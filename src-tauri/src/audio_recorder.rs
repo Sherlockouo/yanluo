@@ -1,18 +1,19 @@
 //! Audio capture via cpal. Records from the default input device at 16kHz mono.
+//!
+//! Samples are accumulated in a shared `Arc<Mutex<Vec<f32>>>` so that a
+//! background thread can read periodic snapshots for streaming ASR while the
+//! cpal callback keeps appending data.
 
-use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-/// Active audio recorder. Drop to stop recording.
+/// Active audio recorder. Drop the stream to stop recording.
 pub struct AudioRecorder {
-    /// Join handle for the capture thread. Dropping will not join — use stop().
+    /// Owned cpal stream — dropped in `stop()`.
     _stream: cpal::Stream,
-    /// Receives samples from the callback.
-    rx: mpsc::Receiver<f32>,
-    /// Tracks whether recording is active.
-    active: Arc<Mutex<bool>>,
+    /// Shared sample buffer written by the cpal callback.
+    samples: Arc<Mutex<Vec<f32>>>,
 }
 
 impl AudioRecorder {
@@ -34,25 +35,21 @@ impl AudioRecorder {
             }
         }
 
-        // Fallback to default config if 16kHz not supported
+        // Fallback to default config if 16kHz mono not directly supported.
         let config = config.unwrap_or_else(|| device.default_input_config().unwrap());
 
-        let (tx, rx) = mpsc::channel::<f32>();
-        let active = Arc::new(Mutex::new(true));
-        let active_clone = active.clone();
+        let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
+        let samples_cb = samples.clone();
 
         let stream = device.build_input_stream(
             &config.into(),
             move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                for &sample in data {
-                    if tx.send(sample).is_err() {
-                        break;
-                    }
+                if let Ok(mut buf) = samples_cb.lock() {
+                    buf.extend_from_slice(data);
                 }
             },
-            move |err| {
+            |err| {
                 eprintln!("Audio capture error: {}", err);
-                *active_clone.lock().unwrap() = false;
             },
             None,
         )?;
@@ -61,20 +58,19 @@ impl AudioRecorder {
 
         Ok(Self {
             _stream: stream,
-            rx,
-            active,
+            samples,
         })
+    }
+
+    /// Snapshot of currently accumulated samples (non-blocking clone).
+    pub fn get_samples(&self) -> Vec<f32> {
+        self.samples.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
     /// Stop recording and return all captured samples.
     pub fn stop(self) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
-        *self.active.lock().unwrap() = false;
-        drop(self._stream); // stop the stream
-
-        let mut samples = Vec::new();
-        while let Ok(s) = self.rx.try_recv() {
-            samples.push(s);
-        }
+        drop(self._stream); // stop the stream first
+        let samples = self.samples.lock().map(|s| s.clone()).unwrap_or_default();
         Ok(samples)
     }
 }

@@ -23,7 +23,16 @@ export const StreamPanel: Component = () => {
   let startTime = 0;
   let unlisten: UnlistenFn | null = null;
 
+  let unlistenPartial: UnlistenFn | null = null;
+
   onMount(async () => {
+    // Partial (streaming) results — update live while recording.
+    unlistenPartial = await listen<{ text: string }>("partial-result", (event) => {
+      if (appState.recState !== "recording") return; // ignore stale partials
+      appActions.setPartialText(event.payload.text);
+    });
+
+    // Final result — replaces partial text.
     unlisten = await listen<{
       text: string;
       language: string;
@@ -32,6 +41,7 @@ export const StreamPanel: Component = () => {
     }>("transcription-result", (event) => {
       const r = event.payload;
       appActions.setRecState("idle");
+      appActions.setPartialText("");
       if (r.error) {
         appActions.showToast(r.error);
         return;
@@ -56,6 +66,7 @@ export const StreamPanel: Component = () => {
   onCleanup(() => {
     if (timer) clearInterval(timer);
     if (unlisten) unlisten();
+    if (unlistenPartial) unlistenPartial();
   });
 
   const startRecording = async () => {
@@ -71,6 +82,7 @@ export const StreamPanel: Component = () => {
     }
     appActions.clearText();
     appActions.setRecState("recording");
+    appActions.setPartialText("");
     startTime = Date.now();
     timer = setInterval(() => {
       appActions.setElapsedMs(Date.now() - startTime);
@@ -172,7 +184,20 @@ export const StreamPanel: Component = () => {
             </p>
           </div>
 
-          {/* Transcription output */}
+          {/* Live partial transcription (while recording) */}
+          <Show when={appState.recState === "recording" && appState.partialText}>
+            <div class="rounded-xl border border-accent/30 bg-accent/5 p-5 animate-slide-up">
+              <div class="flex items-center gap-2 mb-3">
+                <span class="w-2 h-2 rounded-full bg-accent animate-pulse" />
+                <span class="text-sm font-medium text-accent">实时识别中</span>
+              </div>
+              <p class="text-base leading-relaxed text-content-primary whitespace-pre-wrap break-words min-h-[3rem]">
+                {appState.partialText}
+              </p>
+            </div>
+          </Show>
+
+          {/* Final transcription output */}
           <Show when={appState.finalText}>
             <div class="rounded-xl border border-border bg-surface-secondary p-5 animate-slide-up">
               <div class="flex items-center justify-between mb-3">
@@ -196,7 +221,7 @@ export const StreamPanel: Component = () => {
           </Show>
 
           {/* Empty hint */}
-          <Show when={!appState.finalText && appState.recState === "idle"}>
+          <Show when={!appState.finalText && !appState.partialText && appState.recState === "idle"}>
             <div class="text-center py-8">
               <p class="text-sm text-content-tertiary">
                 加载模型后，点击麦克风开始录音转写

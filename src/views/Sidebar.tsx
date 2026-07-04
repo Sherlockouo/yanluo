@@ -23,6 +23,12 @@ export const Sidebar: Component = () => {
       appActions.setModelLoading(false);
       appActions.showToast("Model loaded");
     });
+    // Listen for model-error event from backend
+    listen<string>("model-error", (event) => {
+      appActions.setModelLoaded(false);
+      appActions.setModelLoading(false);
+      appActions.showToast(event.payload);
+    });
     // On mount, try to load the default model path
     invoke("set_model_dir", { path: appState.modelDir }).catch(() => {});
   });
