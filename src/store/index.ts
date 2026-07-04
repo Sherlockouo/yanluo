@@ -37,9 +37,9 @@ const [language, setLanguage] = createSignal<string | null>(null);
 
 // --- Streaming settings ---
 /// Chunk size in seconds. Smaller = lower latency, more frequent updates.
-const [chunkSec, setChunkSec] = createSignal(1.0);
+const [chunkSec, setChunkSec] = createSignal(0.5);
 /// Number of trailing tokens to re-decode each chunk. 0 = re-decode all (exact).
-const [rollbackTokens, setRollbackTokens] = createSignal(3);
+const [rollbackTokens, setRollbackTokens] = createSignal(1);
 
 // --- Engine status ---
 const [modelLoaded, setModelLoaded] = createSignal(false);

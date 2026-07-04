@@ -164,7 +164,6 @@ export const StreamPanel: Component = () => {
                   <option value={0.5}>0.5s</option>
                   <option value={1.0}>1.0s</option>
                   <option value={2.0}>2.0s</option>
-                  <option value={3.0}>3.0s</option>
                 </select>
               </label>
               <label class="flex items-center gap-2 text-content-secondary">
@@ -175,9 +174,9 @@ export const StreamPanel: Component = () => {
                   onChange={(e) => appActions.setRollbackTokens(parseInt(e.currentTarget.value))}
                 >
                   <option value={0}>0 (精确)</option>
-                  <option value={3}>3 (推荐)</option>
+                  <option value={1}>1 (推荐)</option>
+                  <option value={3}>3</option>
                   <option value={5}>5</option>
-                  <option value={8}>8</option>
                 </select>
               </label>
             </div>
@@ -232,7 +231,7 @@ export const StreamPanel: Component = () => {
           </div>
 
           {/* Live partial transcription (while recording or processing) */}
-          <Show when={appState.partialText && appState.recState !== "idle"}>
+          <Show when={appState.recState !== "idle"}>
             <div class="rounded-xl border border-accent/30 bg-accent/5 p-5 animate-slide-up">
               <div class="flex items-center gap-2 mb-3">
                 <span class="w-2 h-2 rounded-full bg-accent animate-pulse" />
@@ -241,7 +240,7 @@ export const StreamPanel: Component = () => {
                 </span>
               </div>
               <p class="text-base leading-relaxed text-content-primary whitespace-pre-wrap break-words min-h-[3rem]">
-                {appState.partialText}
+                {appState.partialText || "倾听中…"}
               </p>
             </div>
           </Show>
@@ -270,22 +269,11 @@ export const StreamPanel: Component = () => {
           </Show>
 
           {/* Empty hint */}
-          <Show when={!appState.finalText && !appState.partialText && appState.recState === "idle"}>
+          <Show when={!appState.finalText && appState.recState === "idle"}>
             <div class="text-center py-8">
               <p class="text-sm text-content-tertiary">
                 加载模型后，点击麦克风开始录音转写
               </p>
-            </div>
-          </Show>
-
-          {/* Processing indicator (only if no partial text yet) */}
-          <Show when={appState.recState === "processing" && !appState.partialText}>
-            <div class="flex flex-col items-center py-6">
-              <svg class="w-8 h-8 animate-spin text-accent" viewBox="0 0 24 24" fill="none">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              <p class="mt-3 text-sm text-content-secondary">正在转写，请稍候...</p>
             </div>
           </Show>
         </div>

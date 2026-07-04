@@ -188,7 +188,7 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
                         break;
                     }
 
-                    std::thread::sleep(Duration::from_millis(100));
+                    std::thread::sleep(Duration::from_millis(50));
 
                     let samples = match AsrEngine::get_audio_snapshot(&app) {
                         Some(s) => s,
@@ -221,7 +221,13 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
                                     r.language,
                                     r.text.len()
                                 );
-                                let _ = app.emit("partial-result", &PartialResult { text: r.text });
+                                // Only emit if there's new text — avoids
+                                // flicker when a partial step produces no
+                                // new complete chunk.
+                                if !r.text.is_empty() {
+                                    let _ =
+                                        app.emit("partial-result", &PartialResult { text: r.text });
+                                }
                             }
                         }
                         Err(e) => {
@@ -351,8 +357,8 @@ fn start_recording(
     engine.inner().recording.store(true, Ordering::Release);
 
     // Defaults: 1s chunk, rollback=3.
-    let chunk_sec = chunk_sec.unwrap_or(1.0);
-    let rollback_tokens = rollback_tokens.unwrap_or(3);
+    let chunk_sec = chunk_sec.unwrap_or(0.5);
+    let rollback_tokens = rollback_tokens.unwrap_or(1);
 
     // Tell the worker to enter the streaming loop.
     engine.send_worker(WorkerCommand::StartStreaming {
