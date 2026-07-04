@@ -6,14 +6,12 @@
 //! results come back via Tauri events.
 
 use serde::Serialize;
-use std::io::BufWriter;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tempfile::NamedTempFile;
 
 mod audio_recorder;
 use audio_recorder::AudioRecorder;
@@ -65,9 +63,12 @@ impl AsrEngine {
         let model_loaded = Arc::new(AtomicBool::new(false));
         let model_loaded_clone = model_loaded.clone();
         let app_for_worker = app.clone();
-        std::thread::spawn(move || {
-            mlx_worker(rx, app_for_worker, model_loaded_clone);
-        });
+        std::thread::Builder::new()
+            .name("mlx-worker".into())
+            .spawn(move || {
+                mlx_worker(rx, app_for_worker, model_loaded_clone);
+            })
+            .expect("failed to spawn MLX worker thread");
 
         Self {
             model_dir: Mutex::new(String::new()),
@@ -95,38 +96,59 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
     // Initialize MLX on THIS thread. All subsequent MLX operations must
     // run on this thread — MLX streams are thread-local.
     qwen3_asr_rs::backend::mlx::stream::init_mlx(true);
+    eprintln!("[mlx-worker] MLX initialized, waiting for commands...");
 
     let mut inference: Option<qwen3_asr_rs::inference::AsrInference> = None;
 
     while let Ok(cmd) = rx.recv() {
         match cmd {
             WorkerCommand::LoadModel { path } => {
+                eprintln!("[mlx-worker] Loading model from {:?}", path);
                 match qwen3_asr_rs::inference::AsrInference::load(
                     &path,
                     qwen3_asr_rs::tensor::Device::Gpu(0),
                 ) {
                     Ok(inf) => {
+                        eprintln!("[mlx-worker] Model loaded successfully");
                         inference = Some(inf);
                         model_loaded.store(true, Ordering::Release);
                         let _ = app.emit("model-loaded", &path.to_string_lossy().to_string());
                     }
                     Err(e) => {
+                        eprintln!("[mlx-worker] Model load failed: {}", e);
                         model_loaded.store(false, Ordering::Release);
                         let _ = app.emit("model-error", &format!("Failed to load model: {}", e));
                     }
                 }
             }
             WorkerCommand::Transcribe { samples, is_final } => {
+                let sample_count = samples.len();
+                let duration = sample_count as f64 / 16000.0;
+                let kind = if is_final { "final" } else { "partial" };
+
+                // Quick audio level check (RMS) to verify mic is capturing.
+                let rms = if sample_count > 0 {
+                    let sum: f32 = samples.iter().map(|s| s * s).sum();
+                    (sum / sample_count as f32).sqrt()
+                } else {
+                    0.0
+                };
+                eprintln!(
+                    "[mlx-worker] {} transcribe: {:.1}s audio ({} samples, RMS={:.4})",
+                    kind, duration, sample_count, rms
+                );
+
                 let inf = match inference.as_ref() {
                     Some(inf) => inf,
                     None => {
+                        eprintln!("[mlx-worker] No model loaded, skipping");
                         if is_final {
                             let _ = app.emit(
                                 "transcription-result",
                                 &TranscriptionResult {
                                     text: String::new(),
                                     language: String::new(),
-                                    duration_seconds: samples.len() as f64 / 16000.0,
+                                    duration_seconds: duration,
                                     error: Some("Model not loaded".into()),
                                 },
                             );
@@ -135,32 +157,15 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
                     }
                 };
 
-                let duration_seconds = samples.len() as f64 / 16000.0;
-                let prefix = if is_final { "asr_recording" } else { "partial" };
-
-                let wav_path = match save_wav(&samples, prefix) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        if is_final {
-                            let _ = app.emit(
-                                "transcription-result",
-                                &TranscriptionResult {
-                                    text: String::new(),
-                                    language: String::new(),
-                                    duration_seconds,
-                                    error: Some(e),
-                                },
-                            );
-                        }
-                        continue;
-                    }
-                };
-
-                let result = inf.transcribe(wav_path.to_str().unwrap(), None);
-                let _ = std::fs::remove_file(&wav_path);
-
-                match result {
+                // Transcribe samples directly — no temp file I/O.
+                match inf.transcribe_samples(&samples, None) {
                     Ok(r) => {
+                        eprintln!(
+                            "[mlx-worker] {} done: lang={} text_len={}",
+                            kind,
+                            r.language,
+                            r.text.len()
+                        );
                         if is_final {
                             let _ = app.emit(
                                 "transcription-result",
@@ -175,22 +180,28 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
                             let _ = app.emit("partial-result", &PartialResult { text: r.text });
                         }
                     }
-                    Err(e) if is_final => {
-                        let _ = app.emit(
-                            "transcription-result",
-                            &TranscriptionResult {
-                                text: String::new(),
-                                language: String::new(),
-                                duration_seconds,
-                                error: Some(format!("{e}")),
-                            },
-                        );
+                    Err(e) => {
+                        eprintln!("[mlx-worker] {} transcription failed: {}", kind, e);
+                        if is_final {
+                            let _ = app.emit(
+                                "transcription-result",
+                                &TranscriptionResult {
+                                    text: String::new(),
+                                    language: String::new(),
+                                    duration_seconds: duration,
+                                    error: Some(format!("{e}")),
+                                },
+                            );
+                        }
+                        // For partials, emit an error event so the frontend can show it
+                        let _ = app.emit("partial-error", &format!("{e}"));
                     }
-                    Err(_) => { /* swallow partial transcription errors */ }
                 }
             }
         }
     }
+
+    eprintln!("[mlx-worker] channel closed, exiting");
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +268,7 @@ fn start_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Result<(), S
         *guard = Some(SendWrapper::new(rec));
     }
     engine.inner().recording.store(true, Ordering::Release);
+    eprintln!("[asr] recording started, timer thread spawning");
 
     // Spawn timer thread that sends partial transcription requests to the worker.
     let app_handle = app.clone();
@@ -267,31 +279,41 @@ fn start_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Result<(), S
         .lock()
         .map_err(|e| e.to_string())?
         .clone();
-    std::thread::spawn(move || {
-        // Wait before the first partial so we have enough audio.
-        std::thread::sleep(PARTIAL_INTERVAL);
-
-        while recording.load(Ordering::Acquire) {
-            // Snapshot the current audio buffer.
-            let samples = {
-                let state = app_handle.state::<AsrEngine>();
-                let rec_guard = state.inner().recorder.lock().unwrap();
-                match rec_guard.as_ref() {
-                    Some(r) => r.0.get_samples(),
-                    None => break, // recorder taken — stop.
-                }
-            };
-
-            if samples.len() >= MIN_PARTIAL_SAMPLES {
-                let _ = worker_tx.send(WorkerCommand::Transcribe {
-                    samples,
-                    is_final: false,
-                });
-            }
-
+    std::thread::Builder::new()
+        .name("partial-timer".into())
+        .spawn(move || {
+            // Wait before the first partial so we have enough audio.
             std::thread::sleep(PARTIAL_INTERVAL);
-        }
-    });
+
+            while recording.load(Ordering::Acquire) {
+                // Snapshot the current audio buffer.
+                let samples = {
+                    let state = app_handle.state::<AsrEngine>();
+                    let rec_guard = state.inner().recorder.lock().unwrap();
+                    match rec_guard.as_ref() {
+                        Some(r) => r.0.get_samples(),
+                        None => break, // recorder taken — stop.
+                    }
+                };
+
+                eprintln!(
+                    "[partial-timer] snapshot: {} samples ({:.1}s)",
+                    samples.len(),
+                    samples.len() as f64 / 16000.0
+                );
+
+                if samples.len() >= MIN_PARTIAL_SAMPLES {
+                    let _ = worker_tx.send(WorkerCommand::Transcribe {
+                        samples,
+                        is_final: false,
+                    });
+                }
+
+                std::thread::sleep(PARTIAL_INTERVAL);
+            }
+            eprintln!("[partial-timer] exited");
+        })
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }
@@ -308,6 +330,11 @@ fn stop_recording(engine: State<'_, AsrEngine>) -> Result<(), String> {
 
     let recorder = recorder.into_inner();
     let samples = recorder.stop().map_err(|e| e.to_string())?;
+    eprintln!(
+        "[asr] recording stopped, {} samples ({:.1}s) → worker",
+        samples.len(),
+        samples.len() as f64 / 16000.0
+    );
 
     // Send final transcription to the worker thread.
     // Result arrives via "transcription-result" event.
@@ -332,34 +359,6 @@ struct TranscriptionResult {
     language: String,
     duration_seconds: f64,
     error: Option<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn save_wav(samples: &[f32], prefix: &str) -> Result<PathBuf, String> {
-    // tempfile 3.27: NamedTempFile::keep() returns (File, PathBuf) — file first.
-    let temp = NamedTempFile::with_prefix(prefix).map_err(|e| e.to_string())?;
-    let (file, path) = temp.keep().map_err(|e| e.to_string())?;
-
-    let spec = hound::WavSpec {
-        channels: 1,
-        sample_rate: 16000,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-    let mut writer =
-        hound::WavWriter::new(BufWriter::new(file), spec).map_err(|e| e.to_string())?;
-
-    for &s in samples {
-        let clamped = s.clamp(-1.0, 1.0);
-        let sample = (clamped * 32767.0) as i16;
-        writer.write_sample(sample).map_err(|e| e.to_string())?;
-    }
-    writer.finalize().map_err(|e| e.to_string())?;
-
-    Ok(path)
 }
 
 // ---------------------------------------------------------------------------

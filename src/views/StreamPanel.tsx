@@ -14,22 +14,30 @@ import {
 /**
  * Real-time streaming ASR panel.
  *
- * Record audio → transcribe → display result.
+ * Record audio → partial transcriptions stream in → final result on stop.
  * Backend: Tauri commands (start_recording / stop_recording).
- * Result arrives via `transcription-result` event.
+ * Events: "partial-result" (live), "transcription-result" (final).
  */
 export const StreamPanel: Component = () => {
   let timer: ReturnType<typeof setInterval> | null = null;
   let startTime = 0;
   let unlisten: UnlistenFn | null = null;
-
   let unlistenPartial: UnlistenFn | null = null;
+  let unlistenPartialError: UnlistenFn | null = null;
 
   onMount(async () => {
-    // Partial (streaming) results — update live while recording.
+    // Partial (streaming) results — show live while recording or processing.
     unlistenPartial = await listen<{ text: string }>("partial-result", (event) => {
-      if (appState.recState !== "recording") return; // ignore stale partials
+      // Accept partials during both "recording" and "processing" (a partial
+      // may arrive just after stop was clicked).
+      if (appState.recState === "idle") return;
       appActions.setPartialText(event.payload.text);
+    });
+
+    // Partial transcription errors — show as toast but keep recording.
+    unlistenPartialError = await listen<string>("partial-error", (event) => {
+      console.warn("[partial-error]", event.payload);
+      appActions.showToast(`Partial error: ${event.payload}`);
     });
 
     // Final result — replaces partial text.
@@ -59,7 +67,7 @@ export const StreamPanel: Component = () => {
         error: null,
       };
       appActions.addHistory(entry);
-      appActions.showToast(`Transcribed ${r.duration_seconds.toFixed(1)}s audio`);
+      appActions.showToast(`转写完成 · ${r.duration_seconds.toFixed(1)}s`);
     });
   });
 
@@ -67,17 +75,18 @@ export const StreamPanel: Component = () => {
     if (timer) clearInterval(timer);
     if (unlisten) unlisten();
     if (unlistenPartial) unlistenPartial();
+    if (unlistenPartialError) unlistenPartialError();
   });
 
   const startRecording = async () => {
     if (!appState.modelLoaded) {
-      appActions.showToast("Please load the model first");
+      appActions.showToast("请先加载模型");
       return;
     }
     try {
       await invoke("start_recording");
     } catch (e) {
-      appActions.showToast(`Failed to start: ${e}`);
+      appActions.showToast(`启动录音失败: ${e}`);
       return;
     }
     appActions.clearText();
@@ -98,16 +107,17 @@ export const StreamPanel: Component = () => {
     try {
       await invoke("stop_recording");
     } catch (e) {
-      appActions.showToast(`Failed to stop: ${e}`);
+      appActions.showToast(`停止录音失败: ${e}`);
+      appActions.setRecState("idle");
     }
-    // Result will arrive via transcription-result event
+    // Final result arrives via "transcription-result" event
   };
 
   const copyText = async () => {
     const text = appState.finalText;
     if (!text) return;
     await navigator.clipboard.writeText(text);
-    appActions.showToast("Copied to clipboard");
+    appActions.showToast("已复制到剪贴板");
   };
 
   const clearAll = () => {
@@ -121,7 +131,7 @@ export const StreamPanel: Component = () => {
       <div class="flex items-center justify-between px-6 pt-5 pb-4 border-b border-border">
         <div>
           <h2 class="text-base font-semibold text-content-primary">实时流式识别</h2>
-          <p class="text-xs text-content-tertiary mt-0.5">录音 → 转写，一键完成</p>
+          <p class="text-xs text-content-tertiary mt-0.5">边录边转，实时显示识别结果</p>
         </div>
         <Show when={appState.recState === "recording"}>
           <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10">
@@ -184,12 +194,14 @@ export const StreamPanel: Component = () => {
             </p>
           </div>
 
-          {/* Live partial transcription (while recording) */}
-          <Show when={appState.recState === "recording" && appState.partialText}>
+          {/* Live partial transcription (while recording or processing) */}
+          <Show when={appState.partialText && appState.recState !== "idle"}>
             <div class="rounded-xl border border-accent/30 bg-accent/5 p-5 animate-slide-up">
               <div class="flex items-center gap-2 mb-3">
                 <span class="w-2 h-2 rounded-full bg-accent animate-pulse" />
-                <span class="text-sm font-medium text-accent">实时识别中</span>
+                <span class="text-sm font-medium text-accent">
+                  {appState.recState === "recording" ? "实时识别中" : "最终转写中"}
+                </span>
               </div>
               <p class="text-base leading-relaxed text-content-primary whitespace-pre-wrap break-words min-h-[3rem]">
                 {appState.partialText}
@@ -229,8 +241,8 @@ export const StreamPanel: Component = () => {
             </div>
           </Show>
 
-          {/* Processing indicator */}
-          <Show when={appState.recState === "processing"}>
+          {/* Processing indicator (only if no partial text yet) */}
+          <Show when={appState.recState === "processing" && !appState.partialText}>
             <div class="flex flex-col items-center py-6">
               <svg class="w-8 h-8 animate-spin text-accent" viewBox="0 0 24 24" fill="none">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" />
