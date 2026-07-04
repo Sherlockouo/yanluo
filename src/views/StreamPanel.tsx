@@ -87,6 +87,7 @@ export const StreamPanel: Component = () => {
       await invoke("start_recording", {
         chunkSec: appState.chunkSec,
         rollbackTokens: appState.rollbackTokens,
+        language: appState.language,
       });
     } catch (e) {
       appActions.showToast(`启动录音失败: ${e}`);
@@ -160,7 +161,6 @@ export const StreamPanel: Component = () => {
                   value={appState.chunkSec}
                   onChange={(e) => appActions.setChunkSec(parseFloat(e.currentTarget.value))}
                 >
-                  <option value={0.5}>0.2s</option>
                   <option value={0.5}>0.5s</option>
                   <option value={1.0}>1.0s</option>
                   <option value={2.0}>2.0s</option>
@@ -173,10 +173,10 @@ export const StreamPanel: Component = () => {
                   value={appState.rollbackTokens}
                   onChange={(e) => appActions.setRollbackTokens(parseInt(e.currentTarget.value))}
                 >
-                  <option value={0}>0 (精确)</option>
-                  <option value={1}>1 (推荐)</option>
-                  <option value={3}>3</option>
-                  <option value={5}>5</option>
+                  <option value={0}>所有 (最精确但慢)</option>
+                  <option value={1}>1 (快速但不精确)</option>
+                  <option value={3}>3 (推荐, 表现均衡)</option>
+                  <option value={5}>5 (更慢更精确)</option>
                 </select>
               </label>
             </div>

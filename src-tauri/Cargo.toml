@@ -23,9 +23,10 @@ tempfile = "3"
 tokio = { version = "1", features = ["sync", "time"] }
 hound = "3.5"
 
-# Qwen3-ASR Rust implementation (local fork with transcribe_samples + mlx-c 0.31.2 FFT fix).
+# Qwen3-ASR Rust implementation (fork with streaming + chunk-local attention + mlx-c 0.31.2 FFT fix).
 qwen3-asr-rs = {
-  path = "../../qwen3_asr_rs_fork",
+  git = "https://github.com/XBCoder128/qwen3_asr_rs",
+  branch = "fix/mlx-0.31-fft-norm",
   default-features = false,
   features = ["mlx"],
 }

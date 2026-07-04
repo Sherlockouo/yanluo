@@ -46,6 +46,7 @@ enum WorkerCommand {
     StartStreaming {
         chunk_sec: f64,
         rollback_tokens: usize,
+        language: Option<String>,
     },
 }
 
@@ -148,6 +149,7 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
             WorkerCommand::StartStreaming {
                 chunk_sec,
                 rollback_tokens,
+                language,
             } => {
                 let inf = match inference.as_mut() {
                     Some(inf) => inf,
@@ -164,14 +166,15 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
                     chunk_sec, chunk_samples, rollback_tokens
                 );
 
-                let mut stream_state = match inf.init_streaming(None, rollback_tokens) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        eprintln!("[mlx-worker] init_streaming failed: {}", e);
-                        let _ = app.emit("partial-error", &format!("init_streaming: {e}"));
-                        continue;
-                    }
-                };
+                let mut stream_state =
+                    match inf.init_streaming(language.as_deref(), rollback_tokens) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("[mlx-worker] init_streaming failed: {}", e);
+                            let _ = app.emit("partial-error", &format!("init_streaming: {e}"));
+                            continue;
+                        }
+                    };
 
                 eprintln!(
                     "[mlx-worker] streaming loop started (rollback={})",
@@ -336,6 +339,7 @@ const MIN_PARTIAL_SAMPLES: usize = 16_000; // 1 second @ 16kHz
 fn start_recording(
     chunk_sec: Option<f64>,
     rollback_tokens: Option<usize>,
+    language: Option<String>,
     engine: State<'_, AsrEngine>,
 ) -> Result<(), String> {
     // Reject if already recording.
@@ -356,7 +360,7 @@ fn start_recording(
     }
     engine.inner().recording.store(true, Ordering::Release);
 
-    // Defaults: 1s chunk, rollback=3.
+    // Defaults: 0.5s chunk, rollback=1.
     let chunk_sec = chunk_sec.unwrap_or(0.5);
     let rollback_tokens = rollback_tokens.unwrap_or(1);
 
@@ -364,6 +368,7 @@ fn start_recording(
     engine.send_worker(WorkerCommand::StartStreaming {
         chunk_sec,
         rollback_tokens,
+        language,
     })?;
     eprintln!(
         "[asr] recording started, chunk={}s rollback={}",
