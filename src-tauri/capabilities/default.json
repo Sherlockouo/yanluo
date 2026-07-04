@@ -4,10 +4,12 @@
   "description": "Default capability for the ASR Workshop app",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "core:event:default",
-    "core:event:allow-listen",
-    "core:event:allow-emit",
-    "shell:allow-open"
-  ]
+      "core:default",
+      "core:event:default",
+      "core:event:allow-listen",
+      "core:event:allow-emit",
+      "shell:allow-open",
+      "dialog:default",
+      "dialog:allow-open"
+    ]
 }
