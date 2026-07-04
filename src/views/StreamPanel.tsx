@@ -84,7 +84,10 @@ export const StreamPanel: Component = () => {
       return;
     }
     try {
-      await invoke("start_recording");
+      await invoke("start_recording", {
+        chunkSec: appState.chunkSec,
+        rollbackTokens: appState.rollbackTokens,
+      });
     } catch (e) {
       appActions.showToast(`启动录音失败: ${e}`);
       return;
@@ -147,6 +150,39 @@ export const StreamPanel: Component = () => {
       {/* Main area */}
       <div class="flex-1 overflow-y-auto px-6 py-6">
         <div class="max-w-3xl mx-auto space-y-6">
+          {/* Streaming settings (only when idle) */}
+          <Show when={appState.recState === "idle"}>
+            <div class="flex items-center justify-center gap-6 text-sm">
+              <label class="flex items-center gap-2 text-content-secondary">
+                <span>增量步长</span>
+                <select
+                  class="bg-surface-secondary border border-border rounded-md px-2 py-1 text-content-primary text-xs"
+                  value={appState.chunkSec}
+                  onChange={(e) => appActions.setChunkSec(parseFloat(e.currentTarget.value))}
+                >
+                  <option value={0.5}>0.2s</option>
+                  <option value={0.5}>0.5s</option>
+                  <option value={1.0}>1.0s</option>
+                  <option value={2.0}>2.0s</option>
+                  <option value={3.0}>3.0s</option>
+                </select>
+              </label>
+              <label class="flex items-center gap-2 text-content-secondary">
+                <span>回溯Token</span>
+                <select
+                  class="bg-surface-secondary border border-border rounded-md px-2 py-1 text-content-primary text-xs"
+                  value={appState.rollbackTokens}
+                  onChange={(e) => appActions.setRollbackTokens(parseInt(e.currentTarget.value))}
+                >
+                  <option value={0}>0 (精确)</option>
+                  <option value={3}>3 (推荐)</option>
+                  <option value={5}>5</option>
+                  <option value={8}>8</option>
+                </select>
+              </label>
+            </div>
+          </Show>
+
           {/* Record control */}
           <div class="flex flex-col items-center py-8">
             <button

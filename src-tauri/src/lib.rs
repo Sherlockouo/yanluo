@@ -40,8 +40,13 @@ impl<T> SendWrapper<T> {
 // ---------------------------------------------------------------------------
 
 enum WorkerCommand {
-    LoadModel { path: PathBuf },
-    StartStreaming,
+    LoadModel {
+        path: PathBuf,
+    },
+    StartStreaming {
+        chunk_sec: f64,
+        rollback_tokens: usize,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -140,8 +145,11 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
                 }
             }
 
-            WorkerCommand::StartStreaming => {
-                let inf = match inference.as_ref() {
+            WorkerCommand::StartStreaming {
+                chunk_sec,
+                rollback_tokens,
+            } => {
+                let inf = match inference.as_mut() {
                     Some(inf) => inf,
                     None => {
                         eprintln!("[mlx-worker] StartStreaming but no model loaded");
@@ -149,41 +157,62 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
                     }
                 };
 
-                eprintln!("[mlx-worker] streaming loop started");
+                let chunk_samples = (chunk_sec * 16000.0) as usize;
+
+                eprintln!(
+                    "[mlx-worker] streaming: chunk={}s ({} samples), rollback={}",
+                    chunk_sec, chunk_samples, rollback_tokens
+                );
+
+                let mut stream_state = match inf.init_streaming(None, rollback_tokens) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("[mlx-worker] init_streaming failed: {}", e);
+                        let _ = app.emit("partial-error", &format!("init_streaming: {e}"));
+                        continue;
+                    }
+                };
+
+                eprintln!(
+                    "[mlx-worker] streaming loop started (rollback={})",
+                    rollback_tokens
+                );
                 let mut partial_count = 0usize;
+                let mut last_transcribed_samples = 0usize;
 
                 // --- Self-paced streaming loop ---
-                // After each transcription, immediately grab the latest audio
-                // and start the next round. No timer, no queue.
+                // After each transcription, wait for at least chunk_sec of new
+                // audio before the next round.
                 loop {
                     if !recording.load(Ordering::Acquire) {
                         break;
                     }
 
-                    // Sleep briefly before first transcription to accumulate audio.
-                    // Also prevents busy-looping when audio is too short.
-                    std::thread::sleep(Duration::from_millis(300));
+                    std::thread::sleep(Duration::from_millis(100));
 
                     let samples = match AsrEngine::get_audio_snapshot(&app) {
                         Some(s) => s,
                         None => break, // recorder gone
                     };
 
-                    if samples.len() < MIN_PARTIAL_SAMPLES {
-                        continue; // not enough audio yet
+                    // Wait until enough new audio has accumulated.
+                    let new_samples = samples.len().saturating_sub(last_transcribed_samples);
+                    if samples.len() < chunk_samples || new_samples < chunk_samples {
+                        continue;
                     }
 
                     partial_count += 1;
                     let duration = samples.len() as f64 / 16000.0;
                     eprintln!(
-                        "[mlx-worker] partial #{}: {:.1}s audio",
-                        partial_count, duration
+                        "[mlx-worker] partial #{}: {:.1}s audio (+{:.1}s new)",
+                        partial_count,
+                        duration,
+                        new_samples as f64 / 16000.0
                     );
 
-                    match inf.transcribe_samples(&samples, None) {
+                    match inf.streaming_transcribe_partial(&samples, &mut stream_state) {
                         Ok(r) => {
-                            // Flush MLX computation graph to free memory.
-                            qwen3_asr_rs::backend::mlx::stream::synchronize();
+                            last_transcribed_samples = samples.len();
 
                             if recording.load(Ordering::Acquire) {
                                 eprintln!(
@@ -196,7 +225,6 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
                             }
                         }
                         Err(e) => {
-                            qwen3_asr_rs::backend::mlx::stream::synchronize();
                             eprintln!("[mlx-worker] partial #{} failed: {}", partial_count, e);
                             let _ = app.emit("partial-error", &format!("{e}"));
                         }
@@ -227,7 +255,8 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
                 let duration = samples.len() as f64 / 16000.0;
                 eprintln!("[mlx-worker] final: {:.1}s audio", duration);
 
-                let result = match inf.transcribe_samples(&samples, None) {
+                // Final transcription: process everything including tail frames.
+                let result = match inf.streaming_transcribe(&samples, &mut stream_state) {
                     Ok(r) => TranscriptionResult {
                         text: r.text,
                         language: r.language,
@@ -241,9 +270,6 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
                         error: Some(format!("{e}")),
                     },
                 };
-
-                // Flush MLX graph.
-                qwen3_asr_rs::backend::mlx::stream::synchronize();
 
                 eprintln!(
                     "[mlx-worker] final done: lang={} text_len={} error={:?}",
@@ -301,7 +327,11 @@ fn load_model(engine: State<'_, AsrEngine>) -> Result<(), String> {
 const MIN_PARTIAL_SAMPLES: usize = 16_000; // 1 second @ 16kHz
 
 #[tauri::command]
-fn start_recording(engine: State<'_, AsrEngine>) -> Result<(), String> {
+fn start_recording(
+    chunk_sec: Option<f64>,
+    rollback_tokens: Option<usize>,
+    engine: State<'_, AsrEngine>,
+) -> Result<(), String> {
     // Reject if already recording.
     {
         let guard = engine.inner().recorder.lock().map_err(|e| e.to_string())?;
@@ -320,9 +350,19 @@ fn start_recording(engine: State<'_, AsrEngine>) -> Result<(), String> {
     }
     engine.inner().recording.store(true, Ordering::Release);
 
+    // Defaults: 1s chunk, rollback=3.
+    let chunk_sec = chunk_sec.unwrap_or(1.0);
+    let rollback_tokens = rollback_tokens.unwrap_or(3);
+
     // Tell the worker to enter the streaming loop.
-    engine.send_worker(WorkerCommand::StartStreaming)?;
-    eprintln!("[asr] recording started, worker streaming loop initiated");
+    engine.send_worker(WorkerCommand::StartStreaming {
+        chunk_sec,
+        rollback_tokens,
+    })?;
+    eprintln!(
+        "[asr] recording started, chunk={}s rollback={}",
+        chunk_sec, rollback_tokens
+    );
 
     Ok(())
 }

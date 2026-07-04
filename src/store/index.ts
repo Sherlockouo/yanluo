@@ -35,6 +35,12 @@ const [toastMessage, setToastMessage] = createSignal<string | null>(null);
 const [modelDir, setModelDir] = createSignal("/Users/xbcoder/project/Qwen3-ASR/models");
 const [language, setLanguage] = createSignal<string | null>(null);
 
+// --- Streaming settings ---
+/// Chunk size in seconds. Smaller = lower latency, more frequent updates.
+const [chunkSec, setChunkSec] = createSignal(1.0);
+/// Number of trailing tokens to re-decode each chunk. 0 = re-decode all (exact).
+const [rollbackTokens, setRollbackTokens] = createSignal(3);
+
 // --- Engine status ---
 const [modelLoaded, setModelLoaded] = createSignal(false);
 const [modelLoading, setModelLoading] = createSignal(false);
@@ -55,6 +61,8 @@ export const appState = {
   get modelLoaded() { return modelLoaded(); },
   get modelLoading() { return modelLoading(); },
   get history() { return history(); },
+  get chunkSec() { return chunkSec(); },
+  get rollbackTokens() { return rollbackTokens(); },
 };
 
 export const appActions = {
@@ -69,6 +77,8 @@ export const appActions = {
   setLanguage,
   setModelLoaded,
   setModelLoading,
+  setChunkSec,
+  setRollbackTokens,
   showToast: (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
