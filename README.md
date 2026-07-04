@@ -41,8 +41,6 @@ tok.backend_tokenizer.save('./Qwen3-ASR-0.6B/tokenizer.json')
 "
 ```
 
-> 如果遇到 `pip install transformers` 的 SSL 证书错误，通常是 conda Python 的临时网络问题，重试或切换网络即可。
-
 ### 3. 安装与运行
 
 ```bash
