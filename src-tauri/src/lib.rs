@@ -2,8 +2,10 @@
 //!
 //! Architecture: a dedicated MLX worker thread owns the inference engine.
 //! All MLX operations (model loading, transcription) happen on that thread.
-//! Tauri commands send requests to the worker via an mpsc channel and
-//! results come back via Tauri events.
+//!
+//! Streaming: the worker thread runs a self-paced loop — after each partial
+//! transcription completes, it immediately grabs the latest accumulated audio
+//! and starts the next round. No timer, no queue, no stale partials.
 
 use serde::Serialize;
 use std::path::PathBuf;
@@ -34,12 +36,12 @@ impl<T> SendWrapper<T> {
 }
 
 // ---------------------------------------------------------------------------
-// Worker commands (producer → consumer)
+// Worker commands
 // ---------------------------------------------------------------------------
 
 enum WorkerCommand {
     LoadModel { path: PathBuf },
-    Transcribe { samples: Vec<f32>, is_final: bool },
+    StartStreaming,
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +51,7 @@ enum WorkerCommand {
 pub struct AsrEngine {
     model_dir: Mutex<String>,
     recorder: Mutex<Option<SendWrapper<AudioRecorder>>>,
+    /// true while recording is active. Worker loop reads this.
     recording: Arc<AtomicBool>,
     model_loaded: Arc<AtomicBool>,
     /// Channel to the MLX worker thread.
@@ -59,7 +62,6 @@ impl AsrEngine {
     fn new(app: AppHandle) -> Self {
         let (tx, rx) = mpsc::channel::<WorkerCommand>();
 
-        // Spawn the dedicated MLX worker thread — lives for the entire app.
         let model_loaded = Arc::new(AtomicBool::new(false));
         let model_loaded_clone = model_loaded.clone();
         let app_for_worker = app.clone();
@@ -86,6 +88,23 @@ impl AsrEngine {
             .send(cmd)
             .map_err(|e| e.to_string())
     }
+
+    /// Grab a snapshot of all accumulated audio samples (16kHz mono f32).
+    fn get_audio_snapshot(app: &AppHandle) -> Option<Vec<f32>> {
+        let state = app.state::<AsrEngine>();
+        let rec_guard = state.inner().recorder.lock().unwrap();
+        rec_guard.as_ref().map(|r| r.0.get_samples())
+    }
+
+    /// Take ownership of the recorder, stop it, and return all samples.
+    fn take_recorder_and_stop(app: &AppHandle) -> Option<Vec<f32>> {
+        let state = app.state::<AsrEngine>();
+        let mut rec_guard = state.inner().recorder.lock().unwrap();
+        rec_guard.take().map(|wrapper| {
+            let rec = wrapper.into_inner();
+            rec.stop().unwrap_or_default()
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -93,12 +112,11 @@ impl AsrEngine {
 // ---------------------------------------------------------------------------
 
 fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<AtomicBool>) {
-    // Initialize MLX on THIS thread. All subsequent MLX operations must
-    // run on this thread — MLX streams are thread-local.
     qwen3_asr_rs::backend::mlx::stream::init_mlx(true);
     eprintln!("[mlx-worker] MLX initialized, waiting for commands...");
 
     let mut inference: Option<qwen3_asr_rs::inference::AsrInference> = None;
+    let recording = app.state::<AsrEngine>().inner().recording.clone();
 
     while let Ok(cmd) = rx.recv() {
         match cmd {
@@ -121,82 +139,119 @@ fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<Ato
                     }
                 }
             }
-            WorkerCommand::Transcribe { samples, is_final } => {
-                let sample_count = samples.len();
-                let duration = sample_count as f64 / 16000.0;
-                let kind = if is_final { "final" } else { "partial" };
 
-                // Quick audio level check (RMS) to verify mic is capturing.
-                let rms = if sample_count > 0 {
-                    let sum: f32 = samples.iter().map(|s| s * s).sum();
-                    (sum / sample_count as f32).sqrt()
-                } else {
-                    0.0
-                };
-                eprintln!(
-                    "[mlx-worker] {} transcribe: {:.1}s audio ({} samples, RMS={:.4})",
-                    kind, duration, sample_count, rms
-                );
-
+            WorkerCommand::StartStreaming => {
                 let inf = match inference.as_ref() {
                     Some(inf) => inf,
                     None => {
-                        eprintln!("[mlx-worker] No model loaded, skipping");
-                        if is_final {
-                            let _ = app.emit(
-                                "transcription-result",
-                                &TranscriptionResult {
-                                    text: String::new(),
-                                    language: String::new(),
-                                    duration_seconds: duration,
-                                    error: Some("Model not loaded".into()),
-                                },
-                            );
-                        }
+                        eprintln!("[mlx-worker] StartStreaming but no model loaded");
                         continue;
                     }
                 };
 
-                // Transcribe samples directly — no temp file I/O.
-                match inf.transcribe_samples(&samples, None) {
-                    Ok(r) => {
-                        eprintln!(
-                            "[mlx-worker] {} done: lang={} text_len={}",
-                            kind,
-                            r.language,
-                            r.text.len()
-                        );
-                        if is_final {
-                            let _ = app.emit(
-                                "transcription-result",
-                                &TranscriptionResult {
-                                    text: r.text,
-                                    language: r.language,
-                                    duration_seconds: r.duration_seconds,
-                                    error: None,
-                                },
-                            );
-                        } else {
-                            let _ = app.emit("partial-result", &PartialResult { text: r.text });
-                        }
+                eprintln!("[mlx-worker] streaming loop started");
+                let mut partial_count = 0usize;
+
+                // --- Self-paced streaming loop ---
+                // After each transcription, immediately grab the latest audio
+                // and start the next round. No timer, no queue.
+                loop {
+                    if !recording.load(Ordering::Acquire) {
+                        break;
                     }
-                    Err(e) => {
-                        eprintln!("[mlx-worker] {} transcription failed: {}", kind, e);
-                        if is_final {
-                            let _ = app.emit(
-                                "transcription-result",
-                                &TranscriptionResult {
-                                    text: String::new(),
-                                    language: String::new(),
-                                    duration_seconds: duration,
-                                    error: Some(format!("{e}")),
-                                },
-                            );
+
+                    // Sleep briefly before first transcription to accumulate audio.
+                    // Also prevents busy-looping when audio is too short.
+                    std::thread::sleep(Duration::from_millis(300));
+
+                    let samples = match AsrEngine::get_audio_snapshot(&app) {
+                        Some(s) => s,
+                        None => break, // recorder gone
+                    };
+
+                    if samples.len() < MIN_PARTIAL_SAMPLES {
+                        continue; // not enough audio yet
+                    }
+
+                    partial_count += 1;
+                    let duration = samples.len() as f64 / 16000.0;
+                    eprintln!(
+                        "[mlx-worker] partial #{}: {:.1}s audio",
+                        partial_count, duration
+                    );
+
+                    match inf.transcribe_samples(&samples, None) {
+                        Ok(r) => {
+                            // Flush MLX computation graph to free memory.
+                            qwen3_asr_rs::backend::mlx::stream::synchronize();
+
+                            if recording.load(Ordering::Acquire) {
+                                eprintln!(
+                                    "[mlx-worker] partial #{} done: lang={} text_len={}",
+                                    partial_count,
+                                    r.language,
+                                    r.text.len()
+                                );
+                                let _ = app.emit("partial-result", &PartialResult { text: r.text });
+                            }
                         }
-                        // For partials, emit an error event so the frontend can show it
-                        let _ = app.emit("partial-error", &format!("{e}"));
+                        Err(e) => {
+                            qwen3_asr_rs::backend::mlx::stream::synchronize();
+                            eprintln!("[mlx-worker] partial #{} failed: {}", partial_count, e);
+                            let _ = app.emit("partial-error", &format!("{e}"));
+                        }
                     }
                 }
+
+                eprintln!("[mlx-worker] streaming loop ended, doing final transcription");
+
+                // --- Final transcription ---
+                // Take the recorder, stop it, get all samples.
+                let samples = match AsrEngine::take_recorder_and_stop(&app) {
+                    Some(s) => s,
+                    None => {
+                        eprintln!("[mlx-worker] recorder already gone, skipping final");
+                        let _ = app.emit(
+                            "transcription-result",
+                            &TranscriptionResult {
+                                text: String::new(),
+                                language: String::new(),
+                                duration_seconds: 0.0,
+                                error: Some("Recorder not found".into()),
+                            },
+                        );
+                        continue;
+                    }
+                };
+
+                let duration = samples.len() as f64 / 16000.0;
+                eprintln!("[mlx-worker] final: {:.1}s audio", duration);
+
+                let result = match inf.transcribe_samples(&samples, None) {
+                    Ok(r) => TranscriptionResult {
+                        text: r.text,
+                        language: r.language,
+                        duration_seconds: r.duration_seconds,
+                        error: None,
+                    },
+                    Err(e) => TranscriptionResult {
+                        text: String::new(),
+                        language: String::new(),
+                        duration_seconds: duration,
+                        error: Some(format!("{e}")),
+                    },
+                };
+
+                // Flush MLX graph.
+                qwen3_asr_rs::backend::mlx::stream::synchronize();
+
+                eprintln!(
+                    "[mlx-worker] final done: lang={} text_len={} error={:?}",
+                    result.language,
+                    result.text.len(),
+                    result.error
+                );
+                let _ = app.emit("transcription-result", &result);
             }
         }
     }
@@ -239,18 +294,14 @@ fn load_model(engine: State<'_, AsrEngine>) -> Result<(), String> {
     if !path.join("model.safetensors").exists() {
         return Err(format!("model.safetensors not found in {}", dir));
     }
-    // Async: worker thread loads the model, emits "model-loaded" / "model-error".
     engine.send_worker(WorkerCommand::LoadModel { path })
 }
 
 /// Minimum audio length (in samples) before we attempt a partial transcription.
 const MIN_PARTIAL_SAMPLES: usize = 16_000; // 1 second @ 16kHz
 
-/// Interval between partial transcription attempts.
-const PARTIAL_INTERVAL: Duration = Duration::from_secs(2);
-
 #[tauri::command]
-fn start_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Result<(), String> {
+fn start_recording(engine: State<'_, AsrEngine>) -> Result<(), String> {
     // Reject if already recording.
     {
         let guard = engine.inner().recorder.lock().map_err(|e| e.to_string())?;
@@ -268,80 +319,21 @@ fn start_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Result<(), S
         *guard = Some(SendWrapper::new(rec));
     }
     engine.inner().recording.store(true, Ordering::Release);
-    eprintln!("[asr] recording started, timer thread spawning");
 
-    // Spawn timer thread that sends partial transcription requests to the worker.
-    let app_handle = app.clone();
-    let recording = engine.inner().recording.clone();
-    let worker_tx = engine
-        .inner()
-        .worker_tx
-        .lock()
-        .map_err(|e| e.to_string())?
-        .clone();
-    std::thread::Builder::new()
-        .name("partial-timer".into())
-        .spawn(move || {
-            // Wait before the first partial so we have enough audio.
-            std::thread::sleep(PARTIAL_INTERVAL);
-
-            while recording.load(Ordering::Acquire) {
-                // Snapshot the current audio buffer.
-                let samples = {
-                    let state = app_handle.state::<AsrEngine>();
-                    let rec_guard = state.inner().recorder.lock().unwrap();
-                    match rec_guard.as_ref() {
-                        Some(r) => r.0.get_samples(),
-                        None => break, // recorder taken — stop.
-                    }
-                };
-
-                eprintln!(
-                    "[partial-timer] snapshot: {} samples ({:.1}s)",
-                    samples.len(),
-                    samples.len() as f64 / 16000.0
-                );
-
-                if samples.len() >= MIN_PARTIAL_SAMPLES {
-                    let _ = worker_tx.send(WorkerCommand::Transcribe {
-                        samples,
-                        is_final: false,
-                    });
-                }
-
-                std::thread::sleep(PARTIAL_INTERVAL);
-            }
-            eprintln!("[partial-timer] exited");
-        })
-        .map_err(|e| e.to_string())?;
+    // Tell the worker to enter the streaming loop.
+    engine.send_worker(WorkerCommand::StartStreaming)?;
+    eprintln!("[asr] recording started, worker streaming loop initiated");
 
     Ok(())
 }
 
 #[tauri::command]
 fn stop_recording(engine: State<'_, AsrEngine>) -> Result<(), String> {
-    // Signal the timer thread to stop.
+    // Signal the worker's streaming loop to stop.
+    // The worker will then do the final transcription automatically.
     engine.inner().recording.store(false, Ordering::Release);
-
-    let recorder = {
-        let mut guard = engine.inner().recorder.lock().map_err(|e| e.to_string())?;
-        guard.take().ok_or("Not recording")?
-    };
-
-    let recorder = recorder.into_inner();
-    let samples = recorder.stop().map_err(|e| e.to_string())?;
-    eprintln!(
-        "[asr] recording stopped, {} samples ({:.1}s) → worker",
-        samples.len(),
-        samples.len() as f64 / 16000.0
-    );
-
-    // Send final transcription to the worker thread.
-    // Result arrives via "transcription-result" event.
-    engine.send_worker(WorkerCommand::Transcribe {
-        samples,
-        is_final: true,
-    })
+    eprintln!("[asr] stop signaled, worker will finish current partial then do final");
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

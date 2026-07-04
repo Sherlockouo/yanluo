@@ -110,7 +110,8 @@ export const StreamPanel: Component = () => {
       appActions.showToast(`停止录音失败: ${e}`);
       appActions.setRecState("idle");
     }
-    // Final result arrives via "transcription-result" event
+    // Worker finishes current partial, then does final transcription.
+    // Final result arrives via "transcription-result" event.
   };
 
   const copyText = async () => {
