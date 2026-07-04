@@ -1,17 +1,51 @@
-import { Component, Show } from "solid-js";
+import { Component, Show, onMount } from "solid-js";
 import { appState, appActions, type AsrMode } from "../store";
 import { cn } from "../lib/cn";
+import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   HiOutlineSignal,
   HiOutlineDocumentArrowUp,
   HiOutlineCog6Tooth,
   HiOutlineCpuChip,
+  HiOutlineFolderOpen,
 } from "solid-icons/hi";
 
 /**
  * Left sidebar — mode switcher + settings + engine status.
  */
 export const Sidebar: Component = () => {
+  onMount(() => {
+    // Listen for model-loaded event from backend
+    listen("model-loaded", () => {
+      appActions.setModelLoaded(true);
+      appActions.setModelLoading(false);
+      appActions.showToast("Model loaded");
+    });
+    // On mount, try to load the default model path
+    invoke("set_model_dir", { path: appState.modelDir }).catch(() => {});
+  });
+
+  const handleBrowse = async () => {
+    const selected = await open({ directory: true, multiple: false, title: "Select model directory" });
+    if (selected && typeof selected === "string") {
+      appActions.setModelDir(selected);
+      appActions.setModelLoaded(false);
+      invoke("set_model_dir", { path: selected });
+    }
+  };
+
+  const handleLoad = async () => {
+    appActions.setModelLoading(true);
+    try {
+      await invoke("load_model");
+    } catch (e) {
+      appActions.setModelLoading(false);
+      appActions.showToast(`Load failed: ${e}`);
+    }
+  };
+
   return (
     <aside class="flex flex-col h-screen bg-surface-sidebar border-r border-border overflow-hidden">
       {/* Brand */}
@@ -47,20 +81,50 @@ export const Sidebar: Component = () => {
           </span>
         </div>
 
-        {/* Model dir */}
+        {/* Model dir + Browse */}
         <div class="space-y-1.5 mb-3">
           <label class="text-xs text-content-secondary">Model directory</label>
-          <input
-            type="text"
-            class="input-field text-xs font-mono"
-            placeholder="/path/to/Qwen3-ASR-0.6B"
-            value={appState.modelDir}
-            onInput={(e) => appActions.setModelDir(e.currentTarget.value)}
-          />
+          <div class="flex gap-1">
+            <input
+              type="text"
+              class="input-field text-xs font-mono flex-1"
+              placeholder="/path/to/Qwen3-ASR-0.6B"
+              value={appState.modelDir}
+              onInput={(e) => {
+                appActions.setModelDir(e.currentTarget.value);
+                appActions.setModelLoaded(false);
+                invoke("set_model_dir", { path: e.currentTarget.value });
+              }}
+              onChange={(e) => {
+                // fallback: sync on blur
+                invoke("set_model_dir", { path: e.currentTarget.value });
+              }}
+            />
+            <button class="btn-icon !p-2 shrink-0" onClick={handleBrowse} title="Browse...">
+              <HiOutlineFolderOpen class="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
 
+        {/* Load button */}
+        <button
+          class={cn(
+            "btn-primary w-full text-xs",
+            appState.modelLoading && "animate-pulse"
+          )}
+          onClick={handleLoad}
+          disabled={appState.modelLoading || !appState.modelDir}
+        >
+          <Show
+            when={appState.modelLoading}
+            fallback="Load Model"
+          >
+            Loading...
+          </Show>
+        </button>
+
         {/* Language */}
-        <div class="space-y-1.5">
+        <div class="space-y-1.5 mt-3">
           <label class="text-xs text-content-secondary">Language</label>
           <select
             class="select-field text-xs"
@@ -138,22 +202,25 @@ const ModeButton: Component<{
 };
 
 const EngineStatus: Component = () => {
-  // TODO: wire to real engine status from Rust
-  const ready = () => appState.modelDir.trim().length > 0;
   return (
     <div class="flex items-center gap-2">
       <span
         class={cn(
           "w-2 h-2 rounded-full",
-          ready() ? "bg-green-500" : "bg-content-tertiary/40"
+          appState.modelLoaded
+            ? "bg-green-500"
+            : appState.modelLoading
+              ? "bg-yellow-500 animate-pulse"
+              : "bg-content-tertiary/40"
         )}
       />
-      <Show
-        when={ready()}
-        fallback={<span class="text-xs text-content-tertiary">Not configured</span>}
-      >
-        <span class="text-xs text-content-secondary">Ready</span>
-      </Show>
+      <span class="text-xs text-content-secondary">
+        {appState.modelLoading
+          ? "Loading..."
+          : appState.modelLoaded
+            ? "Ready"
+            : "Not loaded"}
+      </span>
     </div>
   );
 };

@@ -126,7 +126,7 @@ fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Result<(), St
 
     let wav_path = save_wav(&samples, "asr_recording")?;
 
-    let mut inference_guard = engine.inner().inference.lock().map_err(|e| e.to_string())?;
+    let inference_guard = engine.inner().inference.lock().map_err(|e| e.to_string())?;
 
     let result = match inference_guard.as_ref() {
         Some(inf) => match inf.0.transcribe(wav_path.to_str().unwrap(), None) {
@@ -199,6 +199,9 @@ fn save_wav(samples: &[f32], prefix: &str) -> Result<PathBuf, String> {
 // ---------------------------------------------------------------------------
 
 pub fn main() {
+    // Initialize MLX backend before any inference.
+    qwen3_asr_rs::backend::mlx::stream::init_mlx(true);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
