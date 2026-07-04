@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Rust
+src-tauri/target/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Tauri
+src-tauri/gen/
+
+# Model weights (download separately, do not commit)
+Qwen3-ASR-*/
+*.safetensors
+
+# Temporary audio files
+*.tmp.wav
+*.tmp.mp3

@@ -1,0 +1,33 @@
+[package]
+name = "asr-workshop"
+version = "0.1.0"
+description = "Desktop app for Qwen3-ASR, built with Tauri 2.0"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "asr_workshop_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Qwen3-ASR Rust implementation (fork with mlx-c 0.31.2 FFT fix).
+# Pin to a specific commit for reproducible builds.
+qwen3-asr-rs = {
+  git = "https://github.com/XBCoder128/qwen3_asr_rs.git",
+  branch = "fix/mlx-0.31-fft-norm",
+  default-features = false,
+  features = ["mlx"],
+}
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

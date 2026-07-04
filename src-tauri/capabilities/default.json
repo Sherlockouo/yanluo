@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegoodcode/tauri-2.0/main/crates/tauri/permissions/schemas/cap.schema.json",
+  "identifier": "default",
+  "description": "Default capability for the ASR Workshop app",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
+    "shell:allow-open"
+  ]
+}
