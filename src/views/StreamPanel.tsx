@@ -161,6 +161,7 @@ export const StreamPanel: Component = () => {
                   value={appState.chunkSec}
                   onChange={(e) => appActions.setChunkSec(parseFloat(e.currentTarget.value))}
                 >
+                  <option value={0.3}>0.3s</option>
                   <option value={0.5}>0.5s</option>
                   <option value={1.0}>1.0s</option>
                   <option value={2.0}>2.0s</option>
