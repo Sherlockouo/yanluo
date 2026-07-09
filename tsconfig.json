@@ -8,9 +8,8 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
-    "jsx": "preserve",
-    "jsxImportSource": "solid-js",
-    "types": [],
+    "jsx": "react-jsx",
+    "types": ["react", "react-dom"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]

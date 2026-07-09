@@ -10,8 +10,10 @@
     "beforeBuildCommand": "pnpm build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
+        "label": "main",
         "title": "ASR Workshop",
         "width": 1400,
         "height": 900,
@@ -22,7 +24,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/**", "$HOME/Library/Application Support/ASR Workshop/**"]
+      }
     }
   },
   "plugins": {

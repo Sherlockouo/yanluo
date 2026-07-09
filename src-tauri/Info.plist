@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>ASR Workshop needs microphone access to capture speech for transcription.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>ASR Workshop uses Apple Speech Recognition to convert your voice into text.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>ASR Workshop uses Apple Events to paste transcribed text into the focused app.</string>
+</dict>
+</plist>

@@ -1,9 +1,13 @@
-/* @refresh reload */
-import { render } from "solid-js/web";
+import React from "react";
+import { createRoot } from "react-dom/client";
 import { App } from "./App";
-import "./styles/tailwind.css";
+import "./global.css";
 
 const root = document.getElementById("app");
 if (!root) throw new Error("Root element #app not found");
 
-render(() => <App />, root);
+createRoot(root).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+);
