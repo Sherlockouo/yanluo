@@ -105,7 +105,7 @@ export function TranscribePage() {
               isDisabled={processing}
               onPress={() => void pickFile()}
             >
-              <Upload size={15} aria-hidden />
+              <Upload size={16} aria-hidden />
               选择文件
             </Button>
             <Button
@@ -114,7 +114,7 @@ export function TranscribePage() {
               isPending={processing}
               onPress={() => void runTranscribe()}
             >
-              <FileAudio size={15} aria-hidden />
+              <FileAudio size={16} aria-hidden />
               开始转写
             </Button>
           </div>
@@ -168,7 +168,7 @@ export function TranscribePage() {
                   toast.success("已复制");
                 }}
               >
-                <Clipboard size={13} aria-hidden />
+                <Clipboard size={16} aria-hidden />
                 复制结果
               </Button>
             </div>
@@ -239,7 +239,7 @@ function TranscribeEntryCard({ entry }: { entry: HistoryEntry }) {
           className="shrink-0"
           onPress={() => void navigator.clipboard.writeText(entry.text)}
         >
-          <Clipboard size={13} aria-hidden />
+          <Clipboard size={16} aria-hidden />
           复制
         </Button>
       </div>

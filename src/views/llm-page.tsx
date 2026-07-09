@@ -73,10 +73,12 @@ export function LlmPage() {
 
         <div className="form-actions">
           <Button fullWidth variant="secondary" onPress={() => void testLlm()}>
-            <Sparkles size={15} /> 测试
+            <Sparkles size={16} aria-hidden />
+            测试
           </Button>
           <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
-            <Save size={15} /> 保存
+            <Save size={16} aria-hidden />
+            保存
           </Button>
         </div>
       </SectionCard>

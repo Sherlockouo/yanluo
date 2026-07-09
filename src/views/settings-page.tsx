@@ -154,7 +154,7 @@ export function SettingsPage() {
                       isDisabled={busy === item.kind}
                       onPress={() => void openSettings(item.kind)}
                     >
-                      <ExternalLink size={13} />
+                      <ExternalLink size={16} />
                       打开系统设置
                     </Button>
                   ) : null}
@@ -188,7 +188,8 @@ export function SettingsPage() {
         </TextField>
 
         <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
-          <Save size={15} /> 保存
+          <Save size={16} />
+          保存
         </Button>
       </SectionCard>
     </PageShell>

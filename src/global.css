@@ -1,8 +1,9 @@
+/* Official HeroUI v3 + Tailwind v4 setup (matches heroui-inc/vite-template) */
 @import "tailwindcss";
 @import "@heroui/styles";
 
-@source "./**/*.{tsx,ts,html}";
-@source "../index.html";
+/* Enable `dark:` utilities when <html class="dark"> is set */
+@custom-variant dark (&:is(.dark *));
 
 @theme {
   --font-sans:
@@ -21,11 +22,17 @@
 /*
   macOS-inspired themes. Override AFTER @heroui/styles so HeroUI components
   pick up the same semantic tokens (including calculated hover/soft vars).
+
+  NOTE: HeroUI defaults --field-border-width to 0px (borderless fields).
+  We set 1px so TextField/Input borders are visible.
 */
 :root,
 .light,
 [data-theme="light"] {
   color-scheme: light;
+
+  --border-width: 1px;
+  --field-border-width: 1px;
 
   --background: #f5f5f7;
   --foreground: #1d1d1f;
@@ -96,6 +103,9 @@
 .dark,
 [data-theme="dark"] {
   color-scheme: dark;
+
+  --border-width: 1px;
+  --field-border-width: 1px;
 
   --background: #000000;
   --foreground: #f5f5f7;
@@ -406,27 +416,14 @@ body {
 }
 
 /*
-  HeroUI buttons put margin-block on child SVGs, which throws icons off the
-  text baseline. Keep icons optically centered with the label.
+  HeroUI button CSS applies my-0.5 / sm:my-1 on child SVGs, which misaligns
+  Lucide icons next to labels. Zero the vertical margin inside @layer so we
+  stay after HeroUI component styles without !important wars.
 */
-.button > svg,
-.button [data-slot="icon"] svg {
-  margin-block: 0 !important;
-  margin-inline: 0 !important;
-  display: block;
-  flex-shrink: 0;
-  align-self: center;
-}
-
-/* Form fields / selects: ensure Label → control spacing */
-.textfield,
-.select {
-  gap: 0.5rem !important;
-}
-
-.textfield .label,
-.select .label {
-  margin-bottom: 0.125rem;
+@layer components {
+  .button svg:not([data-slot="spinner"] svg, [data-slot="link-icon"] svg) {
+    margin-block: 0;
+  }
 }
 
 .form-actions {

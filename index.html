@@ -5,38 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ASR Workshop</title>
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-    />
-
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body, #app { height: 100%; }
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
-        overflow: hidden;
-      }
-      :root { color-scheme: dark; }
-    </style>
-
     <script>
       (function () {
         var params = new URLSearchParams(window.location.search);
         var isFloating =
-          params.get('window') === 'floating' || window.__ASR_FLOATING__ === true;
-        var theme = localStorage.getItem('asr-theme') === 'light' ? 'light' : 'dark';
+          params.get("window") === "floating" || window.__ASR_FLOATING__ === true;
+        var theme = localStorage.getItem("asr-theme") === "light" ? "light" : "dark";
         document.documentElement.classList.add(theme);
-        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.setAttribute("data-theme", theme);
         if (isFloating) {
-          document.documentElement.setAttribute('data-floating', '1');
+          document.documentElement.setAttribute("data-floating", "1");
         }
       })();
     </script>
   </head>
-  <body>
+  <body class="bg-background text-foreground">
     <div id="app"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

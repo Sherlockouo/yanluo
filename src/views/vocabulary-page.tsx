@@ -37,7 +37,8 @@ export function VocabularyPage() {
             />
           </TextField>
           <Button variant="primary" onPress={addTerm}>
-            <Plus size={15} /> 添加
+            <Plus size={16} />
+            添加
           </Button>
         </div>
 
@@ -73,7 +74,8 @@ export function VocabularyPage() {
         </div>
 
         <Button fullWidth variant="secondary" onPress={() => void saveConfig()}>
-          <Save size={15} /> 保存词库
+          <Save size={16} />
+          保存词库
         </Button>
       </SectionCard>
     </PageShell>

@@ -7,6 +7,12 @@ import { codeInspectorPlugin } from "code-inspector-plugin";
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
+/**
+ * HeroUI v3 official Vite setup:
+ * - @tailwindcss/vite only (no PostCSS Tailwind plugin)
+ * - CSS: @import "tailwindcss"; @import "@heroui/styles";
+ * See: https://github.com/heroui-inc/vite-template
+ */
 export default defineConfig({
   plugins: [
     codeInspectorPlugin({
@@ -15,21 +21,17 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  // Prevent vite from obscuring rust error messages
   clearScreen: false,
   server: {
     port: 1420,
     strictPort: true,
     watch: {
-      // Tell vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
   },
   build: {
-    // Tauri uses Chromium on Windows/Linux, WebKit on macOS
     target: "esnext",
-    // Avoid LightningCSS mangling Tailwind v4 nested :where(&) selectors
-    // (space-y / divide utilities become invalid and are dropped by the browser).
+    // LightningCSS minify can corrupt Tailwind v4 nested :where(&) selectors.
     cssMinify: false,
   },
   resolve: {

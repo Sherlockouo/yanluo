@@ -92,7 +92,8 @@ export function AsrPage() {
               <div className="flex gap-2">
                 <Input className="min-w-0 flex items-center font-mono" />
                 <Button variant="secondary" onPress={() => void chooseModelDir()}>
-                  <FolderOpen size={15} /> 浏览
+                  <FolderOpen size={16} />
+                  浏览
                 </Button>
               </div>
             </TextField>
@@ -113,7 +114,8 @@ export function AsrPage() {
         )}
 
         <Button fullWidth variant="secondary" onPress={() => void saveConfig()}>
-          <Save size={15} /> 保存 ASR 设置
+          <Save size={16} />
+          保存 ASR 设置
         </Button>
       </SectionCard>
     </PageShell>

@@ -14,7 +14,7 @@ export function HistoryPage() {
         subtitle="最近的识别结果，最多保留 200 条。转写页产生的记录会附带音频。"
         action={
           <Button size="sm" variant="danger" onPress={() => void clearHistory()}>
-            <Trash2 size={14} />
+            <Trash2 size={16} />
             清空历史
           </Button>
         }
@@ -77,7 +77,7 @@ export function HistoryPage() {
                   className="shrink-0"
                   onPress={() => void navigator.clipboard.writeText(entry.text)}
                 >
-                  <Clipboard size={13} />
+                  <Clipboard size={16} />
                   复制
                 </Button>
               </div>
