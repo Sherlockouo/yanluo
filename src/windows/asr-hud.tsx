@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { AnimatePresence, motion } from "framer-motion";
-import type { FloatingPayload } from "@/types";
+import type { AudioLevelPayload, FloatingPayload } from "@/types";
 import { CAPSULE_TAIL_CHARS, lastChars } from "@/lib/constants";
 import { useSmoothedRms } from "@/hooks/useAudioBars";
 import { AudioBars } from "@/components/ui/audio-bars";
@@ -12,8 +12,8 @@ import { cn } from "@/lib/cn";
 const CAPSULE_H = 56;
 const TEXT_MIN = 160;
 const TEXT_MAX = 560;
-/** Horizontal chrome: padding + waveform + gap + colon + trailing pad */
-const CHROME_W = 16 + 44 + 12 + 10 + 18;
+/** Horizontal chrome: padding + thin spectrum + gap + colon + trailing pad */
+const CHROME_W = 16 + 40 + 10 + 8 + 18;
 
 function applyHudTheme(theme: "light" | "dark") {
   const root = document.documentElement;
@@ -34,6 +34,7 @@ export function AsrHud() {
     state: "idle",
     text: "",
     rms: 0,
+    bands: [],
   });
 
   useEffect(() => {
@@ -66,13 +67,35 @@ export function AsrHud() {
       });
 
     void listen<FloatingPayload>("floating-status", (event) =>
-      setPayload(event.payload),
+      setPayload((prev) => ({
+        ...event.payload,
+        // Never let status snapshots wipe the live meter.
+        rms: event.payload.rms > 0 ? event.payload.rms : prev.rms,
+      })),
     ).then((u) => {
       unlistenStatus = u;
     });
-    void listen<number>("audio-level", (event) =>
-      setPayload((prev) => ({ ...prev, rms: event.payload })),
-    ).then((u) => {
+    void listen<AudioLevelPayload | number>("audio-level", (event) => {
+      const raw = event.payload;
+      if (typeof raw === "number") {
+        if (!Number.isFinite(raw)) return;
+        setPayload((prev) => ({
+          ...prev,
+          rms: Math.max(0, Math.min(1, raw)),
+        }));
+        return;
+      }
+      const rms = Number(raw?.rms);
+      if (!Number.isFinite(rms)) return;
+      const bands = Array.isArray(raw.bands)
+        ? raw.bands.map((v) => Math.max(0, Math.min(1, Number(v) || 0)))
+        : [];
+      setPayload((prev) => ({
+        ...prev,
+        rms: Math.max(0, Math.min(1, rms)),
+        bands,
+      }));
+    }).then((u) => {
       unlistenLevel = u;
     });
     void listen<{ text: string }>("partial-result", (event) =>
@@ -180,7 +203,11 @@ function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
       style={{ width: "100%", height: "100%" }}
     >
       <div className="hud-inner">
-        <AudioBars rms={smoothed} active={recording} />
+        <AudioBars
+          rms={smoothed}
+          bands={payload.bands}
+          active={recording}
+        />
         <span className="hud-colon" aria-hidden>
           :
         </span>

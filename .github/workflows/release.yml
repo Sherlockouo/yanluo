@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-aarch64
+            os: macos-14
+            args: --features qwen-local
+            bundles: app,dmg
+          - platform: linux-x86_64
+            os: ubuntu-22.04
+            args: ""
+            bundles: deb,appimage
+          - platform: windows-x86_64
+            os: windows-latest
+            args: ""
+            bundles: msi,nsis
+
+    name: Build (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+            VERSION="${TAG#v}"
+            PUBLISH=true
+          else
+            TAG=""
+            VERSION=$(node -p "require('./package.json').version")
+            PUBLISH=false
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev
+
+      - name: Install frontend deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Sync package versions from tag
+        if: steps.ver.outputs.publish == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          node -e "
+            const fs=require('fs');
+            const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));
+            pkg.version=process.env.VERSION;
+            fs.writeFileSync('package.json', JSON.stringify(pkg,null,2)+'\n');
+            const conf=JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json','utf8'));
+            conf.version=process.env.VERSION;
+            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(conf,null,2)+'\n');
+          "
+          perl -i -pe 's/^version = ".*"/version = "$ENV{VERSION}"/' src-tauri/Cargo.toml
+
+      - name: Build release notes from CHANGELOG
+        if: steps.ver.outputs.publish == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import os
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          version = os.environ["VERSION"]
+          lines = text.splitlines()
+          out = []
+          capture = False
+          for line in lines:
+              if line.startswith("## ["):
+                  if capture:
+                      break
+                  if f"[{version}]" in line or f"[v{version}]" in line:
+                      capture = True
+                      out.append(line)
+                      continue
+              elif capture:
+                  out.append(line)
+          body = "\n".join(out).strip() or f"ASR Workshop v{version}"
+          Path("release-notes.md").write_text(body + "\n", encoding="utf-8")
+          print(body)
+          PY
+
+      - name: Publish GitHub Release (tagged)
+        if: steps.ver.outputs.publish == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ steps.ver.outputs.tag }}
+          releaseName: ASR Workshop ${{ steps.ver.outputs.tag }}
+          releaseBodyFile: release-notes.md
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+          # Matrix jobs share the same tag and upload platform artifacts together.
+
+      - name: Build only (manual / no tag)
+        if: steps.ver.outputs.publish != 'true'
+        shell: bash
+        run: pnpm tauri build ${{ matrix.args }}

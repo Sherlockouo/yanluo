@@ -1,7 +1,7 @@
 {
   "name": "asr-workshop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev:local": "tauri dev --features qwen-local",
-    "tauri:build:local": "tauri build --features qwen-local"
+    "tauri:build:local": "tauri build --features qwen-local",
+    "tauri:build": "tauri build",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@heroui/react": "^3.2.2",

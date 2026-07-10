@@ -1,13 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * Smooth RMS with attack/release envelope so bars breathe naturally.
- * attack 40% → rising level catches up fast.
- * release 15% → falling level lingers, no jitter.
+ * Fast envelope for overall loudness.
  */
 export function useSmoothedRms(rms: number, active: boolean) {
   const [smoothed, setSmoothed] = useState(0);
-  const rafRef = useRef<number | null>(null);
   const currentRef = useRef(0);
   const targetRef = useRef(0);
 
@@ -16,60 +13,81 @@ export function useSmoothedRms(rms: number, active: boolean) {
   }, [rms, active]);
 
   useEffect(() => {
+    let raf = 0;
     const tick = () => {
       const target = targetRef.current;
       const current = currentRef.current;
-      const rate = target > current ? 0.4 : 0.15;
-      const next = current + (target - current) * rate;
-      currentRef.current = next;
-      setSmoothed(next);
-      rafRef.current = requestAnimationFrame(tick);
+      const rate = target > current ? 0.55 : 0.22;
+      currentRef.current = current + (target - current) * rate;
+      setSmoothed(currentRef.current);
+      raf = requestAnimationFrame(tick);
     };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, []);
 
   return smoothed;
 }
 
-const BAR_WEIGHTS = [0.5, 0.8, 1.0, 0.75, 0.55];
-
 /**
- * Compute bar heights from smoothed RMS.
- * Driven by external RMS from Tauri — does not open the microphone.
+ * Per-band attack/release (Apple Music–style): fast rise, slower fall,
+ * independent springs so the spectrum feels fluid rather than locked.
  */
-export function useBarHeights(rms: number, active: boolean, maxH: number) {
+export function useBandHeights(
+  bands: number[],
+  active: boolean,
+  maxH: number,
+) {
+  const count = Math.max(1, bands.length);
   const [heights, setHeights] = useState<number[]>(() =>
-    BAR_WEIGHTS.map((w) => maxH * 0.14 * w),
+    Array.from({ length: count }, () => Math.max(2, maxH * 0.12)),
   );
-  const rmsRef = useRef(rms);
+  const bandsRef = useRef(bands);
   const activeRef = useRef(active);
-  rmsRef.current = rms;
+  const levelsRef = useRef<number[]>(Array.from({ length: count }, () => 0));
+  bandsRef.current = bands;
   activeRef.current = active;
 
   useEffect(() => {
+    if (levelsRef.current.length !== count) {
+      levelsRef.current = Array.from({ length: count }, () => 0);
+    }
     let raf = 0;
-    const min = maxH * 0.14;
-    const compute = () => {
-      // Backend already expands speech RMS into ~0–1; keep a mild boost only.
-      const level = activeRef.current
-        ? Math.max(0.08, Math.min(1, rmsRef.current * 1.35))
-        : 0.06;
-      const now = performance.now();
-      const next = BAR_WEIGHTS.map((weight, i) => {
-        const jitter = 1 + Math.sin(now / (140 + i * 23) + i * 1.7) * 0.12;
-        return Math.max(min, level * weight * jitter * maxH);
-      });
+    const floor = Math.max(2, maxH * 0.1);
+
+    const tick = () => {
+      const src = bandsRef.current;
+      const levels = levelsRef.current;
+      const next = new Array<number>(count);
+
+      for (let i = 0; i < count; i++) {
+        const target = activeRef.current
+          ? Math.max(0, Math.min(1, src[i] ?? 0))
+          : 0;
+        // High bands release a bit faster (presence), low bands linger (body).
+        const t = count === 1 ? 0.5 : i / (count - 1);
+        const attack = 0.42 + t * 0.2;
+        const release = 0.14 + (1 - t) * 0.1;
+        const rate = target > levels[i]! ? attack : release;
+        levels[i] = levels[i]! + (target - levels[i]!) * rate;
+        next[i] = floor + (maxH - floor) * levels[i]!;
+      }
+
       setHeights(next);
-      raf = requestAnimationFrame(compute);
+      raf = requestAnimationFrame(tick);
     };
-    raf = requestAnimationFrame(compute);
+
+    raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [maxH]);
+  }, [count, maxH]);
 
   return heights;
+}
+
+/** @deprecated Prefer useBandHeights with real spectrum bands. */
+export function useBarHeights(rms: number, active: boolean, maxH: number) {
+  const bands = [0.55, 0.7, 0.85, 1, 0.85, 0.7, 0.55].map((w) => rms * w);
+  return useBandHeights(bands, active, maxH);
 }
 
 /**
@@ -102,19 +120,19 @@ export function useWaveformBands(
 
         if (processingRef.current && !activeRef.current) {
           const wave =
-            Math.sin(now / 280 + i * 0.22) * 0.18 +
-            Math.cos(now / 410 - i * 0.14) * 0.12;
-          return Math.max(0.06, (0.22 + wave) * center);
+            Math.sin(now / 280 + i * 0.22) * 0.12 +
+            Math.cos(now / 410 - i * 0.14) * 0.08;
+          return Math.max(0.06, (0.18 + wave) * center);
         }
 
         if (!activeRef.current) {
-          const breath = 0.06 + Math.sin(now / 900 + i * 0.08) * 0.02;
-          return breath * center;
+          return 0.08 * center;
         }
 
-        const level = Math.max(0.05, Math.min(1, rmsRef.current * 5.2));
-        const jitter = 1 + Math.sin(now / (160 + i * 19) + i * 1.3) * 0.08;
-        return Math.max(0.06, level * center * jitter);
+        const raw = Math.max(0, Math.min(1, rmsRef.current));
+        const level =
+          raw < 0.02 ? 0.08 : Math.min(1, Math.pow(raw, 0.55) * 1.15);
+        return Math.max(0.08, level * center);
       });
       setBands(next);
       raf = requestAnimationFrame(tick);

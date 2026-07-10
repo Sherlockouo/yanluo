@@ -1,25 +1,52 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Input, Label, TextField } from "@heroui/react";
+import {
+  Button,
+  Label,
+  ListBox,
+  Select,
+} from "@heroui/react";
 import {
   CheckCircle2,
   CircleAlert,
+  Download,
   Ear,
   ExternalLink,
   Keyboard,
   Mic,
+  Moon,
+  RefreshCw,
   Save,
   Shield,
+  Sun,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { PageHeader, PageShell, SectionCard } from "@/components/shared/page-shell";
+import { open } from "@tauri-apps/plugin-shell";
+import {
+  PageHeader,
+  PageShell,
+  SectionCard,
+} from "@/components/shared/page-shell";
 import { cn } from "@/lib/cn";
-import { useApp } from "@/app-context";
+import { useApp, type ThemeMode } from "@/app-context";
+import { LANGUAGES } from "@/lib/constants";
+import {
+  APP_RELEASES_URL,
+  APP_REPO,
+  APP_REPO_URL,
+  CHANGELOG,
+  type ChangelogEntry,
+} from "@/lib/changelog";
+
+type SettingsTab = "general" | "permissions" | "updates";
 
 type PermissionStatus = {
   accessibility: boolean;
   input_monitoring: boolean;
   microphone: boolean;
   speech_recognition: boolean;
+  executable_path?: string;
+  platform?: string;
+  apple_speech_available?: boolean;
 };
 
 type PermKind =
@@ -27,6 +54,30 @@ type PermKind =
   | "input_monitoring"
   | "microphone"
   | "speech_recognition";
+
+type AppInfo = {
+  version: string;
+  name: string;
+  platform?: string;
+  executable_path?: string;
+  apple_speech_available?: boolean;
+};
+
+type GhRelease = {
+  tag_name: string;
+  name: string | null;
+  body: string | null;
+  html_url: string;
+  published_at: string | null;
+  prerelease: boolean;
+  draft: boolean;
+};
+
+const TABS: { id: SettingsTab; label: string }[] = [
+  { id: "general", label: "常规" },
+  { id: "permissions", label: "权限" },
+  { id: "updates", label: "更新" },
+];
 
 const PERMS: {
   kind: PermKind;
@@ -60,10 +111,138 @@ const PERMS: {
   },
 ];
 
+function compareSemver(a: string, b: string): number {
+  const pa = a.replace(/^v/i, "").split(".").map((n) => Number(n) || 0);
+  const pb = b.replace(/^v/i, "").split(".").map((n) => Number(n) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
 export function SettingsPage() {
-  const { config, updateConfig, saveConfig } = useApp();
+  const [tab, setTab] = useState<SettingsTab>("general");
+
+  return (
+    <PageShell>
+      <PageHeader title="设置" subtitle="常规、权限与版本更新。" />
+
+      <div className="settings-tabs max-w-2xl" role="tablist">
+        {TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === item.id}
+            className={cn(
+              "settings-tab",
+              tab === item.id && "settings-tab-active",
+            )}
+            onClick={() => setTab(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "general" ? <GeneralPanel /> : null}
+      {tab === "permissions" ? <PermissionsPanel /> : null}
+      {tab === "updates" ? <UpdatesPanel /> : null}
+    </PageShell>
+  );
+}
+
+function GeneralPanel() {
+  const { config, updateConfig, saveConfig, theme, setTheme } = useApp();
+
+  const setThemeMode = (next: ThemeMode) => {
+    setTheme(next);
+  };
+
+  return (
+    <>
+      <SectionCard
+        className="max-w-2xl flex flex-col gap-5"
+        title="外观"
+        description="主题对主窗口与浮动胶囊同时生效。"
+      >
+        <div className="grid grid-cols-2 gap-2">
+          {(
+            [
+              { id: "dark", label: "深色", icon: Moon },
+              { id: "light", label: "浅色", icon: Sun },
+            ] as const
+          ).map((item) => {
+            const Icon = item.icon;
+            const active = theme === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cn(
+                  "flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition-colors",
+                  active
+                    ? "border-foreground/20 bg-default text-foreground"
+                    : "border-border bg-transparent text-muted hover:bg-default/50",
+                )}
+                onClick={() => setThemeMode(item.id)}
+              >
+                <Icon size={15} />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        className="max-w-2xl flex flex-col gap-5"
+        title="全局语言"
+        description="影响 Fn 录音、文件转写与系统菜单语言选项。"
+      >
+        <Select
+          className="w-full"
+          selectedKey={config.language}
+          onSelectionChange={(key) => {
+            if (key == null) return;
+            updateConfig("language", String(key));
+          }}
+        >
+          <Label>识别语言</Label>
+          <Select.Trigger>
+            <Select.Value />
+            <Select.Indicator />
+          </Select.Trigger>
+          <Select.Popover>
+            <ListBox>
+              {LANGUAGES.map(([value, label]) => (
+                <ListBox.Item key={value} id={value} textValue={label}>
+                  {label}
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+              ))}
+            </ListBox>
+          </Select.Popover>
+        </Select>
+        <Button
+          fullWidth
+          variant="primary"
+          onPress={() => void saveConfig()}
+        >
+          <Save size={16} />
+          保存语言
+        </Button>
+      </SectionCard>
+    </>
+  );
+}
+
+function PermissionsPanel() {
   const [perms, setPerms] = useState<PermissionStatus | null>(null);
   const [busy, setBusy] = useState<PermKind | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -85,23 +264,47 @@ export function SettingsPage() {
     };
   }, [refresh]);
 
-  const openSettings = async (kind: PermKind) => {
+  const requestThenOpen = async (kind: PermKind) => {
     setBusy(kind);
+    setHint(null);
     try {
+      // Request first so this binary appears in the Privacy list, then open the pane.
+      const message = await invoke<string>("request_permission", { kind });
+      setHint(message);
       await invoke("open_permission_settings", { kind });
       window.setTimeout(() => void refresh(), 1200);
     } catch (error) {
-      console.error(error);
+      setHint(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(null);
     }
   };
 
-  return (
-    <PageShell>
-      <PageHeader title="设置" subtitle="权限与凭证。" />
+  const isMac = (perms?.platform ?? "macos") === "macos";
+  const exePath = perms?.executable_path;
 
-      <SectionCard title="系统权限" className="max-w-2xl">
+  if (!isMac) {
+    return (
+      <SectionCard
+        title="系统权限"
+        description="当前平台无需 macOS 隐私权限。"
+        className="max-w-2xl"
+      >
+        <p className="text-[13px] leading-relaxed text-muted">
+          辅助功能 / 输入监视 / Apple Speech 仅在 macOS 使用。Linux / Windows
+          请直接配置麦克风与云端凭证。
+        </p>
+      </SectionCard>
+    );
+  }
+
+  return (
+    <>
+      <SectionCard
+        title="系统权限"
+        description="先点「请求权限」让本进程出现在列表里，再打开系统设置打开开关。"
+        className="max-w-2xl"
+      >
         <div>
           {PERMS.map((item) => {
             const granted = perms?.[item.kind] ?? false;
@@ -126,7 +329,7 @@ export function SettingsPage() {
                     {item.description}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                   <span
                     className={cn(
                       "perm-status",
@@ -143,14 +346,28 @@ export function SettingsPage() {
                   {!granted ? (
                     <Button
                       size="sm"
-                      variant="secondary"
+                      variant="primary"
                       isDisabled={busy === item.kind}
-                      onPress={() => void openSettings(item.kind)}
+                      onPress={() => void requestThenOpen(item.kind)}
                     >
-                      <ExternalLink size={16} />
-                      打开系统设置
+                      请求权限
                     </Button>
                   ) : null}
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    isDisabled={busy === item.kind}
+                    onPress={() =>
+                      void invoke("open_permission_settings", {
+                        kind: item.kind,
+                      }).then(() =>
+                        window.setTimeout(() => void refresh(), 800),
+                      )
+                    }
+                  >
+                    <ExternalLink size={14} />
+                    系统设置
+                  </Button>
                 </div>
               </div>
             );
@@ -158,33 +375,196 @@ export function SettingsPage() {
         </div>
       </SectionCard>
 
-      <SectionCard className="max-w-2xl flex flex-col gap-5" title="云端凭证">
-        <TextField
-          fullWidth
-          variant="secondary"
-          type="password"
-          value={config.elevenlabs_api_key}
-          onChange={(value) => updateConfig("elevenlabs_api_key", value)}
-        >
-          <Label>ElevenLabs API Key</Label>
-          <Input />
-        </TextField>
-
-        <TextField
-          fullWidth
-          variant="secondary"
-          value={config.elevenlabs_model}
-          onChange={(value) => updateConfig("elevenlabs_model", value)}
-        >
-          <Label>ElevenLabs Model</Label>
-          <Input />
-        </TextField>
-
-        <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
-          <Save size={16} />
-          保存
-        </Button>
+      <SectionCard
+        className="max-w-2xl"
+        title="调试：列表里找不到本应用？"
+        description="打开系统设置不会自动登记进程；必须先「请求权限」或实际录音一次。"
+      >
+        <ul className="flex flex-col gap-2 text-[13px] leading-relaxed text-muted">
+          <li>
+            · 必须先点「请求权限」——只打开系统设置不会把本应用登记进列表。
+          </li>
+          <li>
+            · <code className="text-foreground">tauri dev</code>{" "}
+            时列表名通常是{" "}
+            <code className="text-foreground">asr-workshop</code>
+            ，不是「ASR Workshop」。
+          </li>
+          <li>
+            · 麦克风 / 语音识别已改为进程内请求，授权后应出现本进程（不再是
+            swift）。
+          </li>
+        </ul>
+        {exePath ? (
+          <p className="mt-3 break-all rounded-xl border border-border bg-default/40 px-3 py-2 font-mono text-[11px] text-foreground">
+            {exePath}
+          </p>
+        ) : null}
+        {hint ? (
+          <p className="mt-3 whitespace-pre-wrap text-[12px] leading-relaxed text-muted">
+            {hint}
+          </p>
+        ) : null}
       </SectionCard>
-    </PageShell>
+    </>
+  );
+}
+
+function UpdatesPanel() {
+  const [info, setInfo] = useState<AppInfo | null>(null);
+  const [remote, setRemote] = useState<GhRelease[]>([]);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const [latest, setLatest] = useState<GhRelease | null>(null);
+
+  useEffect(() => {
+    void invoke<AppInfo>("get_app_info")
+      .then(setInfo)
+      .catch(() => setInfo({ version: "0.1.0", name: "ASR Workshop" }));
+  }, []);
+
+  const checkUpdates = useCallback(async () => {
+    setChecking(true);
+    setCheckError(null);
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${APP_REPO}/releases?per_page=12`,
+        { headers: { Accept: "application/vnd.github+json" } },
+      );
+      if (!res.ok) {
+        throw new Error(`GitHub API ${res.status}`);
+      }
+      const data = (await res.json()) as GhRelease[];
+      const published = data.filter((r) => !r.draft);
+      setRemote(published);
+      setLatest(published.find((r) => !r.prerelease) ?? published[0] ?? null);
+    } catch (error) {
+      setCheckError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkUpdates();
+  }, [checkUpdates]);
+
+  const current = info?.version ?? "0.1.0";
+  const updateAvailable =
+    latest != null && compareSemver(latest.tag_name, current) > 0;
+
+  const logEntries: ChangelogEntry[] =
+    remote.length > 0
+      ? remote.map((r) => ({
+          version: r.tag_name.replace(/^v/i, ""),
+          date: r.published_at
+            ? r.published_at.slice(0, 10)
+            : "",
+          notes: (r.body || r.name || "无说明")
+            .split("\n")
+            .map((line) => line.replace(/^[-*#\s]+/, "").trim())
+            .filter(Boolean)
+            .slice(0, 8),
+        }))
+      : CHANGELOG;
+
+  return (
+    <>
+      <SectionCard
+        className="max-w-2xl flex flex-col gap-4"
+        title="当前版本"
+        description="检查 GitHub Releases 获取更新与发版说明。"
+      >
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium text-foreground">
+              {info?.name ?? "ASR Workshop"}{" "}
+              <span className="text-muted">v{current}</span>
+            </div>
+            <p className="mt-1 text-[12px] text-muted">
+              {updateAvailable
+                ? `发现新版本 ${latest?.tag_name}`
+                : checking
+                  ? "正在检查更新…"
+                  : "已是最新，或尚未发布远程版本。"}
+            </p>
+            {checkError ? (
+              <p className="mt-1 text-[12px]" style={{ color: "var(--danger)" }}>
+                检查失败：{checkError}（仍显示本地 Release Log）
+              </p>
+            ) : null}
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            isDisabled={checking}
+            onPress={() => void checkUpdates()}
+          >
+            <RefreshCw size={14} className={checking ? "animate-spin" : ""} />
+            检查更新
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {updateAvailable && latest ? (
+            <Button
+              size="sm"
+              variant="primary"
+              onPress={() => void open(latest.html_url)}
+            >
+              <Download size={14} />
+              下载 {latest.tag_name}
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={() => void open(APP_RELEASES_URL)}
+          >
+            <ExternalLink size={14} />
+            Releases
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={() => void open(APP_REPO_URL)}
+          >
+            <ExternalLink size={14} />
+            仓库
+          </Button>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        className="max-w-2xl"
+        title="Release Log"
+        description="最近发版说明。"
+      >
+        <div className="flex flex-col gap-5">
+          {logEntries.map((entry) => (
+            <article key={`${entry.version}-${entry.date}`} className="release-entry">
+              <header className="mb-2 flex items-baseline gap-2">
+                <h3 className="text-sm font-semibold text-foreground">
+                  v{entry.version}
+                </h3>
+                {entry.date ? (
+                  <time className="text-[11px] text-muted">{entry.date}</time>
+                ) : null}
+              </header>
+              <ul className="flex flex-col gap-1.5">
+                {entry.notes.map((note, i) => (
+                  <li
+                    key={`${entry.version}-${i}`}
+                    className="text-[13px] leading-relaxed text-muted before:mr-2 before:content-['·']"
+                  >
+                    {note}
+                  </li>
+                ))}
+              </ul>
+            </article>
+          ))}
+        </div>
+      </SectionCard>
+    </>
   );
 }

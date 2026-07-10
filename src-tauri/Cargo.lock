@@ -141,8 +141,9 @@ checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
 name = "asr-workshop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
+ "cc",
  "chrono",
  "core-foundation 0.10.1",
  "core-graphics",
@@ -3386,6 +3387,7 @@ dependencies = [
 [[package]]
 name = "qwen3-asr-rs"
 version = "0.2.0"
+source = "git+https://github.com/Sherlockouo/qwen3_asr_rs?branch=feat%2Fforced-aligner#a3996d883467658079738ca42ded802b47ed9b6a"
 dependencies = [
  "anyhow",
  "axum",

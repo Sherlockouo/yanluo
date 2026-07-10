@@ -124,7 +124,7 @@ impl AudioRecorder {
         self.samples.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
-    /// RMS of the most recent `window` samples (16kHz mono), without cloning the full buffer.
+    /// Live meter 0–1 from recent samples. Aggressive curve so quiet speech still moves HUD bars.
     pub fn recent_rms(&self, window: usize) -> f32 {
         let Ok(buf) = self.samples.lock() else {
             return 0.0;
@@ -134,10 +134,23 @@ impl AudioRecorder {
             return 0.0;
         }
         let start = buf.len() - n;
-        let energy = buf[start..].iter().map(|s| s * s).sum::<f32>() / n as f32;
-        let raw = energy.sqrt();
-        // Speech RMS is often tiny (0.01–0.08); expand into a usable 0–1 meter.
-        (raw * 12.0).clamp(0.0, 1.0)
+        meter_from_slice(&buf[start..])
+    }
+
+    /// Log-spaced speech bands via Goertzel (Apple Music–style spectrum, ~80Hz–4kHz).
+    pub fn recent_bands(&self, band_count: usize, window: usize) -> (f32, Vec<f32>) {
+        let Ok(buf) = self.samples.lock() else {
+            return (0.0, vec![0.0; band_count]);
+        };
+        let n = buf.len().min(window.max(1));
+        if n == 0 {
+            return (0.0, vec![0.0; band_count]);
+        }
+        let start = buf.len() - n;
+        let slice = &buf[start..];
+        let rms = meter_from_slice(slice);
+        let bands = goertzel_bands(slice, TARGET_SR as f32, band_count);
+        (rms, bands)
     }
 
     /// Stop recording and return all captured samples (16kHz mono f32).
@@ -200,5 +213,66 @@ fn linear_resample(input: &[f32], from_sr: usize, to_sr: usize) -> Vec<f32> {
         out.push(s0 * (1.0 - frac as f32) + s1 * frac as f32);
     }
 
+    out
+}
+
+fn meter_from_slice(slice: &[f32]) -> f32 {
+    if slice.is_empty() {
+        return 0.0;
+    }
+    let peak = slice.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+    let energy = slice.iter().map(|s| s * s).sum::<f32>() / slice.len() as f32;
+    let rms = energy.sqrt();
+    let raw = peak.max(rms * 1.6);
+    if raw < 0.000_8 {
+        return 0.0;
+    }
+    let boosted = (raw * 48.0).clamp(0.0, 2.2);
+    boosted.powf(0.45).clamp(0.0, 1.0)
+}
+
+/// Goertzel magnitude at one frequency (normalized roughly to 0–1 for speech).
+fn goertzel_mag(samples: &[f32], freq_hz: f32, sample_rate: f32) -> f32 {
+    if samples.is_empty() || freq_hz <= 0.0 || freq_hz >= sample_rate * 0.5 {
+        return 0.0;
+    }
+    let w = std::f32::consts::TAU * (freq_hz / sample_rate);
+    let coeff = 2.0 * w.cos();
+    let mut s0 = 0.0_f32;
+    let mut s1 = 0.0_f32;
+    let mut s2 = 0.0_f32;
+    for &x in samples {
+        s0 = x + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    let power = s1 * s1 + s2 * s2 - coeff * s1 * s2;
+    (power.max(0.0).sqrt() / samples.len() as f32) * 18.0
+}
+
+/// Log-spaced bands across speech range (bass → presence), soft-knee to 0–1.
+fn goertzel_bands(samples: &[f32], sample_rate: f32, band_count: usize) -> Vec<f32> {
+    let n = band_count.max(1);
+    let f_lo = 80.0_f32;
+    let f_hi = 3800.0_f32;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let t = if n == 1 {
+            0.0
+        } else {
+            i as f32 / (n - 1) as f32
+        };
+        let freq = f_lo * (f_hi / f_lo).powf(t);
+        let mag = goertzel_mag(samples, freq, sample_rate);
+        out.push(mag.powf(0.55).clamp(0.0, 1.0));
+    }
+    // Light neighbor blur so the spectrum feels continuous (Music-like).
+    if n >= 3 {
+        let mut blurred = out.clone();
+        for i in 1..n - 1 {
+            blurred[i] = out[i - 1] * 0.18 + out[i] * 0.64 + out[i + 1] * 0.18;
+        }
+        out = blurred;
+    }
     out
 }

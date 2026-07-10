@@ -1,8 +1,9 @@
 import type { AppConfig, AsrProvider, Page, RecState } from "../types";
 
 export const defaultConfig: AppConfig = {
-  asr_model_dir: "/Users/xbcoder/project/Qwen3-ASR/models",
+  asr_model_dir: "",
   align_model_dir: "",
+  // Apple Speech is macOS-only; non-macOS remaps to elevenlabs at runtime.
   asr_provider: "apple",
   elevenlabs_api_key: "",
   elevenlabs_model: "scribe_v2",

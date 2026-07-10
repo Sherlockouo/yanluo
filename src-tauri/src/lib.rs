@@ -8,20 +8,23 @@
 //! and starts the next round. No timer, no queue, no stale partials.
 
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "macos")]
 use core_foundation::base::{CFRelease, TCFType};
+#[cfg(target_os = "macos")]
 use core_foundation::runloop::CFRunLoop;
+#[cfg(target_os = "macos")]
 use core_foundation::string::{CFString, CFStringRef};
+#[cfg(target_os = "macos")]
 use core_graphics::event::{
     CallbackResult, CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions,
     CGEventTapPlacement, CGEventType,
 };
 use std::fs;
+#[cfg(target_os = "macos")]
 use std::ffi::c_void;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-#[cfg(not(target_os = "macos"))]
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -154,7 +157,14 @@ impl AsrEngine {
     fn get_audio_rms(app: &AppHandle) -> Option<f32> {
         let state = app.state::<AsrEngine>();
         let rec_guard = state.inner().recorder.lock().ok()?;
-        Some(rec_guard.as_ref()?.0.recent_rms(3_200))
+        Some(rec_guard.as_ref()?.0.recent_rms(640)) // ~40ms @ 16kHz
+    }
+
+    /// RMS + log-spaced speech bands for the HUD spectrum.
+    fn get_audio_level(app: &AppHandle, band_count: usize) -> Option<(f32, Vec<f32>)> {
+        let state = app.state::<AsrEngine>();
+        let rec_guard = state.inner().recorder.lock().ok()?;
+        Some(rec_guard.as_ref()?.0.recent_bands(band_count, 1_024))
     }
 
     /// Take ownership of the recorder, stop it, and return all samples.
@@ -201,9 +211,9 @@ enum AsrProvider {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            asr_model_dir: "/Users/xbcoder/project/Qwen3-ASR/models".into(),
+            asr_model_dir: String::new(),
             align_model_dir: default_align_model_dir(),
-            asr_provider: AsrProvider::Apple,
+            asr_provider: default_asr_provider(),
             elevenlabs_api_key: String::new(),
             elevenlabs_model: "scribe_v2".into(),
             language: read_user_default_language().unwrap_or_else(|| "auto".into()),
@@ -213,6 +223,17 @@ impl Default for AppConfig {
             llm_model: "gpt-4o-mini".into(),
             vocabulary: Vec::new(),
         }
+    }
+}
+
+fn default_asr_provider() -> AsrProvider {
+    #[cfg(target_os = "macos")]
+    {
+        AsrProvider::Apple
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        AsrProvider::Elevenlabs
     }
 }
 
@@ -315,10 +336,22 @@ fn history_path() -> PathBuf {
 }
 
 fn load_config_from_disk() -> AppConfig {
-    fs::read_to_string(config_path())
+    let mut config = fs::read_to_string(config_path())
         .ok()
         .and_then(|data| serde_json::from_str(&data).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    normalize_config_for_platform(&mut config);
+    config
+}
+
+fn normalize_config_for_platform(config: &mut AppConfig) {
+    #[cfg(not(target_os = "macos"))]
+    {
+        if matches!(config.asr_provider, AsrProvider::Apple) {
+            config.asr_provider = AsrProvider::Elevenlabs;
+        }
+    }
+    let _ = config;
 }
 
 fn save_config_to_disk(config: &AppConfig) -> Result<(), String> {
@@ -343,25 +376,41 @@ fn save_history_to_disk(history: &[HistoryEntry]) -> Result<(), String> {
 }
 
 fn read_user_default_language() -> Option<String> {
-    let output = Command::new("defaults")
-        .args(["read", "com.template.asr-workshop", "language"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("defaults")
+            .args(["read", "com.template.asr-workshop", "language"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        (!value.is_empty()).then_some(value)
     }
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!value.is_empty()).then_some(value)
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
 }
 
 fn write_user_default_language(language: &str) {
-    let _ = Command::new("defaults")
-        .args(["write", "com.template.asr-workshop", "language", language])
-        .status();
+    #[cfg(target_os = "macos")]
+    {
+        let _ = Command::new("defaults")
+            .args(["write", "com.template.asr-workshop", "language", language])
+            .status();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = language;
+    }
 }
 
+#[cfg(target_os = "macos")]
 type TisInputSourceRef = *const c_void;
 
+#[cfg(target_os = "macos")]
 #[link(name = "Carbon", kind = "framework")]
 unsafe extern "C" {
     static kTISPropertyInputSourceID: CFStringRef;
@@ -374,11 +423,13 @@ unsafe extern "C" {
     ) -> *const c_void;
 }
 
+#[cfg(target_os = "macos")]
 struct InputSourceGuard {
     original: TisInputSourceRef,
     switched: bool,
 }
 
+#[cfg(target_os = "macos")]
 impl Drop for InputSourceGuard {
     fn drop(&mut self) {
         unsafe {
@@ -392,6 +443,7 @@ impl Drop for InputSourceGuard {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn switch_to_ascii_if_cjk() -> Option<InputSourceGuard> {
     unsafe {
         let current = TISCopyCurrentKeyboardInputSource();
@@ -417,6 +469,12 @@ fn switch_to_ascii_if_cjk() -> Option<InputSourceGuard> {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
+fn switch_to_ascii_if_cjk() -> Option<()> {
+    None
+}
+
+#[cfg(target_os = "macos")]
 fn input_source_id(source: TisInputSourceRef) -> Option<String> {
     unsafe {
         let value = TISGetInputSourceProperty(source, kTISPropertyInputSourceID) as CFStringRef;
@@ -439,15 +497,36 @@ fn is_cjk_input_source(id: &str) -> bool {
         || lower.contains("kotoeri")
 }
 
+#[derive(Clone, Serialize)]
+struct AudioLevelPayload {
+    rms: f32,
+    bands: Vec<f32>,
+}
+
+const HUD_BAND_COUNT: usize = 12;
+
 fn spawn_audio_level_pump(app: AppHandle, recording: Arc<AtomicBool>) {
     std::thread::spawn(move || {
         while recording.load(Ordering::Acquire) {
-            if let Some(rms) = AsrEngine::get_audio_rms(&app) {
-                let _ = app.emit("audio-level", rms);
+            if let Some((rms, bands)) = AsrEngine::get_audio_level(&app, HUD_BAND_COUNT) {
+                if let Ok(mut slot) = floating_status_slot(&app).lock() {
+                    slot.rms = rms;
+                }
+                let payload = AudioLevelPayload { rms, bands };
+                let _ = app.emit("audio-level", &payload);
+                let _ = app.emit_to("floating", "audio-level", &payload);
             }
-            std::thread::sleep(Duration::from_millis(33));
+            std::thread::sleep(Duration::from_millis(16));
         }
-        let _ = app.emit("audio-level", 0.0_f32);
+        if let Ok(mut slot) = floating_status_slot(&app).lock() {
+            slot.rms = 0.0;
+        }
+        let silence = AudioLevelPayload {
+            rms: 0.0,
+            bands: vec![0.0; HUD_BAND_COUNT],
+        };
+        let _ = app.emit("audio-level", &silence);
+        let _ = app.emit_to("floating", "audio-level", &silence);
     });
 }
 
@@ -808,6 +887,37 @@ fn open_permission_settings(kind: String) -> Result<(), String> {
     permissions::open_permission_settings(&kind)
 }
 
+#[tauri::command]
+fn request_permission(kind: String) -> Result<String, String> {
+    permissions::request_permission(&kind)
+}
+
+#[derive(Clone, Serialize)]
+struct AppInfo {
+    version: String,
+    name: String,
+    platform: String,
+    executable_path: String,
+    apple_speech_available: bool,
+}
+
+#[tauri::command]
+fn get_app_info() -> AppInfo {
+    let perms = permissions::get_permission_status();
+    AppInfo {
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        name: "ASR Workshop".to_string(),
+        platform: perms.platform,
+        executable_path: perms.executable_path,
+        apple_speech_available: cfg!(target_os = "macos"),
+    }
+}
+
+#[tauri::command]
+fn get_platform() -> String {
+    permissions::get_permission_status().platform
+}
+
 fn install_app_menu(app: &AppHandle) -> Result<(), String> {
     let config = app
         .state::<AsrEngine>()
@@ -888,61 +998,70 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
 }
 
 fn start_fn_event_tap(app: AppHandle) {
-    std::thread::Builder::new()
-        .name("fn-event-tap".into())
-        .spawn(move || {
-            use core_graphics::event::{EventField, KeyCode};
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        eprintln!("[fn] global Fn listener is macOS-only");
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::thread::Builder::new()
+            .name("fn-event-tap".into())
+            .spawn(move || {
+                use core_graphics::event::{EventField, KeyCode};
 
-            let fn_down = Arc::new(AtomicBool::new(false));
-            let fn_down_cb = fn_down.clone();
-            let app_cb = app.clone();
-            // Escape virtual keycode (KeyCode::ESCAPE = 0x35).
-            let escape_keycode = KeyCode::ESCAPE as i64;
-            let installed = CGEventTap::with_enabled(
-                CGEventTapLocation::HID,
-                CGEventTapPlacement::HeadInsertEventTap,
-                CGEventTapOptions::Default,
-                vec![CGEventType::FlagsChanged, CGEventType::KeyDown],
-                move |_proxy, event_type, event| {
-                    let et = event_type as u32;
-                    if et == CGEventType::KeyDown as u32 {
-                        let keycode = event
-                            .get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-                        let autorepeat = event
-                            .get_integer_value_field(EventField::KEYBOARD_EVENT_AUTOREPEAT);
-                        if keycode == escape_keycode && autorepeat == 0 {
-                            let _ = app_cb.emit("escape-key-down", ());
+                let fn_down = Arc::new(AtomicBool::new(false));
+                let fn_down_cb = fn_down.clone();
+                let app_cb = app.clone();
+                // Escape virtual keycode (KeyCode::ESCAPE = 0x35).
+                let escape_keycode = KeyCode::ESCAPE as i64;
+                let installed = CGEventTap::with_enabled(
+                    CGEventTapLocation::HID,
+                    CGEventTapPlacement::HeadInsertEventTap,
+                    CGEventTapOptions::Default,
+                    vec![CGEventType::FlagsChanged, CGEventType::KeyDown],
+                    move |_proxy, event_type, event| {
+                        let et = event_type as u32;
+                        if et == CGEventType::KeyDown as u32 {
+                            let keycode = event
+                                .get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                            let autorepeat = event
+                                .get_integer_value_field(EventField::KEYBOARD_EVENT_AUTOREPEAT);
+                            if keycode == escape_keycode && autorepeat == 0 {
+                                let _ = app_cb.emit("escape-key-down", ());
+                            }
+                            return CallbackResult::Keep;
                         }
-                        return CallbackResult::Keep;
-                    }
-                    if et != CGEventType::FlagsChanged as u32 {
-                        return CallbackResult::Keep;
-                    }
-                    let has_fn = event
-                        .get_flags()
-                        .contains(CGEventFlags::CGEventFlagSecondaryFn);
-                    let was_down = fn_down_cb.swap(has_fn, Ordering::AcqRel);
-                    // Toggle mode: only emit on Fn press (rising edge).
-                    // Release is ignored so hold-to-talk is no longer required.
-                    if has_fn && !was_down {
-                        let _ = app_cb.emit("fn-key-down", ());
-                        return CallbackResult::Drop;
-                    }
-                    if has_fn {
-                        return CallbackResult::Drop;
-                    }
-                    CallbackResult::Keep
-                },
-                CFRunLoop::run_current,
-            );
-            if installed.is_err() {
-                let _ = app.emit(
-                    "fn-listener-error",
-                    "Fn global listener failed. Grant Accessibility/Input Monitoring permissions.",
+                        if et != CGEventType::FlagsChanged as u32 {
+                            return CallbackResult::Keep;
+                        }
+                        let has_fn = event
+                            .get_flags()
+                            .contains(CGEventFlags::CGEventFlagSecondaryFn);
+                        let was_down = fn_down_cb.swap(has_fn, Ordering::AcqRel);
+                        // Toggle mode: only emit on Fn press (rising edge).
+                        // Release is ignored so hold-to-talk is no longer required.
+                        if has_fn && !was_down {
+                            let _ = app_cb.emit("fn-key-down", ());
+                            return CallbackResult::Drop;
+                        }
+                        if has_fn {
+                            return CallbackResult::Drop;
+                        }
+                        CallbackResult::Keep
+                    },
+                    CFRunLoop::run_current,
                 );
-            }
-        })
-        .expect("failed to spawn fn event tap thread");
+                if installed.is_err() {
+                    let _ = app.emit(
+                        "fn-listener-error",
+                        "Fn global listener failed. Grant Accessibility/Input Monitoring permissions.",
+                    );
+                }
+            })
+            .expect("failed to spawn fn event tap thread");
+    }
 }
 
 fn refine_transcript(config: &AppConfig, input: &str) -> Result<String, String> {
@@ -1060,18 +1179,48 @@ fn write_clipboard_text(text: &str) -> Result<(), String> {
 
 #[cfg(not(target_os = "macos"))]
 fn write_clipboard_text(text: &str) -> Result<(), String> {
-    let mut child = Command::new("pbcopy")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    child
-        .stdin
-        .as_mut()
-        .ok_or("pbcopy stdin unavailable")?
-        .write_all(text.as_bytes())
-        .map_err(|e| e.to_string())?;
-    child.wait().map_err(|e| e.to_string())?;
-    Ok(())
+    #[cfg(target_os = "windows")]
+    {
+        let escaped = text.replace('\'', "''");
+        let status = Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                &format!("Set-Clipboard -Value '{escaped}'"),
+            ])
+            .status()
+            .map_err(|e| e.to_string())?;
+        if status.success() {
+            return Ok(());
+        }
+        return Err("failed to write clipboard via PowerShell".into());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        for (bin, args) in [
+            ("wl-copy", vec![] as Vec<&str>),
+            ("xclip", vec!["-selection", "clipboard"]),
+            ("xsel", vec!["--clipboard", "--input"]),
+        ] {
+            if let Ok(mut child) = Command::new(bin)
+                .args(&args)
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    if stdin.write_all(text.as_bytes()).is_ok() && child.wait().is_ok() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        return Err("clipboard helper not found (install wl-copy, xclip, or xsel)".into());
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        let _ = text;
+        Err("clipboard write unsupported on this platform".into())
+    }
 }
 
 /// Synthesize ⌘V via CGEvent so paste goes to the currently focused app
@@ -1100,19 +1249,8 @@ fn post_cmd_v() -> Result<(), String> {
 
 #[cfg(not(target_os = "macos"))]
 fn post_cmd_v() -> Result<(), String> {
-    let status = Command::new("osascript")
-        .args([
-            "-e",
-            r#"tell application "System Events" to keystroke "v" using command down"#,
-        ])
-        .status()
-        .map_err(|e| e.to_string())?;
-    if !status.success() {
-        return Err(
-            "Paste failed (grant Accessibility permission to ASR Workshop in System Settings)"
-                .into(),
-        );
-    }
+    // Auto-paste (synthetic keystroke) is macOS-only; text remains on the clipboard.
+    eprintln!("[paste] auto-paste skipped (non-macOS); text is on clipboard");
     Ok(())
 }
 
@@ -1357,6 +1495,7 @@ fn transcribe_with_elevenlabs(config: &AppConfig, samples: &[f32]) -> Result<Tra
     })
 }
 
+#[cfg(target_os = "macos")]
 fn transcribe_with_apple_speech(config: &AppConfig, samples: &[f32]) -> Result<TranscriptionResult, String> {
     let mut audio_file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
     audio_file
@@ -1394,6 +1533,7 @@ fn transcribe_with_apple_speech(config: &AppConfig, samples: &[f32]) -> Result<T
                     })
 }
 
+#[cfg(target_os = "macos")]
 const APPLE_SPEECH_SWIFT: &str = r#"
 import Foundation
 import Speech
@@ -1492,6 +1632,14 @@ if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
 }
 print(finalText)
 "#;
+
+#[cfg(not(target_os = "macos"))]
+fn transcribe_with_apple_speech(
+    _config: &AppConfig,
+    _samples: &[f32],
+) -> Result<TranscriptionResult, String> {
+    Err("Apple Speech is only available on macOS".into())
+}
 
 fn samples_to_wav_bytes(samples: &[f32]) -> Result<Vec<u8>, String> {
     let mut cursor = std::io::Cursor::new(Vec::new());
@@ -2498,6 +2646,8 @@ fn get_app_config(engine: State<'_, AsrEngine>) -> Result<AppConfig, String> {
 
 #[tauri::command]
 fn save_app_config(config: AppConfig, engine: State<'_, AsrEngine>) -> Result<(), String> {
+    let mut config = config;
+    normalize_config_for_platform(&mut config);
     {
         let mut current = engine.inner().config.lock().map_err(|e| e.to_string())?;
         *current = config.clone();
@@ -2952,6 +3102,9 @@ pub fn main() {
             set_floating_theme,
             get_permission_status,
             open_permission_settings,
+            request_permission,
+            get_app_info,
+            get_platform,
             start_recording,
             stop_recording,
             cancel_recording,

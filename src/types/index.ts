@@ -51,6 +51,13 @@ export type FloatingPayload = {
   state: RecState;
   text: string;
   rms: number;
+  /** Optional log-spaced speech spectrum for HUD bars. */
+  bands?: number[];
+};
+
+export type AudioLevelPayload = {
+  rms: number;
+  bands: number[];
 };
 
 export type TranscriptionResult = {
