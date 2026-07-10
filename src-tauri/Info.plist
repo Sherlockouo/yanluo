@@ -3,10 +3,12 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>ASR Workshop needs microphone access to capture speech for transcription.</string>
+	<string>ASR Workshop 需要麦克风权限以采集语音并进行转写。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>ASR Workshop uses Apple Speech Recognition to convert your voice into text.</string>
+	<string>ASR Workshop 使用 Apple 语音识别将你的说话内容转换为文字。</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>ASR Workshop uses Apple Events to paste transcribed text into the focused app.</string>
+	<string>ASR Workshop 需要通过 Apple Events 将转写结果粘贴到当前应用。</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>ASR Workshop 在「只录系统 / 两者都录」模式下需要屏幕录制权限，以采集系统正在播放的声音（不会保存画面）。</string>
 </dict>
 </plist>

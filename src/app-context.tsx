@@ -35,7 +35,7 @@ type AppContextValue = {
   setNewTerm: (value: string) => void;
   setTheme: (theme: ThemeMode | ((prev: ThemeMode) => ThemeMode)) => void;
   updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void;
-  saveConfig: (next?: AppConfig) => Promise<void>;
+  saveConfig: (next?: AppConfig, opts?: { silent?: boolean }) => Promise<void>;
   loadHistory: () => Promise<void>;
   chooseModelDir: () => Promise<void>;
   loadModel: () => Promise<void>;
@@ -45,7 +45,7 @@ type AppContextValue = {
   clearHistory: () => Promise<void>;
   pruneHistory: (keep: number) => Promise<void>;
   pruneHistoryOlderThan: (days: number) => Promise<void>;
-  markSession: (mode: "fn" | "transcribe") => void;
+  markSession: (mode: "fn" | "translate" | "transcribe") => void;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -80,7 +80,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const configRef = useRef(config);
   const modelLoadedRef = useRef(modelLoaded);
   const stateRef = useRef(state);
-  const sessionModeRef = useRef<"fn" | "transcribe">("fn");
+  const sessionModeRef = useRef<"fn" | "translate" | "transcribe">("fn");
 
   useEffect(() => {
     configRef.current = config;
@@ -100,6 +100,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...defaultConfig,
       ...next,
       language: next.language || "auto",
+      hotkey_transcribe: next.hotkey_transcribe ?? defaultConfig.hotkey_transcribe,
+      hotkey_translate: next.hotkey_translate ?? defaultConfig.hotkey_translate,
+      hotkey_cancel: next.hotkey_cancel ?? defaultConfig.hotkey_cancel,
+      audio_capture_mode: next.audio_capture_mode ?? defaultConfig.audio_capture_mode,
     });
   }, []);
 
@@ -150,6 +154,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           toast.success(
             result.refined ? "转写完成（已优化）" : "转写完成，已保存音频与文本",
           );
+        } else if (sessionModeRef.current === "translate") {
+          toast.success(result.refined ? "已翻译并粘贴" : "已粘贴");
         } else {
           toast.success(result.refined ? "已优化并粘贴" : "已写入剪切板并粘贴");
         }
@@ -171,22 +177,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ...defaultConfig,
           ...event.payload,
           language: event.payload.language || "auto",
+          hotkey_transcribe:
+            event.payload.hotkey_transcribe ?? defaultConfig.hotkey_transcribe,
+          hotkey_translate:
+            event.payload.hotkey_translate ?? defaultConfig.hotkey_translate,
+          hotkey_cancel:
+            event.payload.hotkey_cancel ?? defaultConfig.hotkey_cancel,
+          audio_capture_mode:
+            event.payload.audio_capture_mode ?? defaultConfig.audio_capture_mode,
         });
-        toast.info("菜单设置已更新");
       }),
-      listen<string>("open-settings", () => {
-        navigate("/llm");
+      listen<string>("open-settings", (event) => {
+        const page = event.payload;
+        if (page === "llm") navigate("/llm");
+        else navigate("/settings");
       }),
-      listen("fn-key-down", async () => {
+      listen<{ shift?: boolean; intention?: string }>("fn-key-down", async (event) => {
         const current = configRef.current;
-        // Toggle: Fn press starts when idle, stops when recording.
+        const intention =
+          event.payload?.intention === "translate" || event.payload?.shift
+            ? "translate"
+            : "transcribe";
+        const shift = intention === "translate";
+        // Toggle: hotkey press starts when idle, stops when recording.
         if (stateRef.current === "recording") {
-          const shouldRefine = Boolean(
-            current.llm_enabled &&
-              current.llm_api_base_url &&
-              current.llm_api_key &&
-              current.llm_model,
-          );
+          const translating = sessionModeRef.current === "translate";
+          const shouldRefine =
+            translating ||
+            Boolean(
+              current.llm_enabled &&
+                current.llm_api_base_url?.trim() &&
+                current.llm_model?.trim(),
+            );
           const next: RecState = shouldRefine ? "refining" : "processing";
           setState(next);
           stateRef.current = next;
@@ -204,16 +226,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           toast.warning("请先加载 ASR 模型，或切到 Apple/ElevenLabs");
           return;
         }
+        if (shift) {
+          if (
+            !current.llm_api_base_url?.trim() ||
+            !current.llm_model?.trim()
+          ) {
+            toast.warning("翻译需要先在「LLM」页配置 Base URL 与 Model（Key 可留空）");
+            return;
+          }
+        }
+        const mode = shift ? "translate" : "fn";
         setState("recording");
         stateRef.current = "recording";
-        sessionModeRef.current = "fn";
+        sessionModeRef.current = mode;
         try {
           await invoke("save_app_config", { config: current });
           await invoke("start_recording", {
-            chunkSec: 1.0,
-            rollbackTokens: 2,
+            chunkSec: current.chunk_size_sec ?? 1.0,
+            rollbackTokens: current.unfixed_token_num ?? 2,
             language: current.language === "auto" ? null : current.language,
-            mode: "fn",
+            mode,
           });
         } catch (error) {
           setState("idle");
@@ -263,24 +295,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [loadConfig, loadHistory, navigate]);
 
   const saveConfig = useCallback(
-    async (next = config) => {
+    async (next = config, opts?: { silent?: boolean }) => {
       await invoke("save_app_config", { config: next });
       setConfig(next);
-      toast.success("设置已保存");
+      if (!opts?.silent) toast.success("设置已保存");
     },
     [config],
   );
 
   const testLlm = useCallback(async () => {
     try {
+      // Persist form values first — test hits Rust engine config, not React state.
+      await invoke("save_app_config", { config });
+      const sample = "我在写配森脚本读取杰森文件。";
       const refined = await invoke<string>("test_llm_refinement", {
-        text: "我在写配森脚本读取杰森文件。",
+        text: sample,
       });
-      toast.success(`LLM OK: ${refined}`);
+      if (refined === sample) {
+        toast.warning(`LLM 已响应，但未改写：${refined}`);
+      } else {
+        toast.success(`LLM OK：${sample} → ${refined}`);
+      }
     } catch (error) {
       toast.danger(`LLM 测试失败: ${error}`);
     }
-  }, []);
+  }, [config]);
 
   const chooseModelDir = useCallback(async () => {
     const selected = await open({
@@ -350,7 +389,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [loadHistory],
   );
 
-  const markSession = useCallback((mode: "fn" | "transcribe") => {
+  const markSession = useCallback((mode: "fn" | "translate" | "transcribe") => {
     sessionModeRef.current = mode;
   }, []);
 

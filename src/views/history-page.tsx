@@ -15,10 +15,26 @@ import {
   SectionCard,
 } from "@/components/shared/page-shell";
 import { TranscriptViewer } from "@/components/ui/transcript-viewer";
+import {
+  hasRefineDiff,
+  RefineDiff,
+  RefineFromTo,
+} from "@/components/ui/refine-diff";
 import { isVideoMediaKind } from "@/lib/alignment";
 import { cn } from "@/lib/cn";
+import { translateTargetLabel } from "@/lib/constants";
 import type { HistoryEntry } from "@/types";
 import { useApp } from "@/app-context";
+
+function historyLanguageChip(entry: HistoryEntry): string {
+  const isTranslate = (entry.source ?? "fn") === "translate";
+  if (isTranslate) {
+    const target = translateTargetLabel(entry.translate_target_language);
+    return target ? `译为 ${target}` : "译";
+  }
+  const lang = entry.language || "auto";
+  return hasRefineDiff(entry.raw_text, entry.text) ? `${lang} · refined` : lang;
+}
 
 export function HistoryPage() {
   const { history, clearHistory, pruneHistory, pruneHistoryOlderThan } =
@@ -185,6 +201,10 @@ function HistoryRow({
   onToggle: () => void;
 }) {
   const isVideo = isVideoMediaKind(entry.media_kind, entry.audio_path);
+  const isTranslate = (entry.source ?? "fn") === "translate";
+  const showDiff = !isTranslate && hasRefineDiff(entry.raw_text, entry.text);
+  const showTranslatePair =
+    isTranslate && Boolean(entry.raw_text?.trim() && entry.text?.trim());
   return (
     <button
       type="button"
@@ -201,27 +221,46 @@ function HistoryRow({
           <span>{new Date(entry.created_at).toLocaleString()}</span>
           <span>{entry.duration_seconds.toFixed(1)}s</span>
           <span>
-            {(entry.source ?? "fn") === "transcribe" ? "转写" : "Fn"}
+            {isTranslate
+              ? "翻译"
+              : (entry.source ?? "fn") === "transcribe"
+                ? "转写"
+                : "Fn"}
           </span>
           {isVideo ? <span>视频</span> : null}
           <Chip
             size="sm"
             variant="soft"
-            color={entry.refined ? "accent" : "default"}
+            color={entry.refined || isTranslate ? "accent" : "default"}
           >
             <Chip.Label className="inline-flex items-center gap-1">
-              {entry.refined ? (
+              {entry.refined || isTranslate ? (
                 <Sparkles size={10} />
               ) : (
                 <CheckCircle2 size={10} />
               )}
-              {entry.language || "auto"}
+              {historyLanguageChip(entry)}
             </Chip.Label>
           </Chip>
         </div>
-        <p className="mt-1.5 line-clamp-2 text-[14px] leading-snug text-foreground">
-          {entry.text || "（空）"}
-        </p>
+        {showTranslatePair ? (
+          <div className="mt-1.5 line-clamp-4">
+            <RefineFromTo
+              before={entry.raw_text}
+              after={entry.text}
+              beforeLabel="原"
+              afterLabel="译"
+            />
+          </div>
+        ) : showDiff ? (
+          <div className="mt-1.5 line-clamp-3">
+            <RefineDiff before={entry.raw_text} after={entry.text} compact />
+          </div>
+        ) : (
+          <p className="mt-1.5 line-clamp-2 text-[14px] leading-snug text-foreground">
+            {entry.text || "（空）"}
+          </p>
+        )}
       </div>
       <ChevronDown
         size={16}
@@ -245,6 +284,8 @@ function ExpandedViewer({
   const mediaKind = isVideoMediaKind(entry.media_kind, entry.audio_path)
     ? "video"
     : "audio";
+  const showDiff = hasRefineDiff(entry.raw_text, entry.text);
+  const isTranslate = (entry.source ?? "fn") === "translate";
 
   return (
     <SectionCard className="!p-4">
@@ -267,6 +308,32 @@ function ExpandedViewer({
           </Button>
         </div>
       </div>
+      {isTranslate && showDiff ? (
+        <div className="mb-4 rounded-2xl border border-border bg-surface-secondary/40 px-3.5 py-3">
+          <p className="mb-2 text-[11px] text-muted">
+            原文 → 译文
+            {entry.translate_target_language
+              ? ` · ${translateTargetLabel(entry.translate_target_language)}`
+              : ""}
+          </p>
+          <RefineFromTo
+            before={entry.raw_text}
+            after={entry.text}
+            beforeLabel="原"
+            afterLabel="译"
+          />
+        </div>
+      ) : showDiff ? (
+        <div className="mb-4 rounded-2xl border border-border bg-surface-secondary/40 px-3.5 py-3">
+          <p className="mb-2 text-[11px] text-muted">纠错对照 · 红删绿增</p>
+          <RefineDiff before={entry.raw_text} after={entry.text} />
+          <RefineFromTo
+            className="mt-3 border-t border-border/60 pt-3"
+            before={entry.raw_text}
+            after={entry.text}
+          />
+        </div>
+      ) : null}
       {mediaSrc ? (
         <TranscriptViewer
           text={entry.text}

@@ -2,6 +2,16 @@ export type RecState = "idle" | "recording" | "processing" | "refining";
 
 export type AsrProvider = "qwen" | "apple" | "elevenlabs";
 
+/** Recording source for Fn / live capture. */
+export type AudioCaptureMode = "external" | "system" | "both";
+
+/** Global hotkey: key is "fn" | "escape" | macOS virtual keycode string. */
+export type HotkeyBinding = {
+  key: string;
+  modifiers: string[];
+  label: string;
+};
+
 export type AppConfig = {
   asr_model_dir: string;
   align_model_dir?: string;
@@ -9,6 +19,17 @@ export type AppConfig = {
   elevenlabs_api_key: string;
   elevenlabs_model: string;
   language: string;
+  /** Shift+Fn 翻译目标语言（不含 auto）。 */
+  translate_target_language: string;
+  /** Qwen 流式分块秒数（chunk_size_sec）。 */
+  chunk_size_sec: number;
+  /** Qwen 流式未固定 token 数（unfixed_token_num）。 */
+  unfixed_token_num: number;
+  hotkey_transcribe: HotkeyBinding;
+  hotkey_translate: HotkeyBinding;
+  hotkey_cancel: HotkeyBinding;
+  /** 录音源：外部麦 / 系统播放 / 两者。 */
+  audio_capture_mode: AudioCaptureMode;
   llm_enabled: boolean;
   llm_api_base_url: string;
   llm_api_key: string;
@@ -44,6 +65,8 @@ export type HistoryEntry = {
   segments?: TranscriptSegment[];
   alignment?: CharacterAlignment | null;
   source?: string;
+  /** Translate target language id (e.g. en-US). Set for translate sessions. */
+  translate_target_language?: string | null;
 };
 
 export type FloatingPayload = {
@@ -53,6 +76,12 @@ export type FloatingPayload = {
   rms: number;
   /** Optional log-spaced speech spectrum for HUD bars. */
   bands?: number[];
+  /** Fn session intention: transcribe | translate */
+  intention?: "transcribe" | "translate";
+  /** Translate target language id (e.g. en-US). */
+  target_language?: string | null;
+  /** Clearing + re-translating after a live target switch. */
+  switching?: boolean;
 };
 
 export type AudioLevelPayload = {
@@ -74,6 +103,7 @@ export type TranscriptionResult = {
 export type Page =
   | "overview"
   | "transcribe"
+  | "translate"
   | "asr"
   | "llm"
   | "vocabulary"

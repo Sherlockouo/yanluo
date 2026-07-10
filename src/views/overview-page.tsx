@@ -1,16 +1,30 @@
 import { Kbd } from "@heroui/react";
 import { NavLink } from "react-router-dom";
-import { AudioLines, Brain, BookOpen, Wand2 } from "lucide-react";
-import { providerLabel, stateLabel } from "@/lib/constants";
+import { AudioLines, Brain, BookOpen, Languages, Wand2 } from "lucide-react";
+import { hotkeySegments, providerLabel, stateLabel } from "@/lib/constants";
 import { PageHeader, PageShell, SectionCard } from "@/components/shared/page-shell";
 import { useApp } from "@/app-context";
 
 const LINKS = [
   { to: "/transcribe", icon: AudioLines, title: "转写", hint: "上传与回放" },
+  { to: "/translate", icon: Languages, title: "翻译", hint: "⇧+Fn 只出译文" },
   { to: "/asr", icon: Brain, title: "ASR", hint: "引擎与语言" },
   { to: "/vocabulary", icon: BookOpen, title: "词库", hint: "术语替换" },
   { to: "/llm", icon: Wand2, title: "LLM", hint: "保守纠错" },
 ] as const;
+
+function HotkeyKbd({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {hotkeySegments(label).map((part, i) => (
+        <span key={`${part}-${i}`} className="inline-flex items-center gap-1">
+          {i > 0 ? <span className="text-border">+</span> : null}
+          <Kbd>{part}</Kbd>
+        </span>
+      ))}
+    </span>
+  );
+}
 
 export function OverviewPage() {
   const { config, state, modelLoaded } = useApp();
@@ -28,16 +42,23 @@ export function OverviewPage() {
 
   return (
     <PageShell>
-      <PageHeader title="ASR Workshop" subtitle="点按 Fn 开始，再点结束并粘贴。" />
+      <PageHeader
+        title="ASR Workshop"
+        subtitle={`${config.hotkey_transcribe.label} 转录 · ${config.hotkey_translate.label} 翻译 · ${config.hotkey_cancel.label} 取消`}
+      />
 
       <SectionCard className="max-w-xl">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-muted">
           <span className="inline-flex items-center gap-2 text-foreground">
-            <Kbd>Fn</Kbd>
-            开关
+            <HotkeyKbd label={config.hotkey_transcribe.label} />
+            转录
+          </span>
+          <span className="inline-flex items-center gap-2 text-foreground">
+            <HotkeyKbd label={config.hotkey_translate.label} />
+            翻译
           </span>
           <span className="inline-flex items-center gap-2">
-            <Kbd>Esc</Kbd>
+            <HotkeyKbd label={config.hotkey_cancel.label} />
             取消
           </span>
           <span className="text-border">·</span>

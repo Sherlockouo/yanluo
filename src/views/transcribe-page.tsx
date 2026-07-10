@@ -1,5 +1,8 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button, Chip, toast } from "@heroui/react";
 import {
@@ -7,10 +10,11 @@ import {
   Clipboard,
   FileAudio,
   FileVideo,
+  Plus,
   Sparkles,
   Upload,
 } from "lucide-react";
-import type { HistoryEntry } from "@/types";
+import type { HistoryEntry, TranscriptionResult } from "@/types";
 import {
   providerLabel,
   TRANSCRIBE_FILE_FILTERS,
@@ -24,19 +28,125 @@ import {
 } from "@/components/shared/page-shell";
 import { TranscriptViewer } from "@/components/ui/transcript-viewer";
 import { useApp } from "@/app-context";
+import { cn } from "@/lib/cn";
+
+const VIDEO_EXTS = new Set([
+  "mp4",
+  "m4v",
+  "mov",
+  "mkv",
+  "webm",
+  "avi",
+  "mpeg",
+  "mpg",
+  "3gp",
+  "3g2",
+]);
+
+const MEDIA_EXTS = new Set([
+  ...VIDEO_EXTS,
+  "wav",
+  "mp3",
+  "m4a",
+  "m4b",
+  "m4r",
+  "aac",
+  "flac",
+  "aiff",
+  "aif",
+  "aifc",
+  "caf",
+  "ogg",
+  "oga",
+  "opus",
+  "wma",
+  "amr",
+  "ac3",
+  "eac3",
+  "au",
+  "snd",
+]);
+
+const STORAGE_KEY = "asr-transcribe-view";
+
+type View = "upload" | "result";
+
+type StoredView = {
+  view: View;
+  activeId: string | null;
+  /** Survives route remounts while a file job is in flight. */
+  processingName: string | null;
+};
+
+function isMediaPath(path: string) {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  return MEDIA_EXTS.has(ext);
+}
+
+function fileName(path: string) {
+  return path.split("/").pop() ?? path;
+}
+
+function isVideoPath(path: string) {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  return VIDEO_EXTS.has(ext);
+}
+
+function readStored(): StoredView | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredView;
+    if (parsed.view !== "upload" && parsed.view !== "result") return null;
+    return {
+      view: parsed.view,
+      activeId: parsed.activeId ?? null,
+      processingName: parsed.processingName ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(next: StoredView) {
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+}
 
 export function TranscribePage() {
   const {
     config,
     history,
     modelLoaded,
-    state,
     markSession,
     loadHistory,
   } = useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const stored = useMemo(() => readStored(), []);
+
+  const viewParam = searchParams.get("view");
+  const idParam = searchParams.get("id");
+
+  // URL is source of truth; sessionStorage seeds first paint / restores after nav.
+  const view: View =
+    viewParam === "result" || viewParam === "upload"
+      ? viewParam
+      : (stored?.view ?? "upload");
+  const activeId = idParam ?? stored?.activeId ?? null;
+
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [processingName, setProcessingName] = useState<string | null>(
+    () => stored?.processingName ?? null,
+  );
+  const [dragOver, setDragOver] = useState(false);
+  const historyLenRef = useRef(0);
+  const bootedRef = useRef(false);
+  /** True only when we defaulted to upload because history had not loaded yet. */
+  const awaitingHistoryDefaultRef = useRef(false);
+
+  const processing = processingName != null;
+  const screen: "upload" | "processing" | "result" = processing
+    ? "processing"
+    : view;
 
   const sessionEntries = useMemo(
     () =>
@@ -46,19 +156,162 @@ export function TranscribePage() {
     [history],
   );
 
-  const processing = state === "processing" || state === "refining" || busy;
-  const canUpload =
-    !processing &&
-    !(config.asr_provider === "qwen" && !modelLoaded);
+  const modelBlocked = config.asr_provider === "qwen" && !modelLoaded;
+  const canStart = Boolean(selectedPath) && !modelBlocked && !processing;
 
   const activeEntry = useMemo(() => {
+    if (!sessionEntries.length) return null;
     if (activeId) {
       return sessionEntries.find((e) => e.id === activeId) ?? sessionEntries[0];
     }
-    return sessionEntries[0] ?? null;
+    return sessionEntries[0];
   }, [activeId, sessionEntries]);
 
+  const go = useCallback(
+    (
+      next: View,
+      opts?: {
+        id?: string | null;
+        processingName?: string | null;
+        clearSelection?: boolean;
+      },
+    ) => {
+      const nextId =
+        next === "result"
+          ? (opts?.id !== undefined ? opts.id : activeId)
+          : null;
+      const nextProcessing =
+        opts?.processingName !== undefined
+          ? opts.processingName
+          : processingName;
+
+      writeStored({
+        view: next,
+        activeId: nextId,
+        processingName: nextProcessing,
+      });
+
+      const params = new URLSearchParams();
+      params.set("view", next);
+      if (next === "result" && nextId) params.set("id", nextId);
+      setSearchParams(params, { replace: true });
+
+      if (opts?.processingName !== undefined) {
+        setProcessingName(opts.processingName);
+      }
+      if (opts?.clearSelection) setSelectedPath(null);
+    },
+    [activeId, processingName, setSearchParams],
+  );
+
+  // Hydrate URL once from storage so leaving the page still remembers view.
+  useEffect(() => {
+    if (bootedRef.current) return;
+    bootedRef.current = true;
+    historyLenRef.current = sessionEntries.length;
+
+    if (viewParam === "upload" || viewParam === "result") {
+      writeStored({
+        view: viewParam,
+        activeId: idParam,
+        processingName: stored?.processingName ?? null,
+      });
+      if (stored?.processingName) {
+        setProcessingName(stored.processingName);
+      }
+      return;
+    }
+
+    if (stored?.processingName) {
+      go("upload", { processingName: stored.processingName });
+      return;
+    }
+    if (stored) {
+      go(stored.view, { id: stored.activeId });
+      return;
+    }
+    if (sessionEntries.length > 0) {
+      go("result", { id: sessionEntries[0].id });
+      return;
+    }
+    awaitingHistoryDefaultRef.current = true;
+    go("upload");
+    // intentionally once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // History arrived after a virgin upload default → open latest result once.
+  useEffect(() => {
+    if (!awaitingHistoryDefaultRef.current) return;
+    if (sessionEntries.length === 0) return;
+    awaitingHistoryDefaultRef.current = false;
+    go("result", { id: sessionEntries[0].id });
+  }, [go, sessionEntries]);
+
+  // Job finished → newest result page.
+  useEffect(() => {
+    const prev = historyLenRef.current;
+    historyLenRef.current = sessionEntries.length;
+    if (!processingName) return;
+    if (sessionEntries.length <= prev) return;
+
+    const newest = sessionEntries[0];
+    go("result", {
+      id: newest.id,
+      processingName: null,
+      clearSelection: true,
+    });
+  }, [go, processingName, sessionEntries]);
+
+  // Backend error while processing.
+  useEffect(() => {
+    if (!processingName) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void listen<TranscriptionResult>("transcription-result", (event) => {
+      if (!event.payload.error) {
+        void loadHistory();
+        return;
+      }
+      go("upload", { processingName: null });
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [go, loadHistory, processingName]);
+
+  // Keep storage in sync when URL-driven id changes via history clicks.
+  useEffect(() => {
+    if (!bootedRef.current) return;
+    writeStored({
+      view,
+      activeId: view === "result" ? (activeEntry?.id ?? activeId) : null,
+      processingName,
+    });
+  }, [activeEntry?.id, activeId, processingName, view]);
+
+  const enterUpload = () => {
+    awaitingHistoryDefaultRef.current = false;
+    go("upload", { processingName: null, clearSelection: true });
+  };
+
+  const selectEntry = (id: string) => {
+    awaitingHistoryDefaultRef.current = false;
+    go("result", { id, processingName: null });
+  };
+
+  const acceptPath = (path: string) => {
+    awaitingHistoryDefaultRef.current = false;
+    setSelectedPath(path);
+    go("upload", { processingName: null });
+  };
+
   const pickFile = async () => {
+    if (processing) return;
     const selected = await open({
       multiple: false,
       title: "选择音频或视频文件",
@@ -68,216 +321,396 @@ export function TranscribePage() {
       })),
     });
     if (typeof selected !== "string") return;
-    setSelectedPath(selected);
-    setActiveId(null);
+    acceptPath(selected);
   };
 
-  const selectedIsVideo = useMemo(() => {
-    if (!selectedPath) return false;
-    const ext = selectedPath.split(".").pop()?.toLowerCase() ?? "";
-    return ["mp4", "m4v", "mov", "mkv", "webm", "avi", "mpeg", "mpg", "3gp", "3g2"].includes(
-      ext,
-    );
-  }, [selectedPath]);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === "enter" || event.payload.type === "over") {
+          if (screen === "upload") setDragOver(true);
+          return;
+        }
+        if (event.payload.type === "leave") {
+          setDragOver(false);
+          return;
+        }
+        if (event.payload.type === "drop") {
+          setDragOver(false);
+          if (screen !== "upload") return;
+          const path = event.payload.paths.find(isMediaPath);
+          if (!path) {
+            toast.warning("请拖入音频或视频文件");
+            return;
+          }
+          acceptPath(path);
+        }
+      })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        /* web / HMR */
+      });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+    // acceptPath closes over go; screen is the gate.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
 
   const runTranscribe = async () => {
-    if (!selectedPath || !canUpload) return;
-    setBusy(true);
+    if (!selectedPath || !canStart) return;
+
+    const path = selectedPath;
+    const name = fileName(path);
+
+    // Switch away from upload immediately — before the backend round-trip.
+    awaitingHistoryDefaultRef.current = false;
+    historyLenRef.current = sessionEntries.length;
+    go("upload", { processingName: name, clearSelection: true });
     markSession("transcribe");
+
     try {
       await invoke("save_app_config", { config });
-      await invoke("transcribe_file", { path: selectedPath });
+      await invoke("transcribe_file", { path });
       window.setTimeout(() => void loadHistory(), 800);
     } catch (error) {
+      setSelectedPath(path);
+      go("upload", { processingName: null });
       toast.danger(`转写失败: ${error}`);
-    } finally {
-      setBusy(false);
     }
   };
 
   const languageLabel =
     config.language === "auto" ? "自动检测" : config.language;
+  const selectedIsVideo = selectedPath ? isVideoPath(selectedPath) : false;
 
   return (
     <PageShell className="max-w-5xl">
       <PageHeader
         title="转写"
-        subtitle="上传音频或视频，识别后跟随回放。"
+        subtitle={
+          screen === "upload"
+            ? "选择一段音频或视频。"
+            : screen === "processing"
+              ? "正在识别，请稍候。"
+              : "播放时跟随当前一句。"
+        }
+        action={
+          screen === "result" ? (
+            <Button variant="primary" onPress={enterUpload}>
+              <Plus size={16} aria-hidden />
+              新转写
+            </Button>
+          ) : screen === "upload" && sessionEntries.length > 0 ? (
+            <Button
+              variant="secondary"
+              onPress={() =>
+                go("result", {
+                  id: activeEntry?.id ?? sessionEntries[0].id,
+                  processingName: null,
+                })
+              }
+            >
+              查看结果
+            </Button>
+          ) : null
+        }
       />
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
-        <div className="flex flex-col gap-5">
-          <SectionCard className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold text-foreground">
-                  {processing ? "转写中…" : "选择媒体"}
-                </div>
-                <div className="text-xs text-muted">
-                  {providerLabel(config.asr_provider)} · {languageLabel}
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Button
-                  variant="secondary"
-                  isDisabled={processing}
-                  onPress={() => void pickFile()}
-                >
-                  <Upload size={16} aria-hidden />
-                  选择文件
-                </Button>
-                <Button
-                  variant="primary"
-                  isDisabled={!selectedPath || !canUpload}
-                  isPending={processing}
-                  onPress={() => void runTranscribe()}
-                >
-                  {selectedIsVideo ? (
-                    <FileVideo size={16} aria-hidden />
-                  ) : (
-                    <FileAudio size={16} aria-hidden />
-                  )}
-                  开始转写
-                </Button>
-              </div>
-            </div>
+      <div key={screen} className="page-enter">
+        {screen === "upload" ? (
+          <UploadPhase
+            selectedPath={selectedPath}
+            selectedIsVideo={selectedIsVideo}
+            dragOver={dragOver}
+            modelBlocked={modelBlocked}
+            canStart={canStart}
+            provider={providerLabel(config.asr_provider)}
+            languageLabel={languageLabel}
+            onPick={() => void pickFile()}
+            onStart={() => void runTranscribe()}
+          />
+        ) : null}
 
-            {config.asr_provider === "qwen" && !modelLoaded ? (
-              <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-                Qwen 模型加载中或未加载。若已配置模型目录，启动时会自动加载。
-              </div>
-            ) : null}
+        {screen === "processing" ? (
+          <ProcessingPhase
+            fileName={processingName}
+            provider={providerLabel(config.asr_provider)}
+            languageLabel={languageLabel}
+          />
+        ) : null}
 
-            <div className="flex min-h-[88px] flex-col items-center justify-center gap-1.5 rounded-2xl border border-dashed border-border bg-surface-secondary/40 px-4 py-5 text-center">
-              {selectedPath ? (
-                <>
-                  {selectedIsVideo ? (
-                    <FileVideo className="block text-foreground" size={22} aria-hidden />
-                  ) : (
-                    <FileAudio className="block text-foreground" size={22} aria-hidden />
-                  )}
-                  <div className="max-w-full truncate text-sm font-medium text-foreground">
-                    {selectedPath.split("/").pop()}
-                  </div>
-                  {selectedIsVideo ? (
-                    <p className="text-[11px] text-muted">将提取音轨进行转写</p>
-                  ) : null}
-                </>
-              ) : (
-                <>
-                  <Upload className="block text-muted opacity-60" size={22} aria-hidden />
-                  <p className="text-xs text-muted">{TRANSCRIBE_FORMAT_HINT}</p>
-                </>
-              )}
-            </div>
-          </SectionCard>
-
-          <SectionCard
-            title="转写结果"
-            description="播放时跟随当前一句；长文可切换专注 / 全文。"
-          >
-            {processing && !activeEntry ? (
-              <div className="grid min-h-[160px] place-items-center text-sm text-muted">
-                正在识别…
-              </div>
-            ) : activeEntry ? (
-              <div className="flex flex-col gap-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-                    <span>{new Date(activeEntry.created_at).toLocaleString()}</span>
-                    <span>{activeEntry.duration_seconds.toFixed(1)}s</span>
-                    <Chip
-                      size="sm"
-                      variant="soft"
-                      color={activeEntry.refined ? "accent" : "default"}
-                    >
-                      <Chip.Label className="inline-flex items-center gap-1">
-                        {activeEntry.refined ? (
-                          <Sparkles size={11} />
-                        ) : (
-                          <CheckCircle2 size={11} />
-                        )}
-                        {activeEntry.language || languageLabel}
-                        {activeEntry.refined ? " · refined" : ""}
-                      </Chip.Label>
-                    </Chip>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onPress={() => {
-                      void navigator.clipboard.writeText(activeEntry.text);
-                      toast.success("已复制");
-                    }}
-                  >
-                    <Clipboard size={14} aria-hidden />
-                    复制
-                  </Button>
-                </div>
-                <TranscriptViewer
-                  text={activeEntry.text}
-                  mediaSrc={
-                    activeEntry.audio_path
-                      ? convertFileSrc(activeEntry.audio_path)
-                      : null
-                  }
-                  mediaKind={
-                    isVideoMediaKind(
-                      activeEntry.media_kind,
-                      activeEntry.audio_path,
-                    )
-                      ? "video"
-                      : "audio"
-                  }
-                  durationSeconds={activeEntry.duration_seconds}
-                  segments={activeEntry.segments}
-                  alignment={activeEntry.alignment}
-                  emptyLabel="（空结果）"
-                />
-                {activeEntry.raw_text &&
-                activeEntry.raw_text !== activeEntry.text ? (
-                  <details className="text-xs text-muted">
-                    <summary className="cursor-pointer select-none">
-                      查看原始识别（纠错前）
-                    </summary>
-                    <p className="mt-2 whitespace-pre-wrap leading-relaxed">
-                      {activeEntry.raw_text}
-                    </p>
-                  </details>
-                ) : null}
-              </div>
-            ) : (
-              <div className="grid min-h-[160px] place-items-center text-sm text-muted">
-                选择音频或视频并开始转写后，结果会显示在这里。
-              </div>
-            )}
-          </SectionCard>
-        </div>
-
-        <SectionCard
-          title="转写记录"
-          description="点击条目可回放并高亮。"
-          className="h-fit max-h-[calc(100vh-10rem)] overflow-y-auto"
-        >
-          <div className="flex flex-col gap-2">
-            {sessionEntries.length === 0 ? (
-              <div className="grid min-h-[100px] place-items-center text-sm text-muted">
-                还没有转写记录
-              </div>
-            ) : (
-              sessionEntries.map((entry) => (
-                <HistoryRow
-                  key={entry.id}
-                  entry={entry}
-                  active={activeEntry?.id === entry.id}
-                  onSelect={() => setActiveId(entry.id)}
-                />
-              ))
-            )}
-          </div>
-        </SectionCard>
+        {screen === "result" ? (
+          <ResultPhase
+            activeEntry={activeEntry}
+            sessionEntries={sessionEntries}
+            languageLabel={languageLabel}
+            onSelect={selectEntry}
+            onNew={enterUpload}
+          />
+        ) : null}
       </div>
     </PageShell>
+  );
+}
+
+function UploadPhase({
+  selectedPath,
+  selectedIsVideo,
+  dragOver,
+  modelBlocked,
+  canStart,
+  provider,
+  languageLabel,
+  onPick,
+  onStart,
+}: {
+  selectedPath: string | null;
+  selectedIsVideo: boolean;
+  dragOver: boolean;
+  modelBlocked: boolean;
+  canStart: boolean;
+  provider: string;
+  languageLabel: string;
+  onPick: () => void;
+  onStart: () => void;
+}) {
+  return (
+    <SectionCard className="mx-auto flex w-full max-w-2xl flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-foreground">选择媒体</div>
+          <div className="text-xs text-muted">
+            {provider} · {languageLabel}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button variant="secondary" onPress={onPick}>
+            <Upload size={16} aria-hidden />
+            选择文件
+          </Button>
+          <Button variant="primary" isDisabled={!canStart} onPress={onStart}>
+            {selectedIsVideo ? (
+              <FileVideo size={16} aria-hidden />
+            ) : (
+              <FileAudio size={16} aria-hidden />
+            )}
+            开始转写
+          </Button>
+        </div>
+      </div>
+
+      {modelBlocked ? (
+        <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
+          Qwen 模型加载中或未加载。若已配置模型目录，启动时会自动加载。
+        </div>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={onPick}
+        className={cn(
+          "flex min-h-[200px] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-8 text-center transition",
+          dragOver
+            ? "border-accent/50 bg-accent/10"
+            : "border-border bg-surface-secondary/40 hover:border-foreground/25 hover:bg-surface-secondary/60",
+        )}
+      >
+        {selectedPath ? (
+          <>
+            {selectedIsVideo ? (
+              <FileVideo
+                className="block text-foreground"
+                size={28}
+                aria-hidden
+              />
+            ) : (
+              <FileAudio
+                className="block text-foreground"
+                size={28}
+                aria-hidden
+              />
+            )}
+            <div className="max-w-full truncate text-sm font-medium text-foreground">
+              {fileName(selectedPath)}
+            </div>
+            <p className="text-[12px] text-muted">
+              {selectedIsVideo
+                ? "将提取音轨 · 点击可更换文件"
+                : "点击可更换文件"}
+            </p>
+          </>
+        ) : (
+          <>
+            <Upload
+              className="block text-muted opacity-70"
+              size={28}
+              aria-hidden
+            />
+            <div className="text-sm font-medium text-foreground">
+              {dragOver ? "松开以添加文件" : "拖拽到此处，或点击选择"}
+            </div>
+            <p className="max-w-md text-[12px] leading-relaxed text-muted">
+              {TRANSCRIBE_FORMAT_HINT}
+            </p>
+          </>
+        )}
+      </button>
+    </SectionCard>
+  );
+}
+
+function ProcessingPhase({
+  fileName: name,
+  provider,
+  languageLabel,
+}: {
+  fileName: string | null;
+  provider: string;
+  languageLabel: string;
+}) {
+  return (
+    <SectionCard className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4 py-16 text-center">
+      <div className="processing-pulse grid h-14 w-14 place-items-center rounded-2xl bg-accent/10 text-accent ring-1 ring-accent/20">
+        <FileAudio size={24} aria-hidden />
+      </div>
+      <div>
+        <div className="text-sm font-semibold text-foreground">正在识别…</div>
+        {name ? (
+          <p className="mt-1.5 max-w-sm truncate text-[13px] text-muted">
+            {name}
+          </p>
+        ) : null}
+        <p className="mt-1 text-[12px] text-muted">
+          {provider} · {languageLabel}
+        </p>
+      </div>
+    </SectionCard>
+  );
+}
+
+function ResultPhase({
+  activeEntry,
+  sessionEntries,
+  languageLabel,
+  onSelect,
+  onNew,
+}: {
+  activeEntry: HistoryEntry | null;
+  sessionEntries: HistoryEntry[];
+  languageLabel: string;
+  onSelect: (id: string) => void;
+  onNew: () => void;
+}) {
+  return (
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
+      <SectionCard>
+        {activeEntry ? (
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                <span>{new Date(activeEntry.created_at).toLocaleString()}</span>
+                <span>{activeEntry.duration_seconds.toFixed(1)}s</span>
+                <Chip
+                  size="sm"
+                  variant="soft"
+                  color={activeEntry.refined ? "accent" : "default"}
+                >
+                  <Chip.Label className="inline-flex items-center gap-1">
+                    {activeEntry.refined ? (
+                      <Sparkles size={11} />
+                    ) : (
+                      <CheckCircle2 size={11} />
+                    )}
+                    {activeEntry.language || languageLabel}
+                    {activeEntry.refined ? " · refined" : ""}
+                  </Chip.Label>
+                </Chip>
+              </div>
+              <Button
+                size="sm"
+                variant="secondary"
+                onPress={() => {
+                  void navigator.clipboard.writeText(activeEntry.text);
+                  toast.success("已复制");
+                }}
+              >
+                <Clipboard size={14} aria-hidden />
+                复制
+              </Button>
+            </div>
+            <TranscriptViewer
+              text={activeEntry.text}
+              mediaSrc={
+                activeEntry.audio_path
+                  ? convertFileSrc(activeEntry.audio_path)
+                  : null
+              }
+              mediaKind={
+                isVideoMediaKind(
+                  activeEntry.media_kind,
+                  activeEntry.audio_path,
+                )
+                  ? "video"
+                  : "audio"
+              }
+              durationSeconds={activeEntry.duration_seconds}
+              segments={activeEntry.segments}
+              alignment={activeEntry.alignment}
+              emptyLabel="（空结果）"
+            />
+            {activeEntry.raw_text &&
+            activeEntry.raw_text !== activeEntry.text ? (
+              <details className="text-xs text-muted">
+                <summary className="cursor-pointer select-none">
+                  查看原始识别（纠错前）
+                </summary>
+                <p className="mt-2 whitespace-pre-wrap leading-relaxed">
+                  {activeEntry.raw_text}
+                </p>
+              </details>
+            ) : null}
+          </div>
+        ) : (
+          <div className="grid min-h-[200px] place-items-center gap-3 text-center">
+            <p className="text-sm text-muted">还没有转写结果</p>
+            <Button variant="primary" onPress={onNew}>
+              <Plus size={16} aria-hidden />
+              开始转写
+            </Button>
+          </div>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="转写记录"
+        description="点击条目可回放。"
+        className="h-fit max-h-[calc(100vh-10rem)] overflow-y-auto"
+      >
+        <div className="flex flex-col gap-2">
+          {sessionEntries.length === 0 ? (
+            <div className="grid min-h-[100px] place-items-center text-sm text-muted">
+              还没有转写记录
+            </div>
+          ) : (
+            sessionEntries.map((entry) => (
+              <HistoryRow
+                key={entry.id}
+                entry={entry}
+                active={activeEntry?.id === entry.id}
+                onSelect={() => onSelect(entry.id)}
+              />
+            ))
+          )}
+        </div>
+      </SectionCard>
+    </div>
   );
 }
 

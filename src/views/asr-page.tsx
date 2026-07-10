@@ -206,6 +206,41 @@ export function AsrPage() {
             <Input className="min-w-0 flex items-center font-mono text-[13px]" />
           </TextField>
 
+          <div className="grid grid-cols-2 gap-3">
+            <TextField
+              fullWidth
+              variant="secondary"
+              type="number"
+              value={String(config.chunk_size_sec ?? 1)}
+              onChange={(value) => {
+                const n = Number(value);
+                if (!Number.isFinite(n)) return;
+                updateConfig("chunk_size_sec", Math.max(0.2, Math.min(5, n)));
+              }}
+            >
+              <Label>chunk_size_sec</Label>
+              <Input className="font-mono text-[13px]" />
+            </TextField>
+            <TextField
+              fullWidth
+              variant="secondary"
+              type="number"
+              value={String(config.unfixed_token_num ?? 2)}
+              onChange={(value) => {
+                const n = Number.parseInt(value, 10);
+                if (!Number.isFinite(n)) return;
+                updateConfig("unfixed_token_num", Math.max(1, Math.min(32, n)));
+              }}
+            >
+              <Label>unfixed_token_num</Label>
+              <Input className="font-mono text-[13px]" />
+            </TextField>
+          </div>
+          <p className="text-[12px] leading-relaxed text-muted">
+            流式分块秒数与未固定 token 数。更大切块更稳、延迟更高；unfixed
+            越大越能回滚修正尾部。
+          </p>
+
           <div className="grid grid-cols-2 gap-2">
             <Button
               fullWidth
@@ -214,7 +249,7 @@ export function AsrPage() {
               onPress={() => void persist()}
             >
               <Save size={16} />
-              保存路径
+              保存设置
             </Button>
             <Button
               fullWidth

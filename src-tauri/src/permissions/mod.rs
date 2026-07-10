@@ -14,6 +14,7 @@ pub struct PermissionStatus {
     pub input_monitoring: bool,
     pub microphone: bool,
     pub speech_recognition: bool,
+    pub screen_recording: bool,
     /// Absolute path of this process — look for this name in Privacy lists during `tauri dev`.
     pub executable_path: String,
     pub platform: String,
@@ -57,14 +58,17 @@ mod ffi {
     unsafe extern "C" {
         pub fn CGPreflightListenEventAccess() -> bool;
         pub fn CGRequestListenEventAccess() -> bool;
+        pub fn CGPreflightScreenCaptureAccess() -> bool;
+        pub fn CGRequestScreenCaptureAccess() -> bool;
     }
 
-    // Linked from `macos_tcc.m` (AVFoundation / Speech, in-process).
+    // Linked from `macos_tcc.m` / `macos_system_audio.m`.
     unsafe extern "C" {
         pub fn asr_tcc_mic_authorized() -> bool;
         pub fn asr_tcc_speech_authorized() -> bool;
-        pub fn asr_tcc_request_mic_async();
-        pub fn asr_tcc_request_speech_async();
+        pub fn asr_tcc_request_mic_async() -> bool;
+        pub fn asr_tcc_request_speech_async() -> bool;
+        pub fn asr_tcc_has_screen_capture_usage_description() -> bool;
     }
 }
 
@@ -108,12 +112,23 @@ fn speech_granted() -> bool {
     false
 }
 
+#[cfg(target_os = "macos")]
+fn screen_recording_granted() -> bool {
+    unsafe { ffi::CGPreflightScreenCaptureAccess() }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn screen_recording_granted() -> bool {
+    false
+}
+
 pub fn get_permission_status() -> PermissionStatus {
     PermissionStatus {
         accessibility: accessibility_granted(),
         input_monitoring: input_monitoring_granted(),
         microphone: microphone_granted(),
         speech_recognition: speech_granted(),
+        screen_recording: screen_recording_granted(),
         executable_path: executable_path(),
         platform: platform_label(),
         apple_speech_available: cfg!(target_os = "macos"),
@@ -161,19 +176,48 @@ pub fn request_permission(kind: &str) -> Result<String, String> {
             }
             "microphone" => {
                 // Non-blocking: never join/wait on the dialog (avoids main-thread deadlock).
-                unsafe { ffi::asr_tcc_request_mic_async() };
+                let started = unsafe { ffi::asr_tcc_request_mic_async() };
+                if !started {
+                    return Err(
+                        "当前进程没有 NSMicrophoneUsageDescription（tauri dev 裸二进制常见）。请用打包后的 .app 请求麦克风权限。"
+                            .into(),
+                    );
+                }
                 Ok(format!(
                     "已弹出麦克风授权。允许后列表中找：\n{}",
                     executable_path()
                 ))
             }
             "speech_recognition" => {
-                // Must be main-queue + non-blocking. Blocking wait crashed / deadlocked.
-                unsafe { ffi::asr_tcc_request_speech_async() };
+                // Must be main-queue + non-blocking. Missing usage description → TCC abort.
+                let started = unsafe { ffi::asr_tcc_request_speech_async() };
+                if !started {
+                    return Err(
+                        "当前进程没有 NSSpeechRecognitionUsageDescription（tauri dev 裸二进制常见）。请用打包后的 .app 请求语音识别权限。"
+                            .into(),
+                    );
+                }
                 Ok(format!(
                     "已弹出语音识别授权。开发模式列表名多为 asr-workshop：\n{}",
                     executable_path()
                 ))
+            }
+            "screen_recording" => {
+                if !unsafe { ffi::asr_tcc_has_screen_capture_usage_description() } {
+                    return Err(
+                        "当前进程没有 NSScreenCaptureUsageDescription（tauri dev 裸二进制会闪退）。请用打包后的 .app 请求屏幕录制，或录音源先选「只录外部」。"
+                            .into(),
+                    );
+                }
+                let granted = unsafe { ffi::CGRequestScreenCaptureAccess() };
+                Ok(if granted {
+                    "屏幕录制已授权（可用于系统音频采集）".into()
+                } else {
+                    format!(
+                        "已请求屏幕录制。请在系统设置中打开开关后重启应用：\n{}",
+                        executable_path()
+                    )
+                })
             }
             _ => Err(format!("unknown permission kind: {kind}")),
         }
@@ -204,6 +248,10 @@ pub fn open_permission_settings(kind: &str) -> Result<(), String> {
             "speech_recognition" => (
                 "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_SpeechRecognition",
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition",
+            ),
+            "screen_recording" => (
+                "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture",
+                "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
             ),
             _ => return Err(format!("unknown permission kind: {kind}")),
         };

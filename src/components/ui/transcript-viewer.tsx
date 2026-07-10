@@ -307,8 +307,8 @@ export function TranscriptViewer({
         {hasTimed ? (
           <div
             className={cn(
-              "mx-auto flex flex-col",
-              mode === "focus" ? "max-w-[34rem] gap-5 py-6" : "max-w-[40rem] gap-4 py-2",
+              "mx-auto flex flex-col max-w-[40rem] ",
+              mode === "focus" ? "gap-5 py-6" : "gap-4 py-2",
             )}
           >
             {paragraphs.map((para, pi) => {

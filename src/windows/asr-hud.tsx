@@ -1,19 +1,16 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { AnimatePresence, motion } from "framer-motion";
 import type { AudioLevelPayload, FloatingPayload } from "@/types";
-import { CAPSULE_TAIL_CHARS, lastChars } from "@/lib/constants";
 import { useSmoothedRms } from "@/hooks/useAudioBars";
 import { AudioBars } from "@/components/ui/audio-bars";
 import { cn } from "@/lib/cn";
 
+/** Fixed HUD footprint — never resize with transcript length. */
+const CAPSULE_W = 320;
 const CAPSULE_H = 56;
-const TEXT_MIN = 160;
-const TEXT_MAX = 560;
-/** Horizontal chrome: padding + thin spectrum + gap + colon + trailing pad */
-const CHROME_W = 16 + 40 + 10 + 8 + 18;
 
 function applyHudTheme(theme: "light" | "dark") {
   const root = document.documentElement;
@@ -104,6 +101,8 @@ export function AsrHud() {
         visible: true,
         state: prev.state === "idle" ? "recording" : prev.state,
         text: event.payload.text,
+        switching:
+          event.payload.text.trim() === "" ? prev.switching : false,
       })),
     ).then((u) => {
       unlistenPartial = u;
@@ -130,7 +129,6 @@ export function AsrHud() {
     <div
       className="hud-root"
       onPointerDown={(event) => {
-        // Left-button drag moves the native frosted capsule.
         if (event.button !== 0) return;
         void getCurrentWindow().startDragging().catch(() => {});
       }}
@@ -144,47 +142,65 @@ export function AsrHud() {
 
 function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
   const refining = payload.state === "refining";
+  const processing = payload.state === "processing";
   const recording = payload.state === "recording";
+  const switching = Boolean(payload.switching);
+  const loading = refining || processing || switching;
+  const translating = payload.intention === "translate";
   const lastTextRef = useRef("");
+  const prevShownRef = useRef("");
+  const textViewportRef = useRef<HTMLDivElement>(null);
+  const sizedRef = useRef(false);
+  const [justRefined, setJustRefined] = useState(false);
 
   if (payload.text.trim()) {
     lastTextRef.current = payload.text;
+  } else if (recording || switching) {
+    lastTextRef.current = "";
   }
 
-  // Keep last partial/final text while processing — never flash "Transcribing…".
   const sourceText =
     payload.text.trim() ||
-    (payload.state === "processing" || refining ? lastTextRef.current : "");
-  const displayText = sourceText
-    ? lastChars(sourceText, CAPSULE_TAIL_CHARS)
-    : recording
-      ? "倾听中…"
-      : "…";
+    (loading && !switching ? lastTextRef.current : "");
+  const displayText = switching ? "" : sourceText;
 
-  const smoothed = useSmoothedRms(payload.rms, recording);
-  const measureRef = useRef<HTMLSpanElement>(null);
-  const [textW, setTextW] = useState(TEXT_MIN);
+  useEffect(() => {
+    if (!displayText || displayText === prevShownRef.current) return;
+    const prev = prevShownRef.current;
+    prevShownRef.current = displayText;
+    if (!prev || refining || recording || switching) return;
+    if (!processing) return;
+    setJustRefined(true);
+    const t = window.setTimeout(() => setJustRefined(false), 900);
+    return () => window.clearTimeout(t);
+  }, [displayText, processing, refining, recording, switching]);
+
+  const [overflowing, setOverflowing] = useState(false);
+  const smoothed = useSmoothedRms(payload.rms, recording && !switching);
+
+  useEffect(() => {
+    if (sizedRef.current) return;
+    sizedRef.current = true;
+    const win = getCurrentWindow();
+    void win.setSize(new LogicalSize(CAPSULE_W, CAPSULE_H)).catch(() => {});
+    void invoke("recenter_floating_hud", { width: CAPSULE_W }).catch(() => {});
+  }, []);
 
   useLayoutEffect(() => {
-    const el = measureRef.current;
+    const el = textViewportRef.current;
     if (!el) return;
-    const measured = Math.ceil(el.getBoundingClientRect().width);
-    setTextW(Math.max(TEXT_MIN, Math.min(TEXT_MAX, measured)));
-  }, [displayText]);
-
-  const capsuleW = useMemo(() => CHROME_W + textW, [textW]);
-
-  // Keep the native window sized to the capsule so HudWindow vibrancy is pill-shaped.
-  // Recenter only on X (preserve user-dragged Y).
-  useEffect(() => {
-    const win = getCurrentWindow();
-    void win.setSize(new LogicalSize(capsuleW, CAPSULE_H)).catch(() => {});
-    void invoke("recenter_floating_hud", { width: capsuleW }).catch(() => {});
-  }, [capsuleW]);
+    el.scrollLeft = el.scrollWidth;
+    setOverflowing(el.scrollWidth > el.clientWidth + 1);
+  }, [displayText, loading, switching]);
 
   return (
     <motion.div
-      className={cn("hud-capsule", refining && "hud-capsule-refining")}
+      className={cn(
+        "hud-capsule",
+        loading && "hud-capsule-refining",
+        switching && "hud-capsule-switching",
+        justRefined && "hud-capsule-refined",
+      )}
       initial={{ opacity: 0, scale: 0.86, y: 10 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       exit={{
@@ -203,24 +219,60 @@ function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
       style={{ width: "100%", height: "100%" }}
     >
       <div className="hud-inner">
-        <AudioBars
-          rms={smoothed}
-          bands={payload.bands}
-          active={recording}
-        />
+        {loading ? (
+          <span
+            className="hud-spinner"
+            aria-label={
+              switching ? "切换目标语言" : translating ? "翻译中" : "处理中"
+            }
+          />
+        ) : (
+          <AudioBars
+            rms={smoothed}
+            bands={payload.bands}
+            active={recording}
+          />
+        )}
         <span className="hud-colon" aria-hidden>
           :
         </span>
-        <motion.span
-          className={cn("hud-text", refining && "hud-text-refining")}
-          animate={{ width: textW }}
-          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+        <div
+          ref={textViewportRef}
+          className={cn(
+            "hud-text-viewport",
+            overflowing && "hud-text-overflow",
+            loading && "hud-text-refining",
+            switching && "hud-text-switching",
+            justRefined && "hud-text-refined",
+          )}
         >
-          {displayText}
-        </motion.span>
-        <span ref={measureRef} className="hud-text-measure" aria-hidden>
-          {displayText}
-        </span>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              key={switching ? "switching" : "content"}
+              className="hud-text-scroll"
+              initial={
+                switching
+                  ? { opacity: 0, filter: "blur(4px)" }
+                  : { opacity: 0.7 }
+              }
+              animate={{ opacity: 1, filter: "blur(0px)" }}
+              exit={{ opacity: 0, filter: "blur(3px)" }}
+              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {switching
+                ? "切换中"
+                : displayText ||
+                  (loading ? (translating ? "翻译中" : "处理中") : "")}
+              {(loading || switching) && (displayText || switching) ? (
+                <span className="hud-loading-dots" aria-hidden>
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              ) : null}
+            </motion.span>
+          </AnimatePresence>
+        </div>
       </div>
     </motion.div>
   );

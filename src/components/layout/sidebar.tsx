@@ -4,6 +4,7 @@ import {
   AudioLines,
   BookOpen,
   Brain,
+  Languages,
   Mic,
   Moon,
   PanelsTopLeft,
@@ -15,10 +16,12 @@ import type { Page } from "@/types";
 import { NAV } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/app-context";
+import { Button } from "@heroui/react";
 
 const ICONS: Record<Page, typeof Mic> = {
   overview: PanelsTopLeft,
   transcribe: AudioLines,
+  translate: Languages,
   asr: Brain,
   llm: Wand2,
   vocabulary: BookOpen,
@@ -29,6 +32,7 @@ const ICONS: Record<Page, typeof Mic> = {
 const PATHS: Record<Page, string> = {
   overview: "/",
   transcribe: "/transcribe",
+  translate: "/translate",
   asr: "/asr",
   llm: "/llm",
   vocabulary: "/vocabulary",
@@ -37,7 +41,8 @@ const PATHS: Record<Page, string> = {
 };
 
 export function Sidebar() {
-  const { theme, setTheme } = useApp();
+  const { theme, setTheme, config } = useApp();
+  const hint = `${config.hotkey_transcribe?.label ?? "Fn"} · ${config.hotkey_cancel?.label ?? "Esc"}`;
 
   return (
     <aside className="app-sidebar">
@@ -49,7 +54,7 @@ export function Sidebar() {
           <div className="truncate font-display text-[13px] font-semibold tracking-tight text-foreground">
             ASR Workshop
           </div>
-          <div className="truncate text-[11px] text-muted">Fn · Esc</div>
+          <div className="truncate text-[11px] text-muted">{hint}</div>
         </div>
       </div>
 
@@ -73,20 +78,7 @@ export function Sidebar() {
       </nav>
 
       <div className="mt-auto grid grid-cols-2 gap-1.5">
-        <button
-          type="button"
-          className="nav-item justify-center gap-2 !px-2"
-          onClick={() =>
-            setTheme((prev) => (prev === "dark" ? "light" : "dark"))
-          }
-          title={theme === "dark" ? "切换浅色" : "切换深色"}
-        >
-          {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-          <span className="text-[13px] font-medium">
-            {theme === "dark" ? "浅色" : "深色"}
-          </span>
-        </button>
-        <NavLink
+      <NavLink
           to="/settings"
           className={({ isActive }) =>
             cn(
@@ -98,6 +90,19 @@ export function Sidebar() {
           <Settings size={15} />
           <span className="text-[13px] font-medium">设置</span>
         </NavLink>
+        <Button
+          type="button"
+          className="nav-item justify-center gap-2 rounded-lg"
+          onClick={() =>
+            setTheme((prev) => (prev === "dark" ? "light" : "dark"))
+          }
+        >
+          {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+          <span className="text-[13px] font-medium">
+            {theme === "dark" ? "浅色" : "深色"}
+          </span>
+        </Button>
+        
       </div>
     </aside>
   );

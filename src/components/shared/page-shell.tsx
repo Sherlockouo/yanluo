@@ -58,7 +58,7 @@ export function SectionCard({
   description?: string;
 }) {
   return (
-    <div className={cn("panel", className)}>
+    <div className={cn("panel flex flex-col justify-center", className)}>
       {(title || description) && (
         <div className="mb-5">
           {title ? (

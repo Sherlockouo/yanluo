@@ -4,40 +4,51 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AppProvider } from "@/app-context";
 import { MainLayout } from "@/layouts/main-layout";
 import { AsrHud } from "@/windows/asr-hud";
+import { AsrHudLangChip } from "@/windows/asr-hud-lang";
 import { OverviewPage } from "@/views/overview-page";
 import { TranscribePage } from "@/views/transcribe-page";
 import { AsrPage } from "@/views/asr-page";
 import { LlmPage } from "@/views/llm-page";
+import { TranslatePage } from "@/views/translate-page";
 import { VocabularyPage } from "@/views/vocabulary-page";
 import { HistoryPage } from "@/views/history-page";
 import { SettingsPage } from "@/views/settings-page";
 
-function resolveIsFloatingWindow() {
-  if (typeof window === "undefined") return false;
-  const w = window as Window & { __ASR_FLOATING__?: boolean };
-  if (w.__ASR_FLOATING__) return true;
-  if (new URLSearchParams(window.location.search).get("window") === "floating") {
-    return true;
-  }
+function resolveFloatingKind(): "hud" | "lang" | null {
+  if (typeof window === "undefined") return null;
+  const w = window as Window & {
+    __ASR_FLOATING__?: boolean;
+    __ASR_FLOATING_LANG__?: boolean;
+  };
+  if (w.__ASR_FLOATING_LANG__) return "lang";
+  if (w.__ASR_FLOATING__) return "hud";
   try {
-    return getCurrentWindow().label === "floating";
+    const label = getCurrentWindow().label;
+    if (label === "floating-lang") return "lang";
+    if (label === "floating") return "hud";
   } catch {
-    return false;
+    /* ignore */
   }
+  if (new URLSearchParams(window.location.search).get("window") === "floating") {
+    return "hud";
+  }
+  return null;
 }
 
 /**
- * Two-window entry:
- * - main     → control panel (React Router)
- * - floating → ASR HUD capsule
+ * Multi-window entry:
+ * - main          → control panel (React Router)
+ * - floating      → ASR HUD capsule
+ * - floating-lang → translate target chip (native menu)
  *
  * IMPORTANT: HeroUI Toast.Provider children are toast *content renderers*,
  * not app wrappers. Keep Provider as a sibling of the routed app.
  */
 export function App() {
-  const isFloating = resolveIsFloatingWindow();
+  const floatingKind = resolveFloatingKind();
 
-  if (isFloating) return <AsrHud />;
+  if (floatingKind === "lang") return <AsrHudLangChip />;
+  if (floatingKind === "hud") return <AsrHud />;
 
   return (
     <HashRouter>
@@ -46,6 +57,7 @@ export function App() {
           <Route element={<MainLayout />}>
             <Route index element={<OverviewPage />} />
             <Route path="transcribe" element={<TranscribePage />} />
+            <Route path="translate" element={<TranslatePage />} />
             <Route path="asr" element={<AsrPage />} />
             <Route path="llm" element={<LlmPage />} />
             <Route path="vocabulary" element={<VocabularyPage />} />

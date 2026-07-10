@@ -18,6 +18,7 @@
     "core:window:allow-outer-position",
     "core:window:allow-inner-size",
     "core:window:allow-start-dragging",
+    "core:window:allow-set-visible-on-all-workspaces",
     "core:webview:default",
     "core:path:default",
     "shell:allow-open",

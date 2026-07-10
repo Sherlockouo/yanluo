@@ -1,13 +1,13 @@
 import { useBandHeights } from "@/hooks/useAudioBars";
 import { cn } from "@/lib/cn";
 
-/** Compact Music-like spectrum: thin bars, modest height. */
-export const SPECTRUM_BAR_COUNT = 12;
-const WAVE_W = 40;
+/** Compact spectrum: 6 bands across speech-range Hz. */
+export const SPECTRUM_BAR_COUNT = 6;
+const WAVE_W = 28;
 const WAVE_H = 22;
 
 type AudioBarsProps = {
-  /** Overall loudness 0–1 (fallback if bands empty). */
+  /** Overall loudness 0–1 (fall啊。嗯。back if bands empty). */
   rms: number;
   /** Log-spaced speech bands from Goertzel (preferred). */
   bands?: number[];
@@ -39,11 +39,11 @@ export function AudioBars({ rms, bands, active, className }: AudioBarsProps) {
       aria-hidden
     >
       {heights.map((h, i) => (
-        <span
+        <div
           key={i}
           className="audio-bar"
-          style={{ height: `${h.toFixed(1)}px` }}
-        />
+          style={{ height: `${(h * 1.4).toFixed(1)}px` }}
+        ></div>
       ))}
     </div>
   );

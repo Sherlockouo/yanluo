@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Button,
+  Kbd,
   Label,
   ListBox,
   Select,
+  toast,
 } from "@heroui/react";
 import {
   CheckCircle2,
@@ -13,6 +15,7 @@ import {
   ExternalLink,
   Keyboard,
   Mic,
+  Monitor,
   Moon,
   RefreshCw,
   Save,
@@ -20,6 +23,7 @@ import {
   Sun,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
 import {
   PageHeader,
@@ -28,7 +32,8 @@ import {
 } from "@/components/shared/page-shell";
 import { cn } from "@/lib/cn";
 import { useApp, type ThemeMode } from "@/app-context";
-import { LANGUAGES } from "@/lib/constants";
+import { hotkeySegments, LANGUAGES, TRANSLATE_LANGUAGES } from "@/lib/constants";
+import type { HotkeyBinding } from "@/types";
 import {
   APP_RELEASES_URL,
   APP_REPO,
@@ -37,13 +42,14 @@ import {
   type ChangelogEntry,
 } from "@/lib/changelog";
 
-type SettingsTab = "general" | "permissions" | "updates";
+type SettingsTab = "general" | "hotkeys" | "permissions" | "updates";
 
 type PermissionStatus = {
   accessibility: boolean;
   input_monitoring: boolean;
   microphone: boolean;
   speech_recognition: boolean;
+  screen_recording: boolean;
   executable_path?: string;
   platform?: string;
   apple_speech_available?: boolean;
@@ -53,7 +59,8 @@ type PermKind =
   | "accessibility"
   | "input_monitoring"
   | "microphone"
-  | "speech_recognition";
+  | "speech_recognition"
+  | "screen_recording";
 
 type AppInfo = {
   version: string;
@@ -75,6 +82,7 @@ type GhRelease = {
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "常规" },
+  { id: "hotkeys", label: "快捷键" },
   { id: "permissions", label: "权限" },
   { id: "updates", label: "更新" },
 ];
@@ -94,7 +102,7 @@ const PERMS: {
   {
     kind: "input_monitoring",
     title: "输入监视",
-    description: "监听 Fn 点按开关与 Esc 取消。",
+    description: "监听 Fn / Shift+Fn 与 Esc 取消。",
     icon: Keyboard,
   },
   {
@@ -108,6 +116,12 @@ const PERMS: {
     title: "语音识别",
     description: "使用 Apple Speech 时需要此权限。",
     icon: Ear,
+  },
+  {
+    kind: "screen_recording",
+    title: "屏幕录制",
+    description: "「只录系统 / 两者都录」时采集系统播放声音（不保存画面）。",
+    icon: Monitor,
   },
 ];
 
@@ -127,7 +141,7 @@ export function SettingsPage() {
 
   return (
     <PageShell>
-      <PageHeader title="设置" subtitle="常规、权限与版本更新。" />
+      <PageHeader title="设置" subtitle="常规、快捷键、权限与版本更新。" />
 
       <div className="settings-tabs max-w-2xl" role="tablist">
         {TABS.map((item) => (
@@ -148,6 +162,7 @@ export function SettingsPage() {
       </div>
 
       {tab === "general" ? <GeneralPanel /> : null}
+      {tab === "hotkeys" ? <HotkeysPanel /> : null}
       {tab === "permissions" ? <PermissionsPanel /> : null}
       {tab === "updates" ? <UpdatesPanel /> : null}
     </PageShell>
@@ -233,6 +248,261 @@ function GeneralPanel() {
         >
           <Save size={16} />
           保存语言
+        </Button>
+      </SectionCard>
+
+      <SectionCard
+        className="max-w-2xl flex flex-col gap-5"
+        title="录音源"
+        description="Fn / 快捷键录音采集哪里的声音。「只录系统 / 两者都录」走数字通路抓取播放内容，不是会议室那种回声消除；需要屏幕录制权限。"
+      >
+        <div className="grid gap-2">
+          {(
+            [
+              {
+                id: "external" as const,
+                title: "只录外部",
+                hint: "麦克风输入（默认，debug 最稳）",
+              },
+              {
+                id: "system" as const,
+                title: "只录系统",
+                hint: "扬声器正在播放的声音（ScreenCaptureKit，需屏幕录制）",
+              },
+              {
+                id: "both" as const,
+                title: "两者都录",
+                hint: "麦克风 + 系统播放混合；系统音失败时自动退回只录外部",
+              },
+            ] as const
+          ).map((item) => {
+            const active =
+              (config.audio_capture_mode ?? "external") === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={cn(
+                  "flex flex-col items-start rounded-xl border px-3.5 py-3 text-left transition-colors",
+                  active
+                    ? "border-foreground/20 bg-default text-foreground"
+                    : "border-border bg-transparent text-muted hover:bg-default/50",
+                )}
+                onClick={() => updateConfig("audio_capture_mode", item.id)}
+              >
+                <span className="text-sm font-medium text-foreground">
+                  {item.title}
+                </span>
+                <span className="mt-0.5 text-[12px] text-muted">{item.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+        <Button
+          fullWidth
+          variant="primary"
+          onPress={() => void saveConfig()}
+        >
+          <Save size={16} />
+          保存录音源
+        </Button>
+      </SectionCard>
+    </>
+  );
+}
+
+function HotkeysPanel() {
+  const { config, updateConfig, saveConfig } = useApp();
+  const [listening, setListening] = useState<
+    null | "transcribe" | "translate" | "cancel"
+  >(null);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    const unlisteners: Array<() => void> = [];
+    void Promise.all([
+      listen<{
+        slot: string;
+        binding: HotkeyBinding;
+      }>("hotkey-captured", (event) => {
+        const { slot, binding } = event.payload;
+        if (slot === "transcribe") updateConfig("hotkey_transcribe", binding);
+        if (slot === "translate") updateConfig("hotkey_translate", binding);
+        if (slot === "cancel") updateConfig("hotkey_cancel", binding);
+        setListening(null);
+        setPreview(null);
+        toast.success(`已设置：${binding.label}`);
+      }),
+      listen("hotkey-capture-cancelled", () => {
+        setListening(null);
+        setPreview(null);
+      }),
+      listen<{ label: string }>("hotkey-capture-preview", (event) => {
+        setPreview(event.payload.label);
+      }),
+    ]).then((items) => {
+      if (disposed) {
+        items.forEach((u) => u());
+        return;
+      }
+      unlisteners.push(...items);
+    });
+    return () => {
+      disposed = true;
+      unlisteners.forEach((u) => u());
+      void invoke("cancel_hotkey_capture").catch(() => {});
+    };
+  }, [updateConfig]);
+
+  const startCapture = async (slot: "transcribe" | "translate" | "cancel") => {
+    try {
+      setPreview(null);
+      await invoke("begin_hotkey_capture", { slot });
+      setListening(slot);
+    } catch (error) {
+      toast.danger(`无法开始录制快捷键: ${error}`);
+    }
+  };
+
+  const abortCapture = async () => {
+    try {
+      await invoke("cancel_hotkey_capture");
+    } catch {
+      /* ignore */
+    }
+    setListening(null);
+    setPreview(null);
+  };
+
+  const rows: {
+    slot: "transcribe" | "translate" | "cancel";
+    title: string;
+    description: string;
+    binding: HotkeyBinding;
+  }[] = [
+    {
+      slot: "transcribe",
+      title: "转录",
+      description: "识别后粘贴原文（可走 LLM 纠错）",
+      binding: config.hotkey_transcribe,
+    },
+    {
+      slot: "translate",
+      title: "翻译",
+      description: "识别后翻译为目标语言并粘贴（需配置 LLM）",
+      binding: config.hotkey_translate,
+    },
+    {
+      slot: "cancel",
+      title: "取消",
+      description: "丢弃当前录音，不粘贴",
+      binding: config.hotkey_cancel,
+    },
+  ];
+
+  return (
+    <>
+      <SectionCard
+        className="max-w-2xl flex flex-col gap-4"
+        title="全局快捷键"
+        description="支持多键组合（⇧+Fn、⌃+Space 等）。Fn 组合在松开 Fn 时启动（可先按 Fn 再按 ⇧）；普通键在按下时启动。Esc 取消录制。"
+      >
+        <div className="flex flex-col gap-3">
+          {rows.map((row) => {
+            const active = listening === row.slot;
+            return (
+              <div
+                key={row.slot}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-default/30 px-3.5 py-3"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground">
+                    {row.title}
+                  </div>
+                  <p className="mt-0.5 text-[12px] text-muted">
+                    {row.description}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {active ? (
+                    <>
+                      <span className="text-[12px] text-accent">
+                        {preview ? `松键确认：${preview}` : "按下组合键…"}
+                      </span>
+                      <Button size="sm" variant="secondary" onPress={() => void abortCapture()}>
+                        取消
+                      </Button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground transition hover:border-foreground/25 hover:bg-default"
+                      onClick={() => void startCapture(row.slot)}
+                      title="点击修改快捷键"
+                    >
+                      {hotkeySegments(row.binding.label).map((part, i) => (
+                        <span key={`${row.slot}-${part}-${i}`} className="inline-flex items-center gap-1">
+                          {i > 0 ? <span className="text-muted">+</span> : null}
+                          <Kbd>{part}</Kbd>
+                        </span>
+                      ))}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {listening ? (
+          <p className="text-[12px] text-muted">
+            正在录制「{rows.find((r) => r.slot === listening)?.title}」。可先按
+            ⇧/⌃/⌥/⌘，再按 Fn 或字母键；任意顺序按住 Fn 再加修饰键，松开 Fn 即可。
+          </p>
+        ) : null}
+      </SectionCard>
+
+      <SectionCard
+        className="max-w-2xl flex flex-col gap-5"
+        title="翻译目标语言"
+        description="翻译快捷键会将识别结果翻译到此语言。"
+      >
+        <Select
+          className="w-full"
+          selectedKey={config.translate_target_language}
+          onSelectionChange={(key) => {
+            if (key == null) return;
+            const next = {
+              ...config,
+              translate_target_language: String(key),
+            };
+            updateConfig("translate_target_language", String(key));
+            void saveConfig(next, { silent: true });
+          }}
+        >
+          <Label>目标语言</Label>
+          <Select.Trigger>
+            <Select.Value />
+            <Select.Indicator />
+          </Select.Trigger>
+          <Select.Popover>
+            <ListBox>
+              {TRANSLATE_LANGUAGES.map(([value, label]) => (
+                <ListBox.Item key={value} id={value} textValue={label}>
+                  {label}
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+              ))}
+            </ListBox>
+          </Select.Popover>
+        </Select>
+        <Button
+          fullWidth
+          variant="primary"
+          onPress={() => void saveConfig()}
+        >
+          <Save size={16} />
+          保存
         </Button>
       </SectionCard>
     </>
@@ -391,8 +661,9 @@ function PermissionsPanel() {
             ，不是「ASR Workshop」。
           </li>
           <li>
-            · 麦克风 / 语音识别已改为进程内请求，授权后应出现本进程（不再是
-            swift）。
+            · 麦克风 / 语音识别必须在打包后的 .app 里请求——
+            <code className="text-foreground">tauri dev</code>{" "}
+            裸二进制没有 Info.plist，系统会直接闪退（TCC）。
           </li>
         </ul>
         {exePath ? (
