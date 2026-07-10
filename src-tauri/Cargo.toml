@@ -31,13 +31,12 @@ window-vibrancy = "0.6"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSView", "NSColor", "NSGraphics", "NSPasteboard", "NSPasteboardItem"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSView", "NSColor", "NSGraphics", "NSPasteboard", "NSPasteboardItem", "NSAppearance"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSString"] }
 
-# Qwen3-ASR Rust implementation (fork with streaming + chunk-local attention + mlx-c 0.31.2 FFT fix).
+# Qwen3-ASR Rust implementation (local feat/forced-aligner for ForcedAligner testing).
 [dependencies.qwen3-asr-rs]
-git = "https://github.com/XBCoder128/qwen3_asr_rs"
-branch = "fix/mlx-0.31-fft-norm"
+path = "../../qwen3_asr_rs"
 default-features = false
 features = ["mlx"]
 optional = true

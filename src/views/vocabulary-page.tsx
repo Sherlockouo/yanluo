@@ -1,6 +1,11 @@
 import { Button, Chip, Input, Label, TextField } from "@heroui/react";
 import { Plus, Save, X } from "lucide-react";
-import { PageHeader, PageShell, SectionCard } from "@/components/shared/page-shell";
+import {
+  EmptyState,
+  PageHeader,
+  PageShell,
+  SectionCard,
+} from "@/components/shared/page-shell";
 import { useApp } from "@/app-context";
 
 export function VocabularyPage() {
@@ -17,10 +22,10 @@ export function VocabularyPage() {
     <PageShell>
       <PageHeader
         title="词库"
-        subtitle="添加专有名词、技术术语、人名或项目名，提升识别与纠错准确率。"
+        subtitle="识别后替换。例：配森=Python"
       />
 
-      <SectionCard className="max-w-3xl flex flex-col gap-5">
+      <SectionCard className="max-w-2xl flex flex-col gap-5">
         <div className="flex items-end gap-2">
           <TextField
             fullWidth
@@ -28,9 +33,9 @@ export function VocabularyPage() {
             value={newTerm}
             onChange={setNewTerm}
           >
-            <Label>新词条</Label>
+            <Label>词条</Label>
             <Input
-              placeholder="Python / JSON / MySQL / 项目名 …"
+              placeholder="Python / 配森=Python"
               onKeyDown={(e) => {
                 if (e.key === "Enter") addTerm();
               }}
@@ -42,11 +47,12 @@ export function VocabularyPage() {
           </Button>
         </div>
 
-        <div className="flex min-h-[180px] flex-wrap content-start gap-2 rounded-2xl border border-border bg-surface-secondary/50 p-4">
+        <div className="flex min-h-[160px] flex-wrap content-start gap-2 rounded-2xl border border-border bg-surface-secondary/40 p-4">
           {config.vocabulary.length === 0 ? (
-            <div className="grid w-full place-items-center py-10 text-sm text-muted">
-              还没有词库条目
-            </div>
+            <EmptyState
+              title="还没有词条"
+              description="添加术语或「错词=正确」映射。"
+            />
           ) : (
             config.vocabulary.map((term) => (
               <button
@@ -54,7 +60,9 @@ export function VocabularyPage() {
                 type="button"
                 className="group"
                 onClick={() =>
-                  void saveVocabulary(config.vocabulary.filter((t) => t !== term))
+                  void saveVocabulary(
+                    config.vocabulary.filter((t) => t !== term),
+                  )
                 }
                 title="点击删除"
               >
@@ -65,7 +73,7 @@ export function VocabularyPage() {
                 >
                   <Chip.Label className="inline-flex items-center gap-1.5">
                     {term}
-                    <X size={11} className="opacity-60" />
+                    <X size={11} className="opacity-50" />
                   </Chip.Label>
                 </Chip>
               </button>
@@ -75,7 +83,7 @@ export function VocabularyPage() {
 
         <Button fullWidth variant="secondary" onPress={() => void saveConfig()}>
           <Save size={16} />
-          保存词库
+          保存
         </Button>
       </SectionCard>
     </PageShell>

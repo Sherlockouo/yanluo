@@ -43,6 +43,8 @@ type AppContextValue = {
   addTerm: () => void;
   saveVocabulary: (vocabulary: string[]) => Promise<void>;
   clearHistory: () => Promise<void>;
+  pruneHistory: (keep: number) => Promise<void>;
+  pruneHistoryOlderThan: (days: number) => Promise<void>;
   markSession: (mode: "fn" | "transcribe") => void;
 };
 
@@ -54,6 +56,13 @@ export function applyTheme(theme: ThemeMode) {
   root.classList.toggle("light", theme === "light");
   root.setAttribute("data-theme", theme);
   localStorage.setItem("asr-theme", theme);
+  // Floating HUD is a separate webview — broadcast + native vibrancy sync.
+  void import("@tauri-apps/api/event").then(({ emit }) =>
+    emit("theme-changed", theme),
+  );
+  void import("@tauri-apps/api/core").then(({ invoke }) =>
+    invoke("set_floating_theme", { theme }).catch(() => {}),
+  );
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -90,7 +99,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setConfig({
       ...defaultConfig,
       ...next,
-      language: next.language || "zh-CN",
+      language: next.language || "auto",
     });
   }, []);
 
@@ -105,6 +114,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const unlisteners: UnlistenFn[] = [];
     let disposed = false;
+
+    // Auto-load Qwen when provider is qwen and model_dir is set.
+    void (async () => {
+      try {
+        const cfg = await invoke<AppConfig>("get_app_config");
+        if (disposed) return;
+        if (
+          cfg.asr_provider === "qwen" &&
+          cfg.asr_model_dir?.trim() &&
+          !modelLoadedRef.current
+        ) {
+          setModelLoading(true);
+          await invoke("set_model_dir", { path: cfg.asr_model_dir });
+          await invoke("load_model");
+        }
+      } catch {
+        // ignore — user can load manually on ASR page
+        if (!disposed) setModelLoading(false);
+      }
+    })();
 
     Promise.all([
       listen<FloatingPayload>("floating-status", (event) => {
@@ -141,7 +170,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setConfig({
           ...defaultConfig,
           ...event.payload,
-          language: event.payload.language || "zh-CN",
+          language: event.payload.language || "auto",
         });
         toast.info("菜单设置已更新");
       }),
@@ -150,6 +179,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }),
       listen("fn-key-down", async () => {
         const current = configRef.current;
+        // Toggle: Fn press starts when idle, stops when recording.
+        if (stateRef.current === "recording") {
+          const shouldRefine = Boolean(
+            current.llm_enabled &&
+              current.llm_api_base_url &&
+              current.llm_api_key &&
+              current.llm_model,
+          );
+          const next: RecState = shouldRefine ? "refining" : "processing";
+          setState(next);
+          stateRef.current = next;
+          try {
+            await invoke("stop_recording");
+          } catch (error) {
+            setState("idle");
+            stateRef.current = "idle";
+            toast.danger(`停止录音失败: ${error}`);
+          }
+          return;
+        }
         if (stateRef.current !== "idle") return;
         if (current.asr_provider === "qwen" && !modelLoadedRef.current) {
           toast.warning("请先加载 ASR 模型，或切到 Apple/ElevenLabs");
@@ -161,9 +210,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           await invoke("save_app_config", { config: current });
           await invoke("start_recording", {
-            chunkSec: 0.5,
-            rollbackTokens: 1,
-            language: current.language,
+            chunkSec: 1.0,
+            rollbackTokens: 2,
+            language: current.language === "auto" ? null : current.language,
             mode: "fn",
           });
         } catch (error) {
@@ -172,25 +221,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           toast.danger(`启动录音失败: ${error}`);
         }
       }),
-      listen("fn-key-up", async () => {
-        if (stateRef.current !== "recording") return;
-        const current = configRef.current;
-        const shouldRefine = Boolean(
-          current.llm_enabled &&
-            current.llm_api_base_url &&
-            current.llm_api_key &&
-            current.llm_model,
-        );
-        const next: RecState = shouldRefine ? "refining" : "processing";
-        setState(next);
-        stateRef.current = next;
+      listen("escape-key-down", async () => {
+        if (
+          stateRef.current !== "recording" &&
+          stateRef.current !== "processing" &&
+          stateRef.current !== "refining"
+        ) {
+          return;
+        }
         try {
-          await invoke("stop_recording");
-        } catch (error) {
+          await invoke("cancel_recording");
           setState("idle");
           stateRef.current = "idle";
-          toast.danger(`停止录音失败: ${error}`);
+          toast.info("已取消录音");
+        } catch (error) {
+          toast.danger(`取消失败: ${error}`);
         }
+      }),
+      listen("recording-cancelled", () => {
+        setState("idle");
+        stateRef.current = "idle";
       }),
       listen<string>("fn-listener-error", (event) => {
         toast.danger(event.payload);
@@ -284,6 +334,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await loadHistory();
   }, [loadHistory]);
 
+  const pruneHistory = useCallback(
+    async (keep: number) => {
+      await invoke("prune_history", { keep });
+      await loadHistory();
+    },
+    [loadHistory],
+  );
+
+  const pruneHistoryOlderThan = useCallback(
+    async (days: number) => {
+      await invoke("prune_history_older_than", { days });
+      await loadHistory();
+    },
+    [loadHistory],
+  );
+
   const markSession = useCallback((mode: "fn" | "transcribe") => {
     sessionModeRef.current = mode;
   }, []);
@@ -308,6 +374,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addTerm,
       saveVocabulary,
       clearHistory,
+      pruneHistory,
+      pruneHistoryOlderThan,
       markSession,
     }),
     [
@@ -327,6 +395,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addTerm,
       saveVocabulary,
       clearHistory,
+      pruneHistory,
+      pruneHistoryOlderThan,
       markSession,
     ],
   );

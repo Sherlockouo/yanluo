@@ -43,7 +43,7 @@ const PERMS: {
   {
     kind: "input_monitoring",
     title: "输入监视",
-    description: "监听 Fn 键按下 / 松开事件。",
+    description: "监听 Fn 点按开关与 Esc 取消。",
     icon: Keyboard,
   },
   {
@@ -99,16 +99,9 @@ export function SettingsPage() {
 
   return (
     <PageShell>
-      <PageHeader
-        title="设置"
-        subtitle="凭证与系统权限。未授权时可打开系统设置页完成授权。"
-      />
+      <PageHeader title="设置" subtitle="权限与凭证。" />
 
-      <SectionCard
-        title="系统权限"
-        description="以下为当前授权状态。未授权时点击「打开系统设置」前往授权。"
-        className="max-w-3xl"
-      >
+      <SectionCard title="系统权限" className="max-w-2xl">
         <div>
           {PERMS.map((item) => {
             const granted = perms?.[item.kind] ?? false;
@@ -165,7 +158,7 @@ export function SettingsPage() {
         </div>
       </SectionCard>
 
-      <SectionCard className="max-w-3xl flex flex-col gap-5" title="云端凭证">
+      <SectionCard className="max-w-2xl flex flex-col gap-5" title="云端凭证">
         <TextField
           fullWidth
           variant="secondary"

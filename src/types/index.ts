@@ -4,6 +4,7 @@ export type AsrProvider = "qwen" | "apple" | "elevenlabs";
 
 export type AppConfig = {
   asr_model_dir: string;
+  align_model_dir?: string;
   asr_provider: AsrProvider;
   elevenlabs_api_key: string;
   elevenlabs_model: string;
@@ -15,6 +16,20 @@ export type AppConfig = {
   vocabulary: string[];
 };
 
+/** Word/char timing span from ForcedAligner or ElevenLabs words. */
+export type TranscriptSegment = {
+  text: string;
+  start: number;
+  end: number;
+};
+
+/** ElevenLabs CharacterAlignmentResponseModel shape. */
+export type CharacterAlignment = {
+  characters: string[];
+  characterStartTimesSeconds: number[];
+  characterEndTimesSeconds: number[];
+};
+
 export type HistoryEntry = {
   id: string;
   text: string;
@@ -24,6 +39,10 @@ export type HistoryEntry = {
   created_at: string;
   refined: boolean;
   audio_path?: string | null;
+  /** "audio" | "video" */
+  media_kind?: string;
+  segments?: TranscriptSegment[];
+  alignment?: CharacterAlignment | null;
   source?: string;
 };
 
@@ -41,6 +60,8 @@ export type TranscriptionResult = {
   duration_seconds: number;
   refined: boolean;
   error: string | null;
+  segments?: TranscriptSegment[];
+  alignment?: CharacterAlignment | null;
 };
 
 export type Page =

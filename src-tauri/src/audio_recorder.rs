@@ -124,6 +124,22 @@ impl AudioRecorder {
         self.samples.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
+    /// RMS of the most recent `window` samples (16kHz mono), without cloning the full buffer.
+    pub fn recent_rms(&self, window: usize) -> f32 {
+        let Ok(buf) = self.samples.lock() else {
+            return 0.0;
+        };
+        let n = buf.len().min(window.max(1));
+        if n == 0 {
+            return 0.0;
+        }
+        let start = buf.len() - n;
+        let energy = buf[start..].iter().map(|s| s * s).sum::<f32>() / n as f32;
+        let raw = energy.sqrt();
+        // Speech RMS is often tiny (0.01–0.08); expand into a usable 0–1 meter.
+        (raw * 12.0).clamp(0.0, 1.0)
+    }
+
     /// Stop recording and return all captured samples (16kHz mono f32).
     pub fn stop(self) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
         drop(self._stream); // stop the stream first

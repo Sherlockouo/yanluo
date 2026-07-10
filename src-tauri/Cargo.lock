@@ -3386,7 +3386,6 @@ dependencies = [
 [[package]]
 name = "qwen3-asr-rs"
 version = "0.2.0"
-source = "git+https://github.com/XBCoder128/qwen3_asr_rs?branch=fix%2Fmlx-0.31-fft-norm#7a91957ca732f501c1accb03ecef1dc7c86c5037"
 dependencies = [
  "anyhow",
  "axum",

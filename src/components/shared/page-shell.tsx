@@ -7,20 +7,22 @@ export function PageHeader({
   action,
 }: {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   action?: ReactNode;
 }) {
   return (
-    <header className="flex items-start gap-4">
+    <header className="flex items-end gap-4">
       <div className="min-w-0 flex-1">
-        <h1 className="font-display text-3xl font-semibold tracking-tight text-foreground">
+        <h1 className="font-display text-[1.75rem] font-semibold tracking-tight text-foreground sm:text-3xl">
           {title}
         </h1>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted">
-          {subtitle}
-        </p>
+        {subtitle ? (
+          <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-muted">
+            {subtitle}
+          </p>
+        ) : null}
       </div>
-      {action ? <div className="shrink-0 pt-1">{action}</div> : null}
+      {action ? <div className="shrink-0 pb-0.5">{action}</div> : null}
     </header>
   );
 }
@@ -35,7 +37,7 @@ export function PageShell({
   return (
     <section
       className={cn(
-        "mx-auto flex w-full max-w-4xl flex-col gap-6 pb-10",
+        "page-enter mx-auto flex w-full max-w-4xl flex-col gap-7 pb-12",
         className,
       )}
     >
@@ -60,14 +62,51 @@ export function SectionCard({
       {(title || description) && (
         <div className="mb-5">
           {title ? (
-            <h2 className="text-base font-semibold text-foreground">{title}</h2>
+            <h2 className="text-[15px] font-semibold tracking-tight text-foreground">
+              {title}
+            </h2>
           ) : null}
           {description ? (
-            <p className="mt-1 text-sm text-muted">{description}</p>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted">
+              {description}
+            </p>
           ) : null}
         </div>
       )}
       {children}
+    </div>
+  );
+}
+
+export function EmptyState({
+  title,
+  description,
+  action,
+  icon,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  icon?: ReactNode;
+}) {
+  return (
+    <div className="grid min-h-[200px] place-items-center px-6 py-12 text-center">
+      <div className="flex max-w-sm flex-col items-center gap-3">
+        {icon ? (
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-default text-muted ring-1 ring-border">
+            {icon}
+          </div>
+        ) : null}
+        <div>
+          <p className="text-sm font-medium text-foreground">{title}</p>
+          {description ? (
+            <p className="mt-1 text-[13px] leading-relaxed text-muted">
+              {description}
+            </p>
+          ) : null}
+        </div>
+        {action}
+      </div>
     </div>
   );
 }

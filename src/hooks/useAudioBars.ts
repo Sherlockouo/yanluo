@@ -53,12 +53,13 @@ export function useBarHeights(rms: number, active: boolean, maxH: number) {
     let raf = 0;
     const min = maxH * 0.14;
     const compute = () => {
+      // Backend already expands speech RMS into ~0–1; keep a mild boost only.
       const level = activeRef.current
-        ? Math.max(0.05, Math.min(1, rmsRef.current * 5.5))
+        ? Math.max(0.08, Math.min(1, rmsRef.current * 1.35))
         : 0.06;
       const now = performance.now();
       const next = BAR_WEIGHTS.map((weight, i) => {
-        const jitter = 1 + Math.sin(now / (180 + i * 27) + i * 1.7) * 0.04;
+        const jitter = 1 + Math.sin(now / (140 + i * 23) + i * 1.7) * 0.12;
         return Math.max(min, level * weight * jitter * maxH);
       });
       setHeights(next);

@@ -15,13 +15,10 @@ export function LlmPage() {
 
   return (
     <PageShell>
-      <PageHeader
-        title="LLM 纠错"
-        subtitle="OpenAI 兼容 API，用于保守修复中英混杂语音识别错误（例如「配森」→ Python）。"
-      />
+      <PageHeader title="LLM" subtitle="保守纠错，不改写。" />
 
-      <SectionCard className="max-w-3xl flex flex-col gap-5">
-        <div className="rounded-2xl border border-border bg-surface-secondary/60 px-4 py-3">
+      <SectionCard className="max-w-2xl flex flex-col gap-5">
+        <div className="rounded-2xl border border-border bg-surface-secondary/50 px-3 py-2">
           <Switch
             isSelected={config.llm_enabled}
             onChange={(value) => updateConfig("llm_enabled", value)}
@@ -29,9 +26,9 @@ export function LlmPage() {
             <Switch.Content className="w-full justify-between gap-2 p-2">
               <div className="min-w-0 pr-2">
                 <div className="text-sm font-semibold text-foreground">
-                  启用 LLM Refine
+                  启用纠错
                 </div>
-                <Description>仅保守纠错，不做润色或改写。</Description>
+                <Description>仅修复明显识别错误。</Description>
               </div>
               <Switch.Control>
                 <Switch.Thumb />
@@ -58,7 +55,7 @@ export function LlmPage() {
           onChange={(value) => updateConfig("llm_api_key", value)}
         >
           <Label>API Key</Label>
-          <Input placeholder="可完全清空" />
+          <Input placeholder="可留空" />
         </TextField>
 
         <TextField

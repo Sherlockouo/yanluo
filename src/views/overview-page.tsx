@@ -1,110 +1,71 @@
-import { Chip, Kbd } from "@heroui/react";
-import { Activity, BookOpen, Brain, Wand2 } from "lucide-react";
+import { Kbd } from "@heroui/react";
+import { NavLink } from "react-router-dom";
+import { AudioLines, Brain, BookOpen, Wand2 } from "lucide-react";
 import { providerLabel, stateLabel } from "@/lib/constants";
-import {
-  PageHeader,
-  PageShell,
-  SectionCard,
-  StatTile,
-} from "@/components/shared/page-shell";
+import { PageHeader, PageShell, SectionCard } from "@/components/shared/page-shell";
 import { useApp } from "@/app-context";
 
+const LINKS = [
+  { to: "/transcribe", icon: AudioLines, title: "转写", hint: "上传与回放" },
+  { to: "/asr", icon: Brain, title: "ASR", hint: "引擎与语言" },
+  { to: "/vocabulary", icon: BookOpen, title: "词库", hint: "术语替换" },
+  { to: "/llm", icon: Wand2, title: "LLM", hint: "保守纠错" },
+] as const;
+
 export function OverviewPage() {
-  const { config, history, state } = useApp();
-  const recording = state === "recording";
-  const processing = state === "processing" || state === "refining";
+  const { config, state, modelLoaded } = useApp();
+
+  const statusBits = [
+    providerLabel(config.asr_provider),
+    config.asr_provider === "qwen"
+      ? modelLoaded
+        ? "已加载"
+        : "未加载"
+      : null,
+    stateLabel(state),
+    config.language === "auto" ? "自动检测" : config.language,
+  ].filter(Boolean);
 
   return (
     <PageShell>
-      <PageHeader
-        title="控制面板"
-        subtitle="这里只负责配置与状态。识别界面在独立悬浮窗中显示，按住 Fn 即可开始。"
-      />
+      <PageHeader title="ASR Workshop" subtitle="点按 Fn 开始，再点结束并粘贴。" />
 
-      <section className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1.4fr)_320px]">
-        <SectionCard className="relative overflow-hidden">
-          <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-white/5 blur-3xl" />
-          <div className="relative flex flex-wrap gap-2">
-            <Chip size="sm" variant="soft">
-              <Chip.Label>双窗口架构</Chip.Label>
-            </Chip>
-            <Chip size="sm" variant="soft" color="accent">
-              <Chip.Label>
-                {providerLabel(config.asr_provider)} · {config.language}
-              </Chip.Label>
-            </Chip>
-            <Chip
-              size="sm"
-              variant="soft"
-              color={config.llm_enabled ? "success" : "default"}
-            >
-              <Chip.Label>
-                {config.llm_enabled ? "LLM 已启用" : "LLM 已关闭"}
-              </Chip.Label>
-            </Chip>
-          </div>
-
-          <h2 className="relative mt-6 font-display text-4xl font-semibold leading-[1.08] tracking-tight text-foreground sm:text-5xl">
-            按住 <span className="text-foreground">Fn</span>，
-            <br />
-            悬浮窗识别。
-          </h2>
-          <p className="relative mt-4 max-w-xl text-sm leading-relaxed text-muted">
-            控制面板保持打开用于改设置。真正的波形、实时转写与状态反馈，都在屏幕底部的独立透明悬浮窗里完成。
-          </p>
-          <div className="relative mt-6 flex items-center gap-2 text-sm text-muted">
-            <span>快捷键</span>
+      <SectionCard className="max-w-xl">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-muted">
+          <span className="inline-flex items-center gap-2 text-foreground">
             <Kbd>Fn</Kbd>
-            <span>按住说话 · 松开结束</span>
-          </div>
-        </SectionCard>
+            开关
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <Kbd>Esc</Kbd>
+            取消
+          </span>
+          <span className="text-border">·</span>
+          <span>{statusBits.join(" · ")}</span>
+        </div>
+      </SectionCard>
 
-        <SectionCard
-          title="识别窗口"
-          description="独立 always-on-top 悬浮窗，不嵌入本面板。"
-        >
-          <div className="mb-4 flex items-center gap-3">
-            <span
-              className={`status-dot ${recording ? "status-dot-live" : processing ? "status-dot-busy" : ""}`}
-            />
-            <span className="text-lg font-semibold text-foreground">
-              {stateLabel(state)}
-            </span>
-          </div>
-          <ul className="flex flex-col gap-2 text-sm leading-relaxed text-muted">
-            <li>· 录音时自动显示在屏幕底部</li>
-            <li>· 展示实时波形与转写尾部</li>
-            <li>· 结束后自动隐藏并注入文本</li>
-          </ul>
-        </SectionCard>
-      </section>
-
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile
-          icon={<Brain size={17} />}
-          label="ASR"
-          value={providerLabel(config.asr_provider)}
-          hint={config.language}
-        />
-        <StatTile
-          icon={<Wand2 size={17} />}
-          label="LLM"
-          value={config.llm_enabled ? "Enabled" : "Disabled"}
-          hint={config.llm_model}
-        />
-        <StatTile
-          icon={<BookOpen size={17} />}
-          label="词库"
-          value={`${config.vocabulary.length}`}
-          hint="terms"
-        />
-        <StatTile
-          icon={<Activity size={17} />}
-          label="历史"
-          value={`${history.length}`}
-          hint="records"
-        />
-      </section>
+      <div className="grid max-w-xl gap-2.5 sm:grid-cols-2">
+        {LINKS.map(({ to, icon: Icon, title, hint }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className="group rounded-2xl border border-border bg-surface px-4 py-4 transition duration-200 hover:border-accent/25 hover:bg-surface-secondary/40"
+          >
+            <div className="flex items-center gap-3">
+              <div className="grid h-9 w-9 place-items-center rounded-xl bg-default text-foreground transition group-hover:bg-accent/10 group-hover:text-accent">
+                <Icon size={16} />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-foreground">
+                  {title}
+                </div>
+                <div className="text-[12px] text-muted">{hint}</div>
+              </div>
+            </div>
+          </NavLink>
+        ))}
+      </div>
     </PageShell>
   );
 }

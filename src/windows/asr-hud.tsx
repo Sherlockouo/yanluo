@@ -15,6 +15,14 @@ const TEXT_MAX = 560;
 /** Horizontal chrome: padding + waveform + gap + colon + trailing pad */
 const CHROME_W = 16 + 44 + 12 + 10 + 18;
 
+function applyHudTheme(theme: "light" | "dark") {
+  const root = document.documentElement;
+  root.classList.remove("light", "dark");
+  root.classList.add(theme);
+  root.setAttribute("data-theme", theme);
+  void invoke("set_floating_theme", { theme }).catch(() => {});
+}
+
 /**
  * Independent ASR HUD window content.
  * Mounted only when the Tauri window label is `floating`.
@@ -30,12 +38,24 @@ export function AsrHud() {
 
   useEffect(() => {
     document.documentElement.setAttribute("data-floating", "1");
-    document.documentElement.classList.add("dark");
+
+    const syncTheme = () => {
+      const theme =
+        localStorage.getItem("asr-theme") === "light" ? "light" : "dark";
+      applyHudTheme(theme);
+    };
+    syncTheme();
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "asr-theme") syncTheme();
+    };
+    window.addEventListener("storage", onStorage);
 
     let disposed = false;
     let unlistenStatus: UnlistenFn | null = null;
     let unlistenLevel: UnlistenFn | null = null;
     let unlistenPartial: UnlistenFn | null = null;
+    let unlistenTheme: UnlistenFn | null = null;
 
     void invoke<FloatingPayload>("get_floating_status")
       .then((status) => {
@@ -65,12 +85,19 @@ export function AsrHud() {
     ).then((u) => {
       unlistenPartial = u;
     });
+    void listen<"light" | "dark">("theme-changed", (event) => {
+      applyHudTheme(event.payload);
+    }).then((u) => {
+      unlistenTheme = u;
+    });
 
     return () => {
       disposed = true;
+      window.removeEventListener("storage", onStorage);
       unlistenStatus?.();
       unlistenLevel?.();
       unlistenPartial?.();
+      unlistenTheme?.();
     };
   }, []);
 
@@ -95,13 +122,22 @@ export function AsrHud() {
 function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
   const refining = payload.state === "refining";
   const recording = payload.state === "recording";
-  const displayText = refining
-    ? "Refining…"
-    : payload.state === "processing"
-      ? "Transcribing…"
-      : payload.text
-        ? lastChars(payload.text, CAPSULE_TAIL_CHARS)
-        : "倾听中…";
+  const lastTextRef = useRef("");
+
+  if (payload.text.trim()) {
+    lastTextRef.current = payload.text;
+  }
+
+  // Keep last partial/final text while processing — never flash "Transcribing…".
+  const sourceText =
+    payload.text.trim() ||
+    (payload.state === "processing" || refining ? lastTextRef.current : "");
+  const displayText = sourceText
+    ? lastChars(sourceText, CAPSULE_TAIL_CHARS)
+    : recording
+      ? "倾听中…"
+      : "…";
+
   const smoothed = useSmoothedRms(payload.rms, recording);
   const measureRef = useRef<HTMLSpanElement>(null);
   const [textW, setTextW] = useState(TEXT_MIN);
@@ -144,7 +180,7 @@ function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
       style={{ width: "100%", height: "100%" }}
     >
       <div className="hud-inner">
-        <AudioBars rms={smoothed} active={recording || refining} />
+        <AudioBars rms={smoothed} active={recording} />
         <span className="hud-colon" aria-hidden>
           :
         </span>

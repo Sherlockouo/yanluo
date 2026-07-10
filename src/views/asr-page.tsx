@@ -18,12 +18,9 @@ export function AsrPage() {
 
   return (
     <PageShell>
-      <PageHeader
-        title="ASR 引擎"
-        subtitle="选择本地 Apple Speech、ElevenLabs Scribe，或 Qwen3-ASR 本地流式。"
-      />
+      <PageHeader title="ASR" subtitle="选择引擎与语言。" />
 
-      <SectionCard className="max-w-3xl flex flex-col gap-5">
+      <SectionCard className="max-w-2xl flex flex-col gap-5">
         <Select
           className="w-full flex"
           selectedKey={config.asr_provider}
@@ -32,23 +29,23 @@ export function AsrPage() {
             updateConfig("asr_provider", String(key) as AsrProvider);
           }}
         >
-          <Label>Provider</Label>
+          <Label>引擎</Label>
           <Select.Trigger className="flex items-center justify-between p-4">
             <Select.Value />
             <Select.Indicator />
           </Select.Trigger>
           <Select.Popover>
-            <ListBox className="gap-5 p-4 m-4">
-              <ListBox.Item id="apple" textValue="Apple Speech Recognition">
-                Apple Speech Recognition
+            <ListBox className="gap-3 p-3">
+              <ListBox.Item id="apple" textValue="Apple Speech">
+                Apple Speech
                 <ListBox.ItemIndicator />
               </ListBox.Item>
               <ListBox.Item id="elevenlabs" textValue="ElevenLabs Scribe">
                 ElevenLabs Scribe
                 <ListBox.ItemIndicator />
               </ListBox.Item>
-              <ListBox.Item id="qwen" textValue="Qwen3-ASR local streaming">
-                Qwen3-ASR local streaming
+              <ListBox.Item id="qwen" textValue="Qwen 本地">
+                Qwen 本地
                 <ListBox.ItemIndicator />
               </ListBox.Item>
             </ListBox>
@@ -80,22 +77,35 @@ export function AsrPage() {
           </Select.Popover>
         </Select>
 
-        {config.asr_provider === "qwen" && (
-          <>
+        {config.asr_provider === "qwen" ? (
+          <div className="flex flex-col gap-4 border-t border-border/70 pt-5">
             <TextField
               fullWidth
               variant="secondary"
               value={config.asr_model_dir}
               onChange={(value) => updateConfig("asr_model_dir", value)}
             >
-              <Label>Qwen 模型目录</Label>
+              <Label>模型目录</Label>
               <div className="flex gap-2">
-                <Input className="min-w-0 flex items-center font-mono" />
-                <Button variant="secondary" onPress={() => void chooseModelDir()}>
+                <Input className="min-w-0 flex items-center font-mono text-[13px]" />
+                <Button
+                  variant="secondary"
+                  onPress={() => void chooseModelDir()}
+                >
                   <FolderOpen size={16} />
                   浏览
                 </Button>
               </div>
+            </TextField>
+
+            <TextField
+              fullWidth
+              variant="secondary"
+              value={config.align_model_dir ?? ""}
+              onChange={(value) => updateConfig("align_model_dir", value)}
+            >
+              <Label>Aligner（可选）</Label>
+              <Input className="min-w-0 flex items-center font-mono text-[13px]" />
             </TextField>
 
             <Button
@@ -105,17 +115,17 @@ export function AsrPage() {
               onPress={() => void loadModel()}
             >
               {modelLoading
-                ? "Loading…"
+                ? "加载中…"
                 : modelLoaded
-                  ? "重新加载 Qwen 模型"
-                  : "加载 Qwen 模型"}
+                  ? "重新加载"
+                  : "加载模型"}
             </Button>
-          </>
-        )}
+          </div>
+        ) : null}
 
         <Button fullWidth variant="secondary" onPress={() => void saveConfig()}>
           <Save size={16} />
-          保存 ASR 设置
+          保存
         </Button>
       </SectionCard>
     </PageShell>
