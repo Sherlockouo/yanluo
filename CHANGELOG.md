@@ -2,10 +2,16 @@
 
 All notable changes to ASR Workshop are documented in this file.
 
+## [0.5.1] — 2026-07-10
+
+### Fixed
+- Linux CI: drop conflicting `libappindicator3-dev` (keep Ayatana)
+- Windows CI: UTF-8 when generating release notes from CHANGELOG
+
 ## [0.5.0] — 2026-07-10
 
 ### Added
-- Translate mode (⇧+Fn): stable-prefix streaming translation, HUD shows translation only
+- Translate mode (Shift+Fn): stable-prefix streaming translation, HUD shows translation only
 - Separate HUD language chip with native system menu for live target switching
 - Standard macOS app menu (About / Settings / Edit / Window) and tray icon
 - History stores translate target language (`译为 English` etc.)
