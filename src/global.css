@@ -912,6 +912,20 @@ html.light[data-floating="1"] .hud-spinner {
   border-top: 1px solid var(--separator);
 }
 
+.update-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  overflow: hidden;
+}
+
+.update-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent, var(--foreground));
+  transition: width 160ms ease-out;
+}
+
 .perm-status {
   display: inline-flex;
   align-items: center;

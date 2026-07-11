@@ -83,6 +83,11 @@ pub(crate) fn handle_asr_partial(app: &AppHandle, text: &str) {
         return;
     }
 
+    let text = super::sanitize_asr_for_translate(text);
+    if text.is_empty() {
+        return;
+    }
+
     if let Ok(mut st) = app.state::<AsrEngine>().inner().translate_stream.lock() {
         if text != st.last_asr {
             if !st.src_done.is_empty() && !text.starts_with(&st.src_done) {
@@ -92,7 +97,7 @@ pub(crate) fn handle_asr_partial(app: &AppHandle, text: &str) {
                 st.epoch = st.epoch.wrapping_add(1);
                 st.inflight = false;
             }
-            st.last_asr = text.to_string();
+            st.last_asr = text;
             st.last_change = Instant::now();
         }
     }

@@ -12,6 +12,7 @@ mod permissions;
 mod platform;
 mod state;
 mod transcription;
+mod update;
 
 pub(crate) use hotkey::*;
 pub(crate) use hud::*;
@@ -102,6 +103,9 @@ pub fn main() {
             commands::stop_recording,
             commands::cancel_recording,
             commands::transcribe_file,
+            update::check_for_update,
+            update::download_and_install_update,
+            update::open_update_download_dir,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

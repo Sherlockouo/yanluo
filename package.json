@@ -11,7 +11,9 @@
     "tauri:dev:local": "tauri dev --features qwen-local",
     "tauri:build:local": "tauri build --features qwen-local",
     "tauri:build": "tauri build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "version:sync": "node scripts/sync-version.mjs",
+    "version:check": "node scripts/sync-version.mjs --check"
   },
   "dependencies": {
     "@heroui/react": "^3.2.2",

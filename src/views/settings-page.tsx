@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Button,
   Kbd,
@@ -13,6 +14,7 @@ import {
   Download,
   Ear,
   ExternalLink,
+  FolderOpen,
   Keyboard,
   Mic,
   Monitor,
@@ -36,7 +38,6 @@ import { hotkeySegments, LANGUAGES, TRANSLATE_LANGUAGES } from "@/lib/constants"
 import type { HotkeyBinding } from "@/types";
 import {
   APP_RELEASES_URL,
-  APP_REPO,
   APP_REPO_URL,
   CHANGELOG,
   type ChangelogEntry,
@@ -76,7 +77,13 @@ type AppInfo = {
   apple_speech_available?: boolean;
 };
 
-type GhRelease = {
+type ReleaseAsset = {
+  name: string;
+  browser_download_url: string;
+  size: number;
+};
+
+type ReleaseInfo = {
   tag_name: string;
   name: string | null;
   body: string | null;
@@ -84,6 +91,27 @@ type GhRelease = {
   published_at: string | null;
   prerelease: boolean;
   draft: boolean;
+  assets: ReleaseAsset[];
+};
+
+type UpdateCheckResult = {
+  current_version: string;
+  update_available: boolean;
+  latest: ReleaseInfo | null;
+  asset: ReleaseAsset | null;
+  releases: ReleaseInfo[];
+};
+
+type DownloadProgress = {
+  downloaded: number;
+  total: number | null;
+  percent: number | null;
+};
+
+type DownloadInstallResult = {
+  path: string;
+  opened: boolean;
+  message: string;
 };
 
 const TABS: { id: SettingsTab; label: string }[] = [
@@ -131,19 +159,34 @@ const PERMS: {
   },
 ];
 
-function compareSemver(a: string, b: string): number {
-  const pa = a.replace(/^v/i, "").split(".").map((n) => Number(n) || 0);
-  const pb = b.replace(/^v/i, "").split(".").map((n) => Number(n) || 0);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-    if (d !== 0) return d;
-  }
-  return 0;
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function SettingsPage() {
-  const [tab, setTab] = useState<SettingsTab>("general");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = (searchParams.get("tab") as SettingsTab | null) ?? "general";
+  const [tab, setTab] = useState<SettingsTab>(
+    TABS.some((t) => t.id === initialTab) ? initialTab : "general",
+  );
+
+  useEffect(() => {
+    const next = searchParams.get("tab") as SettingsTab | null;
+    if (next && TABS.some((t) => t.id === next) && next !== tab) {
+      setTab(next);
+    }
+  }, [searchParams, tab]);
+
+  const selectTab = (id: SettingsTab) => {
+    setTab(id);
+    if (id === "general") {
+      setSearchParams({}, { replace: true });
+    } else {
+      setSearchParams({ tab: id }, { replace: true });
+    }
+  };
 
   return (
     <PageShell>
@@ -160,7 +203,7 @@ export function SettingsPage() {
               "settings-tab",
               tab === item.id && "settings-tab-active",
             )}
-            onClick={() => setTab(item.id)}
+            onClick={() => selectTab(item.id)}
           >
             {item.label}
           </button>
@@ -645,10 +688,12 @@ function PermissionsPanel() {
 
 function UpdatesPanel() {
   const [info, setInfo] = useState<AppInfo | null>(null);
-  const [remote, setRemote] = useState<GhRelease[]>([]);
+  const [check, setCheck] = useState<UpdateCheckResult | null>(null);
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
-  const [latest, setLatest] = useState<GhRelease | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState<DownloadProgress | null>(null);
+  const [installMessage, setInstallMessage] = useState<string | null>(null);
 
   useEffect(() => {
     void invoke<AppInfo>("get_app_info")
@@ -656,21 +701,25 @@ function UpdatesPanel() {
       .catch(() => setInfo({ version: "0.1.0", name: "ASR Workshop" }));
   }, []);
 
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<DownloadProgress>("update-download-progress", (event) => {
+      setProgress(event.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
+
   const checkUpdates = useCallback(async () => {
     setChecking(true);
     setCheckError(null);
+    setInstallMessage(null);
     try {
-      const res = await fetch(
-        `https://api.github.com/repos/${APP_REPO}/releases?per_page=12`,
-        { headers: { Accept: "application/vnd.github+json" } },
-      );
-      if (!res.ok) {
-        throw new Error(`GitHub API ${res.status}`);
-      }
-      const data = (await res.json()) as GhRelease[];
-      const published = data.filter((r) => !r.draft);
-      setRemote(published);
-      setLatest(published.find((r) => !r.prerelease) ?? published[0] ?? null);
+      const result = await invoke<UpdateCheckResult>("check_for_update");
+      setCheck(result);
     } catch (error) {
       setCheckError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -679,20 +728,48 @@ function UpdatesPanel() {
   }, []);
 
   useEffect(() => {
-    void checkUpdates();
+    // Defer so the Updates tab paints before the network call starts.
+    const id = window.setTimeout(() => {
+      void checkUpdates();
+    }, 50);
+    return () => window.clearTimeout(id);
   }, [checkUpdates]);
 
-  const current = info?.version ?? "0.1.0";
-  const updateAvailable =
-    latest != null && compareSemver(latest.tag_name, current) > 0;
+  const downloadAndInstall = useCallback(async () => {
+    const asset = check?.asset;
+    if (!asset) return;
+    setDownloading(true);
+    setProgress({ downloaded: 0, total: asset.size || null, percent: 0 });
+    setInstallMessage(null);
+    try {
+      const result = await invoke<DownloadInstallResult>(
+        "download_and_install_update",
+        {
+          url: asset.browser_download_url,
+          filename: asset.name,
+        },
+      );
+      setInstallMessage(result.message);
+      toast.success(result.message);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      setInstallMessage(msg);
+      toast.danger(`下载失败: ${msg}`);
+    } finally {
+      setDownloading(false);
+    }
+  }, [check?.asset]);
+
+  const current = check?.current_version ?? info?.version ?? "0.1.0";
+  const updateAvailable = check?.update_available === true;
+  const latest = check?.latest ?? null;
+  const asset = check?.asset ?? null;
 
   const logEntries: ChangelogEntry[] =
-    remote.length > 0
-      ? remote.map((r) => ({
+    check && check.releases.length > 0
+      ? check.releases.map((r) => ({
           version: r.tag_name.replace(/^v/i, ""),
-          date: r.published_at
-            ? r.published_at.slice(0, 10)
-            : "",
+          date: r.published_at ? r.published_at.slice(0, 10) : "",
           notes: (r.body || r.name || "无说明")
             .split("\n")
             .map((line) => line.replace(/^[-*#\s]+/, "").trim())
@@ -700,6 +777,8 @@ function UpdatesPanel() {
             .slice(0, 8),
         }))
       : CHANGELOG;
+
+  const percent = progress?.percent ?? null;
 
   return (
     <>
@@ -712,21 +791,29 @@ function UpdatesPanel() {
             </div>
             <p className="mt-1 text-[12px] text-muted">
               {updateAvailable
-                ? `发现新版本 ${latest?.tag_name}`
+                ? `发现新版本 ${latest?.tag_name}${asset ? ` · ${asset.name}` : ""}`
                 : checking
                   ? "正在检查更新…"
                   : "已是最新，或尚未发布远程版本。"}
             </p>
+            {asset && updateAvailable ? (
+              <p className="mt-1 text-[11px] text-muted">
+                安装包约 {formatBytes(asset.size)}
+              </p>
+            ) : null}
             {checkError ? (
               <p className="mt-1 text-[12px]" style={{ color: "var(--danger)" }}>
                 检查失败：{checkError}（仍显示本地 Release Log）
               </p>
             ) : null}
+            {installMessage ? (
+              <p className="mt-1 text-[12px] text-muted">{installMessage}</p>
+            ) : null}
           </div>
           <Button
             size="sm"
             variant="secondary"
-            isDisabled={checking}
+            isDisabled={checking || downloading}
             onPress={() => void checkUpdates()}
           >
             <RefreshCw size={14} className={checking ? "animate-spin" : ""} />
@@ -734,17 +821,72 @@ function UpdatesPanel() {
           </Button>
         </div>
 
+        {downloading ? (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between text-[12px] text-muted">
+              <span>正在下载安装包…</span>
+              <span>
+                {percent != null
+                  ? `${percent.toFixed(0)}%`
+                  : progress
+                    ? formatBytes(progress.downloaded)
+                    : ""}
+                {progress?.total
+                  ? ` / ${formatBytes(progress.total)}`
+                  : ""}
+              </span>
+            </div>
+            <div className="update-progress-track">
+              <div
+                className="update-progress-bar"
+                style={{
+                  width:
+                    percent != null
+                      ? `${Math.min(100, Math.max(0, percent))}%`
+                      : "30%",
+                }}
+              />
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap gap-2">
-          {updateAvailable && latest ? (
+          {updateAvailable && asset ? (
+            <Button
+              size="sm"
+              variant="primary"
+              isDisabled={downloading}
+              onPress={() => void downloadAndInstall()}
+            >
+              <Download size={14} />
+              {downloading ? "下载中…" : `下载并安装 ${latest?.tag_name}`}
+            </Button>
+          ) : null}
+          {updateAvailable && latest && !asset ? (
             <Button
               size="sm"
               variant="primary"
               onPress={() => void open(latest.html_url)}
             >
-              <Download size={14} />
-              下载 {latest.tag_name}
+              <ExternalLink size={14} />
+              打开 Release 页下载
             </Button>
           ) : null}
+          <Button
+            size="sm"
+            variant="secondary"
+            isDisabled={downloading}
+            onPress={() =>
+              void invoke("open_update_download_dir").catch((error) => {
+                toast.danger(
+                  `无法打开下载目录: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              })
+            }
+          >
+            <FolderOpen size={14} />
+            下载目录
+          </Button>
           <Button
             size="sm"
             variant="secondary"
@@ -793,3 +935,4 @@ function UpdatesPanel() {
     </>
   );
 }
+

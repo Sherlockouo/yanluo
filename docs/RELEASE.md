@@ -1,5 +1,33 @@
 # Release checklist (ASR Workshop)
 
+## Version source of truth
+
+```
+package.json version
+        │
+        ├─ pnpm version:sync  →  Cargo.toml + tauri.conf.json
+        │
+        ├─ git tag vX.Y.Z     →  must equal package.json
+        │
+        └─ CI build embeds CARGO_PKG_VERSION
+                 │
+                 ├─ GitHub Release assets (dmg / msi / AppImage…)
+                 └─ In-app「设置 → 更新」shows this version + checks newer tags
+```
+
+1. Bump `package.json` version.
+2. Run `pnpm version:sync` (keeps Cargo / tauri.conf in lockstep).
+3. Update `CHANGELOG.md` with `## [x.y.z] — YYYY-MM-DD`.
+4. Commit, then tag **exactly** that version:
+
+```bash
+VERSION=$(node -p "require('./package.json').version")
+git tag "v$VERSION"
+git push origin "v$VERSION"
+```
+
+CI **fails** if `v*` tag ≠ `package.json`. The built app’s displayed version is the same string (from `CARGO_PKG_VERSION`).
+
 ## Platforms
 | Platform | Runner | Features | Artifacts |
 |----------|--------|----------|-----------|
@@ -12,20 +40,12 @@ Apple Speech is **macOS-only**. Linux/Windows default to ElevenLabs (Qwen local 
 ## One-time setup
 1. Enable GitHub Actions with `contents: write`.
 2. Optional Apple signing secrets for notarized macOS builds.
-3. Keep versions in sync: `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `CHANGELOG.md`.
+3. Keep the repo public (or otherwise reachable) so in-app update checks can read Releases.
 
 ## Cut a release
-1. Update `CHANGELOG.md` with `## [x.y.z] — YYYY-MM-DD`.
-2. Commit and push to `main`.
-3. Tag and push:
-
-```bash
-git tag v0.1.1
-git push origin v0.1.1
-```
-
-4. **Release** workflow builds all three platforms and uploads to the GitHub Release.
-5. In-app: **设置 → 更新** shows the Release Log.
+1. Follow **Version source of truth** above.
+2. **Release** workflow builds all platforms and uploads to the GitHub Release for that tag.
+3. In-app **设置 → 更新** compares local `CARGO_PKG_VERSION` to the latest GitHub Release tag and can download the matching installer.
 
 ## Local package
 ```bash
@@ -35,6 +55,12 @@ make install
 # macOS + Qwen MLX
 make install-local
 ```
+
+## In-app updates
+- **检查更新** calls the GitHub Releases API off the UI thread (async + short timeout).
+- **下载并安装** saves under `~/Downloads/ASR Workshop Updates/` and opens the installer.
+- macOS: open the `.dmg`, drag into Applications, relaunch.
+- Menu: **Check for Updates…** → **设置 → 更新**.
 
 ## macOS permission debugging
 Privacy lists only show apps that **requested** the permission.

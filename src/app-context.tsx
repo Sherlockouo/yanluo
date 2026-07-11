@@ -191,6 +191,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       listen<string>("open-settings", (event) => {
         const page = event.payload;
         if (page === "llm") navigate("/llm");
+        else if (page === "updates") navigate("/settings?tab=updates");
         else navigate("/settings");
       }),
       listen<{ shift?: boolean; intention?: string }>("fn-key-down", async (event) => {

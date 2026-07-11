@@ -34,6 +34,9 @@ pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
         .accelerator("CmdOrCtrl+,")
         .build(app)
         .map_err(|e| e.to_string())?;
+    let check_updates = MenuItemBuilder::with_id("app:check-updates", "Check for Updates...")
+        .build(app)
+        .map_err(|e| e.to_string())?;
 
     #[cfg(target_os = "macos")]
     let app_menu = Submenu::with_items(
@@ -45,6 +48,7 @@ pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
                 .map_err(|e| e.to_string())?,
             &PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
             &settings,
+            &check_updates,
             &PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
             &PredefinedMenuItem::services(app, None).map_err(|e| e.to_string())?,
             &PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
@@ -60,6 +64,7 @@ pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     let file_menu = SubmenuBuilder::new(app, "File")
         .item(&settings)
+        .item(&check_updates)
         .separator()
         .quit()
         .build()
@@ -242,6 +247,7 @@ pub(crate) fn handle_menu_event(app: &AppHandle, id: &str) {
 
     match id {
         "app:settings" | "tray:settings" => open_settings_page(app, "settings"),
+        "app:check-updates" => open_settings_page(app, "updates"),
         "tray:show" => show_main_window(app),
         "tray:quit" => app.exit(0),
         _ => {}
