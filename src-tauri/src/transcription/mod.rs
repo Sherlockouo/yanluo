@@ -252,10 +252,15 @@ pub(crate) fn finalize_successful_result(
         .map(|config| config.clone())
         .unwrap_or_default();
     // Deterministic vocabulary fixes first (Qwen has no hotword API).
-    let before_vocab = result.text.clone();
-    result.text = apply_vocabulary(&result.text, &config.vocabulary);
-    if result.text != before_vocab {
-        result.refined = true;
+    // File-tab 逐字稿 keeps ForcedAligner timings — don't rewrite text that
+    // would desync from character alignment.
+    let has_timed = !result.segments.is_empty() || result.alignment.is_some();
+    if !(is_transcribe && has_timed) {
+        let before_vocab = result.text.clone();
+        result.text = apply_vocabulary(&result.text, &config.vocabulary);
+        if result.text != before_vocab {
+            result.refined = true;
+        }
     }
 
     if is_translate {
@@ -296,10 +301,12 @@ pub(crate) fn finalize_successful_result(
                 }
             }
         }
-    } else if config.llm_enabled
+    } else if !is_transcribe
+        && config.llm_enabled
         && !config.llm_api_base_url.is_empty()
         && !config.llm_model.is_empty()
     {
+        // File-tab transcription keeps ASR (+ vocab) only — no LLM refine.
         // Keep raw text on HUD while refining — empty string would flash blank.
         emit_floating_status(app, true, "refining", &result.text, 0.0);
         match refine_transcript(&config, &result.text) {
@@ -313,7 +320,7 @@ pub(crate) fn finalize_successful_result(
                 let _ = app.emit("partial-error", format!("LLM 纠错失败: {e}"));
             }
         }
-    } else if config.llm_enabled {
+    } else if !is_transcribe && config.llm_enabled {
         eprintln!("[llm] refine skipped: enabled but incomplete config (url/model)");
     }
 
@@ -369,7 +376,12 @@ pub(crate) fn finalize_successful_result(
     };
 
     // If LLM/vocab changed text after alignment, drop stale timings.
-    if result.refined && !result.segments.is_empty() && result.text != result.raw_text {
+    // Transcribe tab keeps 逐字稿 (word/char highlight) — never strip timings.
+    if !is_transcribe
+        && result.refined
+        && !result.segments.is_empty()
+        && result.text != result.raw_text
+    {
         result.segments.clear();
         result.alignment = None;
     }

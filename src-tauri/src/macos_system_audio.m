@@ -12,6 +12,8 @@
 
 #include <math.h>
 #include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,15 +69,55 @@ typedef void (*AsrSystemAudioCallback)(const float *samples, size_t count, void 
     return;
   }
 
-  if (asbd->mFormatID != kAudioFormatLinearPCM ||
-      !(asbd->mFormatFlags & kAudioFormatFlagIsFloat) ||
-      asbd->mBitsPerChannel != 32) {
+  if (asbd->mFormatID != kAudioFormatLinearPCM) {
     return;
   }
 
-  const float *interleaved = (const float *)dataPointer;
-  size_t frameCount = length / (sizeof(float) * self.sourceChannels);
+  const float *interleaved = NULL;
+  float *converted = NULL;
+  size_t frameCount = 0;
+
+  if ((asbd->mFormatFlags & kAudioFormatFlagIsFloat) && asbd->mBitsPerChannel == 32) {
+    interleaved = (const float *)dataPointer;
+    frameCount = length / (sizeof(float) * self.sourceChannels);
+  } else if (!(asbd->mFormatFlags & kAudioFormatFlagIsFloat) &&
+             asbd->mBitsPerChannel == 16 &&
+             !(asbd->mFormatFlags & kAudioFormatFlagIsNonInterleaved)) {
+    // Some output routes (esp. after headphone / BT switch) deliver int16.
+    size_t samples = length / sizeof(int16_t);
+    frameCount = samples / self.sourceChannels;
+    if (frameCount == 0) {
+      return;
+    }
+    converted = (float *)malloc(samples * sizeof(float));
+    if (converted == NULL) {
+      return;
+    }
+    const int16_t *src = (const int16_t *)dataPointer;
+    const bool is_signed = (asbd->mFormatFlags & kAudioFormatFlagIsSignedInteger) != 0;
+    if (is_signed) {
+      const float scale = 1.0f / 32768.0f;
+      for (size_t i = 0; i < samples; i++) {
+        converted[i] = (float)src[i] * scale;
+      }
+    } else {
+      const float scale = 1.0f / 32768.0f;
+      for (size_t i = 0; i < samples; i++) {
+        converted[i] = ((float)(uint16_t)src[i] - 32768.0f) * scale;
+      }
+    }
+    interleaved = converted;
+  } else {
+    static _Atomic int logged_fmt = 0;
+    if (atomic_exchange(&logged_fmt, 1) == 0) {
+      NSLog(@"[system-audio] unsupported PCM format flags=0x%x bits=%u",
+            (unsigned)asbd->mFormatFlags, (unsigned)asbd->mBitsPerChannel);
+    }
+    return;
+  }
+
   if (frameCount == 0) {
+    free(converted);
     return;
   }
 
@@ -83,6 +125,7 @@ typedef void (*AsrSystemAudioCallback)(const float *samples, size_t count, void 
   const double ratio = targetSr / self.sourceSampleRate;
   size_t outCount = (size_t)llround((double)frameCount * ratio);
   if (outCount == 0) {
+    free(converted);
     return;
   }
 
@@ -91,6 +134,7 @@ typedef void (*AsrSystemAudioCallback)(const float *samples, size_t count, void 
   if (mono == NULL || out == NULL) {
     free(mono);
     free(out);
+    free(converted);
     return;
   }
 
@@ -114,6 +158,7 @@ typedef void (*AsrSystemAudioCallback)(const float *samples, size_t count, void 
   self.callback(out, outCount, self.ctx);
   free(mono);
   free(out);
+  free(converted);
 }
 
 - (void)stream:(SCStream *)stream didStopWithError:(NSError *)error {
@@ -163,7 +208,19 @@ static void asr_fail(AsrSystemAudioHandle *handle, dispatch_semaphore_t sem,
   dispatch_semaphore_signal(sem);
 }
 
-static void asr_start_on_main(AsrSystemAudioHandle *handle, AsrSystemAudioCallback callback,
+/// Dedicated queue for SCKit setup — never the AppKit main queue.
+/// Waiting on main from a Tauri/command thread deadlocks when AppKit is busy
+/// (HUD show, vibrancy, permission sheets) and freezes the whole app.
+static dispatch_queue_t asr_system_audio_queue(void) {
+  static dispatch_queue_t queue;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    queue = dispatch_queue_create("app.asr-workshop.system-audio", DISPATCH_QUEUE_SERIAL);
+  });
+  return queue;
+}
+
+static void asr_start_capture(AsrSystemAudioHandle *handle, AsrSystemAudioCallback callback,
                               void *ctx, dispatch_semaphore_t sem,
                               __strong NSError **outError) {
   if (atomic_load(&handle->cancelled)) {
@@ -194,8 +251,19 @@ static void asr_start_on_main(AsrSystemAudioHandle *handle, AsrSystemAudioCallba
         }
 
         SCDisplay *display = content.displays.firstObject;
+        // Exclude our own HUD / main windows so SCKit does not try to capture
+        // the frosted panels (can stall start on some macOS builds).
+        NSArray<SCWindow *> *ownWindows = content.windows;
+        NSMutableArray<SCWindow *> *exclude = [NSMutableArray array];
+        NSString *ownName = NSBundle.mainBundle.bundleIdentifier;
+        for (SCWindow *w in ownWindows) {
+          NSString *bundle = w.owningApplication.bundleIdentifier;
+          if (bundle.length > 0 && ownName.length > 0 && [bundle isEqualToString:ownName]) {
+            [exclude addObject:w];
+          }
+        }
         SCContentFilter *filter =
-            [[SCContentFilter alloc] initWithDisplay:display excludingWindows:@[]];
+            [[SCContentFilter alloc] initWithDisplay:display excludingWindows:exclude];
         SCStreamConfiguration *config = [SCStreamConfiguration new];
         config.width = 2;
         config.height = 2;
@@ -266,6 +334,15 @@ AsrSystemAudioHandle *asr_system_audio_start(AsrSystemAudioCallback callback, vo
     return NULL;
   }
 
+  // Never block the AppKit main thread waiting on SCKit.
+  if ([NSThread isMainThread]) {
+    if (err_buf && err_buf_len > 0) {
+      snprintf(err_buf, err_buf_len,
+               "asr_system_audio_start must not run on the main thread");
+    }
+    return NULL;
+  }
+
   AsrSystemAudioHandle *handle = calloc(1, sizeof(AsrSystemAudioHandle));
   if (handle == NULL) {
     if (err_buf && err_buf_len > 0) {
@@ -279,8 +356,8 @@ AsrSystemAudioHandle *asr_system_audio_start(AsrSystemAudioCallback callback, vo
   dispatch_semaphore_t sem = dispatch_semaphore_create(0);
   __block NSError *error = nil;
 
-  dispatch_async(dispatch_get_main_queue(), ^{
-    asr_start_on_main(handle, callback, ctx, sem, &error);
+  dispatch_async(asr_system_audio_queue(), ^{
+    asr_start_capture(handle, callback, ctx, sem, &error);
   });
 
   long wait =
@@ -329,11 +406,17 @@ void asr_system_audio_stop(AsrSystemAudioHandle *handle) {
   AsrSystemAudioSink *sink = asr_handle_sink(handle);
   SCStream *stream = sink.stream;
   if (stream != nil) {
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    [stream stopCaptureWithCompletionHandler:^(__unused NSError *error) {
-      dispatch_semaphore_signal(sem);
-    }];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)3 * NSEC_PER_SEC));
+    // Never semaphore-wait on the main thread — stopCapture may complete there.
+    if ([NSThread isMainThread]) {
+      [stream stopCaptureWithCompletionHandler:^(__unused NSError *error){
+      }];
+    } else {
+      dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+      [stream stopCaptureWithCompletionHandler:^(__unused NSError *error) {
+        dispatch_semaphore_signal(sem);
+      }];
+      dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)3 * NSEC_PER_SEC));
+    }
   }
   if (sink != nil) {
     sink.stream = nil;

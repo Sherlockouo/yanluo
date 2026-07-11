@@ -23,7 +23,9 @@ pub(crate) fn open_permission_settings(kind: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub(crate) fn request_permission(kind: String) -> Result<String, String> {
+pub(crate) fn request_permission(
+    kind: String,
+) -> Result<permissions::PermissionRequestResult, String> {
     permissions::request_permission(&kind)
 }
 
@@ -167,6 +169,12 @@ pub(crate) fn clear_history(engine: State<'_, AsrEngine>) -> Result<(), String> 
     save_history_to_disk(&[])
 }
 
+#[tauri::command]
+pub(crate) fn delete_history_entry(id: String, engine: State<'_, AsrEngine>) -> Result<bool, String> {
+    let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
+    delete_history_entry_by_id(&mut history, &id)
+}
+
 /// Keep the newest `keep` entries; drop the rest. `keep=0` clears all.
 #[tauri::command]
 pub(crate) fn prune_history(keep: usize, engine: State<'_, AsrEngine>) -> Result<usize, String> {
@@ -293,7 +301,21 @@ pub(crate) fn start_recording(
     AsrEngine::set_session_mode(&app, session);
     reset_translate_stream(&app);
 
-    let rec = AudioRecorder::start(config.audio_capture_mode).map_err(|e| e.to_string())?;
+    // Show HUD *before* ScreenCaptureKit start — that path can take seconds and
+    // used to leave the UI frozen with no capsule until capture finished/failed.
+    let show_hud = session == "fn" || session == "translate";
+    emit_floating_status(&app, show_hud, "recording", "", 0.0);
+
+    let rec = match AudioRecorder::start(config.audio_capture_mode) {
+        Ok(rec) => rec,
+        Err(e) => {
+            emit_floating_status(&app, false, "idle", "", 0.0);
+            return Err(e.to_string());
+        }
+    };
+    if let Some(warning) = rec.fallback_warning.clone() {
+        let _ = app.emit("audio-capture-warning", warning);
+    }
     {
         let mut guard = engine.inner().recorder.lock().map_err(|e| e.to_string())?;
         *guard = Some(SendWrapper::new(rec));
@@ -304,9 +326,6 @@ pub(crate) fn start_recording(
         .store(false, Ordering::Release);
     engine.inner().recording.store(true, Ordering::Release);
 
-    // Fn / translate show the floating HUD; Transcribe tab keeps UI in-page.
-    let show_hud = session == "fn" || session == "translate";
-    emit_floating_status(&app, show_hud, "recording", "", 0.0);
     spawn_audio_level_pump(app.clone(), engine.inner().recording.clone());
 
     let chunk_sec = chunk_sec.unwrap_or(config.chunk_size_sec.max(0.2));

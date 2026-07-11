@@ -9,6 +9,8 @@
 	<key>NSAppleEventsUsageDescription</key>
 	<string>ASR Workshop 需要通过 Apple Events 将转写结果粘贴到当前应用。</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>ASR Workshop 在「只录系统 / 两者都录」模式下需要屏幕录制权限，以采集系统正在播放的声音（不会保存画面）。</string>
+	<string>ASR Workshop 在「只录系统 / 两者都录」模式下需要屏幕录制权限，以采集系统正在播放的声音（扬声器或耳机，不会保存画面）。</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>ASR Workshop 需要采集系统正在播放的声音（含耳机输出），以便在戴耳机时转写/翻译播放内容。</string>
 </dict>
 </plist>

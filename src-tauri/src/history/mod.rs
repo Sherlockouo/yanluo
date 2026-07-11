@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::Path;
 use tauri::{AppHandle, Manager};
 use crate::state::*;
 use crate::config::*;
@@ -117,4 +118,28 @@ pub(crate) fn append_history(
     );
     history.truncate(5000);
     let _ = save_history_to_disk(&history);
+}
+
+/// Remove one history entry by id. Deletes associated media under recordings/.
+/// Returns true if an entry was removed.
+pub(crate) fn delete_history_entry_by_id(
+    history: &mut Vec<HistoryEntry>,
+    id: &str,
+) -> Result<bool, String> {
+    let Some(idx) = history.iter().position(|e| e.id == id) else {
+        return Ok(false);
+    };
+    let entry = history.remove(idx);
+    if let Some(path) = entry.audio_path.as_deref() {
+        remove_recording_if_owned(path);
+    }
+    save_history_to_disk(history)?;
+    Ok(true)
+}
+
+fn remove_recording_if_owned(path: &str) {
+    let path = Path::new(path);
+    if path.starts_with(recordings_dir()) {
+        let _ = fs::remove_file(path);
+    }
 }

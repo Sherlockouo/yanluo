@@ -4,7 +4,11 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AnimatePresence, motion } from "framer-motion";
 import { ChevronUp } from "lucide-react";
 import type { FloatingPayload } from "@/types";
-import { hudTargetShort, translateTargetLabel } from "@/lib/constants";
+import {
+  TRANSLATE_LANGUAGES,
+  hudTargetShort,
+  translateTargetLabel,
+} from "@/lib/constants";
 import { cn } from "@/lib/cn";
 
 function applyHudTheme(theme: "light" | "dark") {
@@ -17,7 +21,7 @@ function applyHudTheme(theme: "light" | "dark") {
 
 /**
  * Separate frosted chip appended to the right of the ASR capsule.
- * Opens a native system menu — never grows the HUD window.
+ * Opens an in-window menu (native NSMenu fails over fullscreen apps).
  */
 export function AsrHudLangChip() {
   const [payload, setPayload] = useState<FloatingPayload>({
@@ -26,6 +30,7 @@ export function AsrHudLangChip() {
     text: "",
     rms: 0,
   });
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-floating", "1");
@@ -46,6 +51,7 @@ export function AsrHudLangChip() {
     let disposed = false;
     let unlistenStatus: UnlistenFn | null = null;
     let unlistenTheme: UnlistenFn | null = null;
+    let unlistenMenu: UnlistenFn | null = null;
 
     void invoke<FloatingPayload>("get_floating_status")
       .then((status) => {
@@ -55,6 +61,12 @@ export function AsrHudLangChip() {
 
     void listen<FloatingPayload>("floating-status", (event) => {
       setPayload(event.payload);
+      if (!event.payload.visible) {
+        setMenuOpen(false);
+        void invoke("set_floating_lang_menu_open", { open: false }).catch(
+          () => {},
+        );
+      }
     }).then((u) => {
       unlistenStatus = u;
     });
@@ -63,14 +75,25 @@ export function AsrHudLangChip() {
     }).then((u) => {
       unlistenTheme = u;
     });
+    void listen<boolean>("floating-lang-menu", (event) => {
+      setMenuOpen(Boolean(event.payload));
+    }).then((u) => {
+      unlistenMenu = u;
+    });
 
     return () => {
       disposed = true;
       window.removeEventListener("storage", onStorage);
       unlistenStatus?.();
       unlistenTheme?.();
+      unlistenMenu?.();
+      // Do NOT invoke set_floating_lang_menu_open(false) here — HMR/unmount
+      // used to orderFront the chip and flash EN on launch.
     };
   }, []);
+
+  // Esc is handled by the global event tap (NonactivatingPanel never gets keydown).
+  // Keep a local listener only as a no-op fallback when the chip somehow has focus.
 
   const switching = Boolean(payload.switching);
   const target = payload.target_language ?? "en-US";
@@ -80,19 +103,71 @@ export function AsrHudLangChip() {
     payload.state === "refining" ||
     payload.state === "processing";
 
+  const closeMenu = () => {
+    setMenuOpen(false);
+    void invoke("set_floating_lang_menu_open", { open: false }).catch(() => {});
+  };
+
+  const openMenu = () => {
+    if (busy) return;
+    setMenuOpen(true);
+    void invoke("set_floating_lang_menu_open", { open: true }).catch(() => {});
+  };
+
+  const pick = (code: string) => {
+    void invoke("set_translate_target_language", { language: code })
+      .then(() => setMenuOpen(false))
+      .catch(() => {
+        closeMenu();
+      });
+  };
+
   return (
-    <div className="hud-lang-root">
+    <div
+      className={cn("hud-lang-root", menuOpen && "is-menu-open")}
+      onMouseLeave={() => {
+        if (menuOpen) closeMenu();
+      }}
+    >
+      {menuOpen ? (
+        <div className="hud-lang-menu" role="listbox" aria-label="翻译目标语言">
+          {TRANSLATE_LANGUAGES.map(([code, label]) => {
+            const selected = code === target;
+            return (
+              <button
+                key={code}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                className={cn("hud-lang-option", selected && "is-selected")}
+                onClick={() => pick(code)}
+              >
+                <span className="hud-lang-option-short">
+                  {hudTargetShort(code)}
+                </span>
+                <span className="hud-lang-option-label">{label}</span>
+                <span className="hud-lang-option-code">{code}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
       <button
         type="button"
         className={cn(
           "hud-lang-chip",
           switching && "hud-target-switching",
           busy && "is-busy",
+          menuOpen && "is-open",
         )}
-        aria-label={`翻译到 ${translateTargetLabel(target) || short}`}
+        aria-label={`${translateTargetLabel(target) || short}`}
+        aria-expanded={menuOpen}
+        aria-haspopup="listbox"
         disabled={busy}
         onClick={() => {
-          void invoke("popup_translate_target_menu").catch(() => {});
+          if (menuOpen) closeMenu();
+          else openMenu();
         }}
       >
         <AnimatePresence mode="wait" initial={false}>
@@ -106,7 +181,12 @@ export function AsrHudLangChip() {
             {short}
           </motion.span>
         </AnimatePresence>
-        <ChevronUp size={11} strokeWidth={2.5} aria-hidden />
+        <ChevronUp
+          size={11}
+          strokeWidth={2.5}
+          aria-hidden
+          className={cn(menuOpen && "hud-lang-chevron-open")}
+        />
       </button>
     </div>
   );

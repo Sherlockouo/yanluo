@@ -12,6 +12,13 @@
 // Without NS*UsageDescription in the process Info.plist, macOS aborts with
 // TCC SIGABRT. `tauri dev` runs a naked binary without Info.plist — guard
 // and refuse rather than crash. Packaged .app merges src-tauri/Info.plist.
+//
+// Auth status codes (shared with permissions/mod.rs):
+//   0 = notDetermined  → show OS dialog
+//   1 = denied         → only System Settings can flip
+//   2 = authorized
+//   3 = restricted
+//   4 = unknown / unavailable
 
 static bool asr_tcc_has_usage_description(NSString *key) {
   id value = [[NSBundle mainBundle] objectForInfoDictionaryKey:key];
@@ -29,10 +36,44 @@ bool asr_tcc_speech_authorized(void) {
          SFSpeechRecognizerAuthorizationStatusAuthorized;
 }
 
+int asr_tcc_mic_status(void) {
+  switch ([AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeAudio]) {
+  case AVAuthorizationStatusNotDetermined:
+    return 0;
+  case AVAuthorizationStatusDenied:
+    return 1;
+  case AVAuthorizationStatusAuthorized:
+    return 2;
+  case AVAuthorizationStatusRestricted:
+    return 3;
+  default:
+    return 4;
+  }
+}
+
+int asr_tcc_speech_status(void) {
+  switch ([SFSpeechRecognizer authorizationStatus]) {
+  case SFSpeechRecognizerAuthorizationStatusNotDetermined:
+    return 0;
+  case SFSpeechRecognizerAuthorizationStatusDenied:
+    return 1;
+  case SFSpeechRecognizerAuthorizationStatusAuthorized:
+    return 2;
+  case SFSpeechRecognizerAuthorizationStatusRestricted:
+    return 3;
+  default:
+    return 4;
+  }
+}
+
 /// Returns false if Info.plist lacks NSMicrophoneUsageDescription (would crash).
 bool asr_tcc_request_mic_async(void) {
   if (!asr_tcc_has_usage_description(@"NSMicrophoneUsageDescription")) {
     return false;
+  }
+  // Already decided — requesting again does nothing useful and confuses UX.
+  if (asr_tcc_mic_status() != 0) {
+    return true;
   }
   [AVCaptureDevice requestAccessForMediaType:AVMediaTypeAudio
                            completionHandler:^(BOOL granted) {
@@ -45,6 +86,9 @@ bool asr_tcc_request_mic_async(void) {
 bool asr_tcc_request_speech_async(void) {
   if (!asr_tcc_has_usage_description(@"NSSpeechRecognitionUsageDescription")) {
     return false;
+  }
+  if (asr_tcc_speech_status() != 0) {
+    return true;
   }
   dispatch_async(dispatch_get_main_queue(), ^{
     [SFSpeechRecognizer

@@ -192,4 +192,4 @@ export const TRANSCRIBE_FILE_FILTERS = [
 ] as const;
 
 export const TRANSCRIBE_FORMAT_HINT =
-  "支持拖拽或点击选择 · 音频 WAV / MP3 / M4A / FLAC… · 视频 MP4 / MOV / MKV…";
+  "WAV · MP3 · M4A · FLAC · MP4 · MOV · MKV";

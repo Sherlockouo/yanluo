@@ -203,6 +203,44 @@ pub(crate) const FLOATING_LANG_W: f64 = 54.0;
 pub(crate) const FLOATING_LANG_H: f64 = 32.0;
 pub(crate) const FLOATING_LANG_GAP: f64 = 8.0;
 pub(crate) const FLOATING_LANG_CORNER_RADIUS: f64 = 16.0;
+/// Expanded in-window menu (native NSMenu fails over fullscreen NonactivatingPanel).
+pub(crate) const FLOATING_LANG_MENU_W: f64 = 172.0;
+pub(crate) const FLOATING_LANG_MENU_ITEM_H: f64 = 34.0;
+/// Must match `TRANSLATE_LANGUAGES` length in `src/lib/constants.ts`.
+pub(crate) const FLOATING_LANG_MENU_ITEMS: f64 = 5.0;
+pub(crate) const FLOATING_LANG_MENU_PAD_Y: f64 = 6.0;
+pub(crate) const FLOATING_LANG_MENU_GAP: f64 = 2.0;
+
+fn floating_lang_menu_height() -> f64 {
+    // chip + top pad + N items + (N-1) gaps + bottom pad under list (before chip)
+    FLOATING_LANG_H
+        + FLOATING_LANG_MENU_PAD_Y
+        + FLOATING_LANG_MENU_ITEMS * FLOATING_LANG_MENU_ITEM_H
+        + (FLOATING_LANG_MENU_ITEMS - 1.0).max(0.0) * FLOATING_LANG_MENU_GAP
+        + 4.0
+}
+
+fn lang_menu_open_flag() -> &'static AtomicBool {
+    static OPEN: AtomicBool = AtomicBool::new(false);
+    &OPEN
+}
+
+/// True while the translate-target in-window menu is expanded.
+pub(crate) fn floating_lang_menu_is_open() -> bool {
+    lang_menu_open_flag().load(Ordering::Acquire)
+}
+
+/// Collapse the lang menu from the global event tap (Esc).
+pub(crate) fn close_floating_lang_menu(app: &AppHandle) {
+    if !floating_lang_menu_is_open() {
+        return;
+    }
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        apply_floating_lang_menu_open(&app, false);
+        let _ = app.emit_to("floating-lang", "floating-lang-menu", false);
+    });
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct HudPosition {
@@ -372,15 +410,18 @@ fn create_floating_lang_window(app: &AppHandle) -> Result<(), String> {
 
     #[cfg(target_os = "macos")]
     {
-        configure_floating_hud_panel(&window, FLOATING_LANG_CORNER_RADIUS);
+        configure_floating_lang_panel(&window, FLOATING_LANG_CORNER_RADIUS);
         // Chip stays glued to the capsule — don't let it be dragged alone.
         if let Ok(ns_ptr) = window.ns_window() {
             use objc2_app_kit::NSWindow;
             unsafe {
                 let ns_window = &*(ns_ptr as *const NSWindow);
                 ns_window.setMovableByWindowBackground(false);
+                ns_window.setHasShadow(false);
             }
         }
+        // configure / always-on-top can unhide on some macOS builds — force hide.
+        let _ = window.hide();
     }
 
     let _ = window.hide();
@@ -389,6 +430,9 @@ fn create_floating_lang_window(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Place the lang chip just to the right of the capsule (same vertical center).
+/// When the menu is open, expand **upward from the chip** — left edges stay aligned
+/// so the list sits directly above the trigger (not shifted left).
+/// Does not orderFront — callers that need visibility must raise explicitly.
 pub(crate) fn position_floating_lang_chip(app: &AppHandle) {
     let Some(hud) = app.get_webview_window("floating") else {
         return;
@@ -406,13 +450,32 @@ pub(crate) fn position_floating_lang_chip(app: &AppHandle) {
     let Ok(size) = hud.outer_size() else {
         return;
     };
-    let x = pos.x as f64 / scale + size.width as f64 / scale + FLOATING_LANG_GAP;
-    let y = pos.y as f64 / scale
+    // Collapsed chip anchor: right of HUD, vertically centered on the capsule.
+    let chip_x = pos.x as f64 / scale + size.width as f64 / scale + FLOATING_LANG_GAP;
+    let chip_y = pos.y as f64 / scale
         + ((size.height as f64 / scale - FLOATING_LANG_H) / 2.0).max(0.0);
-    let _ = lang.set_position(tauri::LogicalPosition::new(x, y));
+
+    let menu_open = lang_menu_open_flag().load(Ordering::Acquire);
+    if menu_open {
+        let menu_w = FLOATING_LANG_MENU_W;
+        let menu_h = floating_lang_menu_height();
+        // Keep the trigger's left edge fixed; grow up + to the right.
+        let x = chip_x;
+        let y = chip_y + FLOATING_LANG_H - menu_h;
+        let _ = lang.set_size(tauri::LogicalSize::new(menu_w, menu_h));
+        let _ = lang.set_position(tauri::LogicalPosition::new(x, y));
+    } else {
+        let _ = lang.set_size(tauri::LogicalSize::new(FLOATING_LANG_W, FLOATING_LANG_H));
+        let _ = lang.set_position(tauri::LogicalPosition::new(chip_x, chip_y));
+    }
     let _ = lang.set_always_on_top(true);
-    #[cfg(target_os = "macos")]
-    raise_floating_hud_level(&lang, true);
+}
+
+fn translate_lang_chip_should_show(app: &AppHandle) -> bool {
+    floating_status_slot(app)
+        .lock()
+        .map(|s| s.visible && s.intention.as_deref() == Some("translate"))
+        .unwrap_or(false)
 }
 
 /// Show/hide the separate translate-target chip. Call on the AppKit main thread.
@@ -421,6 +484,10 @@ pub(crate) fn sync_floating_lang_chip(app: &AppHandle, show: bool) {
         return;
     };
     if show {
+        // Do not collapse an open menu on every floating-status tick.
+        if !lang_menu_open_flag().load(Ordering::Acquire) {
+            let _ = lang.set_size(tauri::LogicalSize::new(FLOATING_LANG_W, FLOATING_LANG_H));
+        }
         position_floating_lang_chip(app);
         #[cfg(target_os = "macos")]
         {
@@ -431,52 +498,81 @@ pub(crate) fn sync_floating_lang_chip(app: &AppHandle, show: bool) {
             let _ = lang.show();
         }
     } else {
+        lang_menu_open_flag().store(false, Ordering::Release);
+        let _ = lang.set_size(tauri::LogicalSize::new(FLOATING_LANG_W, FLOATING_LANG_H));
         let _ = lang.hide();
     }
 }
 
-/// Native system menu for translate target — does not resize the HUD window.
+/// Expand/collapse the translate-target chip into an in-window menu.
+/// Native `NSMenu.popup` does not reliably appear over fullscreen apps from a
+/// NonactivatingPanel, so the chip window itself grows to host the list.
 #[tauri::command]
-pub(crate) fn popup_translate_target_menu(
-    app: AppHandle,
-    window: tauri::WebviewWindow,
-) -> Result<(), String> {
-    use tauri::menu::{ContextMenu, MenuBuilder};
-
-    let current = app
-        .state::<AsrEngine>()
-        .inner()
-        .config
-        .lock()
-        .map(|c| c.translate_target_language.clone())
-        .unwrap_or_else(|_| "en-US".into());
-
-    let menu = MenuBuilder::new(&app)
-        .text(
-            "translate-target:zh-CN",
-            crate::menu::menu_label("简体中文", current == "zh-CN"),
-        )
-        .text(
-            "translate-target:zh-TW",
-            crate::menu::menu_label("繁體中文", current == "zh-TW"),
-        )
-        .text(
-            "translate-target:en-US",
-            crate::menu::menu_label("English", current == "en-US"),
-        )
-        .text(
-            "translate-target:ja-JP",
-            crate::menu::menu_label("日本語", current == "ja-JP"),
-        )
-        .text(
-            "translate-target:ko-KR",
-            crate::menu::menu_label("한국어", current == "ko-KR"),
-        )
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    menu.popup(window.as_ref().window())
+pub(crate) fn set_floating_lang_menu_open(app: AppHandle, open: bool) -> Result<(), String> {
+    let app_clone = app.clone();
+    app_clone
+        .run_on_main_thread(move || {
+            apply_floating_lang_menu_open(&app, open);
+        })
         .map_err(|e| e.to_string())
+}
+
+fn apply_floating_lang_menu_open(app: &AppHandle, open: bool) {
+    let Some(lang) = app.get_webview_window("floating-lang") else {
+        return;
+    };
+    let should_show = translate_lang_chip_should_show(app);
+
+    // Closing the menu (or spurious calls from webview HMR/unmount) must NEVER
+    // orderFront a hidden chip — that was flashing EN on app launch.
+    if !open {
+        lang_menu_open_flag().store(false, Ordering::Release);
+        let _ = lang.set_size(tauri::LogicalSize::new(FLOATING_LANG_W, FLOATING_LANG_H));
+        if should_show {
+            position_floating_lang_chip(app);
+            #[cfg(target_os = "macos")]
+            raise_floating_hud_level(&lang, true);
+        } else {
+            let _ = lang.hide();
+        }
+        return;
+    }
+
+    if !should_show {
+        lang_menu_open_flag().store(false, Ordering::Release);
+        let _ = lang.hide();
+        return;
+    }
+
+    lang_menu_open_flag().store(true, Ordering::Release);
+    position_floating_lang_chip(app);
+    #[cfg(target_os = "macos")]
+    raise_floating_hud_level(&lang, true);
+}
+
+/// Apply translate target from the HUD chip menu (shows BCP-47 codes in UI).
+#[tauri::command]
+pub(crate) fn set_translate_target_language(
+    app: AppHandle,
+    language: String,
+) -> Result<(), String> {
+    let language = language.trim().to_string();
+    const ALLOWED: &[&str] = &["zh-CN", "zh-TW", "en-US", "ja-JP", "ko-KR"];
+    if !ALLOWED.contains(&language.as_str()) {
+        return Err(format!("unsupported translate target: {language}"));
+    }
+    crate::menu::apply_translate_target(&app, &language);
+    let app_clone = app.clone();
+    let _ = app_clone.run_on_main_thread(move || {
+        apply_floating_lang_menu_open(&app, false);
+    });
+    Ok(())
+}
+
+/// Legacy entry — kept for older frontends; expands the in-window menu instead.
+#[tauri::command]
+pub(crate) fn popup_translate_target_menu(app: AppHandle) -> Result<(), String> {
+    set_floating_lang_menu_open(app, true)
 }
 
 #[tauri::command]

@@ -47,6 +47,8 @@ pub struct AudioRecorder {
     mic_samples: Arc<Mutex<Vec<f32>>>,
     system_samples: Arc<Mutex<Vec<f32>>>,
     mode: AudioCaptureMode,
+    /// Human-readable reason when system capture was dropped.
+    pub fallback_warning: Option<String>,
 }
 
 impl AudioRecorder {
@@ -63,20 +65,21 @@ impl AudioRecorder {
             None
         };
 
-        let (system, effective_mode) = if want_system {
+        let (system, effective_mode, fallback_warning) = if want_system {
             match SystemAudioCapture::start(system_samples.clone()) {
-                Ok(cap) => (Some(cap), mode),
+                Ok(cap) => (Some(cap), mode, None),
                 Err(err) if want_mic => {
                     // Dev / missing screen-recording permission: keep mic alive.
-                    eprintln!(
-                        "[audio] system capture unavailable ({err}); falling back to external-only"
+                    let msg = format!(
+                        "系统音频不可用（{err}），已退回只录麦克风。戴耳机时请到「设置 → 权限」授予屏幕录制，并选「只录系统」或「两者都录」。"
                     );
-                    (None, AudioCaptureMode::External)
+                    eprintln!("[audio] {msg}");
+                    (None, AudioCaptureMode::External, Some(msg))
                 }
                 Err(err) => return Err(err),
             }
         } else {
-            (None, mode)
+            (None, mode, None)
         };
 
         if mic_stream.is_none() && system.is_none() {
@@ -95,6 +98,7 @@ impl AudioRecorder {
             mic_samples,
             system_samples,
             mode: effective_mode,
+            fallback_warning,
         })
     }
 
@@ -103,26 +107,25 @@ impl AudioRecorder {
         mix_buffers(&self.mic_samples, &self.system_samples, self.mode)
     }
 
-    /// Live meter 0–1 from recent samples.
+    /// Live meter 0–1 from recent samples (tail only — never clones the full buffer).
     pub fn recent_rms(&self, window: usize) -> f32 {
-        let buf = self.get_samples();
-        let n = buf.len().min(window.max(1));
-        if n == 0 {
+        let buf = mix_buffers_tail(&self.mic_samples, &self.system_samples, self.mode, window);
+        if buf.is_empty() {
             return 0.0;
         }
-        meter_from_slice(&buf[buf.len() - n..])
+        meter_from_slice(&buf)
     }
 
     /// Log-spaced speech bands via Goertzel (~80Hz–4kHz).
+    /// Copies only the last `window` samples so the HUD pump cannot freeze the app
+    /// as the recording buffer grows (system audio especially).
     pub fn recent_bands(&self, band_count: usize, window: usize) -> (f32, Vec<f32>) {
-        let buf = self.get_samples();
-        let n = buf.len().min(window.max(1));
-        if n == 0 {
+        let buf = mix_buffers_tail(&self.mic_samples, &self.system_samples, self.mode, window);
+        if buf.is_empty() {
             return (0.0, vec![0.0; band_count]);
         }
-        let slice = &buf[buf.len() - n..];
-        let rms = meter_from_slice(slice);
-        let bands = goertzel_bands(slice, TARGET_SR as f32, band_count);
+        let rms = meter_from_slice(&buf);
+        let bands = goertzel_bands(&buf, TARGET_SR as f32, band_count);
         (rms, bands)
     }
 
@@ -145,10 +148,35 @@ fn mix_buffers(
     match mode {
         AudioCaptureMode::External => mic,
         AudioCaptureMode::System => sys,
+        AudioCaptureMode::Both => mix_aligned(&mic, &sys),
+    }
+}
+
+/// Copy only the last `window` mixed samples — used by the HUD meter (~60 Hz).
+fn mix_buffers_tail(
+    mic: &Arc<Mutex<Vec<f32>>>,
+    system: &Arc<Mutex<Vec<f32>>>,
+    mode: AudioCaptureMode,
+    window: usize,
+) -> Vec<f32> {
+    let window = window.max(1);
+    match mode {
+        AudioCaptureMode::External => tail_copy(mic, window),
+        AudioCaptureMode::System => tail_copy(system, window),
         AudioCaptureMode::Both => {
+            let Ok(mic) = mic.lock() else {
+                return Vec::new();
+            };
+            let Ok(sys) = system.lock() else {
+                return Vec::new();
+            };
             let n = mic.len().max(sys.len());
-            let mut out = Vec::with_capacity(n);
-            for i in 0..n {
+            if n == 0 {
+                return Vec::new();
+            }
+            let start = n.saturating_sub(window);
+            let mut out = Vec::with_capacity(n - start);
+            for i in start..n {
                 let a = mic.get(i).copied().unwrap_or(0.0);
                 let b = sys.get(i).copied().unwrap_or(0.0);
                 out.push((a + b).clamp(-1.0, 1.0));
@@ -156,6 +184,28 @@ fn mix_buffers(
             out
         }
     }
+}
+
+fn tail_copy(buf: &Arc<Mutex<Vec<f32>>>, window: usize) -> Vec<f32> {
+    let Ok(guard) = buf.lock() else {
+        return Vec::new();
+    };
+    let n = guard.len().min(window);
+    if n == 0 {
+        return Vec::new();
+    }
+    guard[guard.len() - n..].to_vec()
+}
+
+fn mix_aligned(mic: &[f32], sys: &[f32]) -> Vec<f32> {
+    let n = mic.len().max(sys.len());
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let a = mic.get(i).copied().unwrap_or(0.0);
+        let b = sys.get(i).copied().unwrap_or(0.0);
+        out.push((a + b).clamp(-1.0, 1.0));
+    }
+    out
 }
 
 fn start_mic_stream(

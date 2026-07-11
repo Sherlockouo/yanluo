@@ -204,35 +204,39 @@ fn open_settings_page(app: &AppHandle, page: &str) {
     let _ = app.emit("open-settings", page);
 }
 
+/// Persist translate target and refresh HUD / live stream.
+pub(crate) fn apply_translate_target(app: &AppHandle, target: &str) {
+    let previous = app
+        .state::<AsrEngine>()
+        .inner()
+        .config
+        .lock()
+        .map(|c| c.translate_target_language.clone())
+        .unwrap_or_default();
+    if let Ok(mut config) = app.state::<AsrEngine>().inner().config.lock() {
+        config.translate_target_language = target.to_string();
+        let _ = save_config_to_disk(&config);
+        let _ = app.emit("config-updated", config.clone());
+    }
+    if previous != target {
+        crate::transcription::retarget_translate_stream(app);
+    } else if floating_status_slot(app)
+        .lock()
+        .map(|s| s.visible)
+        .unwrap_or(false)
+    {
+        let text = crate::transcription::peek_translate_out(app);
+        let state = floating_status_slot(app)
+            .lock()
+            .map(|s| s.state.clone())
+            .unwrap_or_else(|_| "recording".into());
+        emit_floating_status(app, true, &state, &text, 0.0);
+    }
+}
+
 pub(crate) fn handle_menu_event(app: &AppHandle, id: &str) {
-    // HUD native translate-target popup (not the app menu bar).
     if let Some(target) = id.strip_prefix("translate-target:") {
-        let previous = app
-            .state::<AsrEngine>()
-            .inner()
-            .config
-            .lock()
-            .map(|c| c.translate_target_language.clone())
-            .unwrap_or_default();
-        if let Ok(mut config) = app.state::<AsrEngine>().inner().config.lock() {
-            config.translate_target_language = target.to_string();
-            let _ = save_config_to_disk(&config);
-            let _ = app.emit("config-updated", config.clone());
-        }
-        if previous != target {
-            crate::transcription::retarget_translate_stream(app);
-        } else if floating_status_slot(app)
-            .lock()
-            .map(|s| s.visible)
-            .unwrap_or(false)
-        {
-            let text = crate::transcription::peek_translate_out(app);
-            let state = floating_status_slot(app)
-                .lock()
-                .map(|s| s.state.clone())
-                .unwrap_or_else(|_| "recording".into());
-            emit_floating_status(app, true, &state, &text, 0.0);
-        }
+        apply_translate_target(app, target);
         return;
     }
 

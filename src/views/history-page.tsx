@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Clipboard,
+  Languages,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -18,7 +19,7 @@ import { TranscriptViewer } from "@/components/ui/transcript-viewer";
 import {
   hasRefineDiff,
   RefineDiff,
-  RefineFromTo,
+  SemanticPair,
 } from "@/components/ui/refine-diff";
 import { isVideoMediaKind } from "@/lib/alignment";
 import { cn } from "@/lib/cn";
@@ -29,16 +30,19 @@ import { useApp } from "@/app-context";
 function historyLanguageChip(entry: HistoryEntry): string {
   const isTranslate = (entry.source ?? "fn") === "translate";
   if (isTranslate) {
-    const target = translateTargetLabel(entry.translate_target_language);
-    return target ? `译为 ${target}` : "译";
+    return translateTargetLabel(entry.translate_target_language) || "译";
   }
-  const lang = entry.language || "auto";
-  return hasRefineDiff(entry.raw_text, entry.text) ? `${lang} · refined` : lang;
+  return entry.language || "auto";
 }
 
 export function HistoryPage() {
-  const { history, clearHistory, pruneHistory, pruneHistoryOlderThan } =
-    useApp();
+  const {
+    history,
+    clearHistory,
+    deleteHistory,
+    pruneHistory,
+    pruneHistoryOlderThan,
+  } = useApp();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState(false);
 
@@ -49,15 +53,22 @@ export function HistoryPage() {
     toast.success(label);
   };
 
+  const removeEntry = async (id: string) => {
+    if (!window.confirm("确定删除这条记录？")) return;
+    try {
+      await deleteHistory(id);
+      setExpandedId((cur) => (cur === id ? null : cur));
+      toast.success("已删除");
+    } catch (error) {
+      toast.danger(`删除失败: ${error}`);
+    }
+  };
+
   return (
     <PageShell>
       <PageHeader
         title="历史"
-        subtitle={
-          history.length
-            ? `${history.length} 条本地记录`
-            : "本地保存，随时清理"
-        }
+        subtitle={history.length ? `${history.length} 条` : undefined}
         action={
           history.length > 0 ? (
             <div className="relative">
@@ -135,10 +146,7 @@ export function HistoryPage() {
 
       {history.length === 0 ? (
         <SectionCard>
-          <EmptyState
-            title="还没有记录"
-            description="Fn 录音或转写页上传后，会出现在这里。"
-          />
+          <EmptyState title="还没有记录" />
         </SectionCard>
       ) : (
         <div className="flex flex-col gap-2">
@@ -152,6 +160,7 @@ export function HistoryPage() {
                   onToggle={() =>
                     setExpandedId((id) => (id === entry.id ? null : entry.id))
                   }
+                  onDelete={() => void removeEntry(entry.id)}
                 />
                 {open ? (
                   <ExpandedViewer
@@ -195,10 +204,12 @@ function HistoryRow({
   entry,
   open,
   onToggle,
+  onDelete,
 }: {
   entry: HistoryEntry;
   open: boolean;
   onToggle: () => void;
+  onDelete: () => void;
 }) {
   const isVideo = isVideoMediaKind(entry.media_kind, entry.audio_path);
   const isTranslate = (entry.source ?? "fn") === "translate";
@@ -206,70 +217,87 @@ function HistoryRow({
   const showTranslatePair =
     isTranslate && Boolean(entry.raw_text?.trim() && entry.text?.trim());
   return (
-    <button
-      type="button"
-      onClick={onToggle}
+    <div
       className={cn(
-        "flex w-full items-start gap-3 rounded-2xl border px-4 py-3.5 text-left transition",
+        "flex w-full items-start gap-2 rounded-2xl border px-4 py-3.5 transition",
         open
           ? "border-accent/35 bg-accent/[0.07]"
           : "border-border bg-surface hover:bg-surface-secondary/40",
       )}
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted">
-          <span>{new Date(entry.created_at).toLocaleString()}</span>
-          <span>{entry.duration_seconds.toFixed(1)}s</span>
-          <span>
-            {isTranslate
-              ? "翻译"
-              : (entry.source ?? "fn") === "transcribe"
-                ? "转写"
-                : "Fn"}
-          </span>
-          {isVideo ? <span>视频</span> : null}
-          <Chip
-            size="sm"
-            variant="soft"
-            color={entry.refined || isTranslate ? "accent" : "default"}
-          >
-            <Chip.Label className="inline-flex items-center gap-1">
-              {entry.refined || isTranslate ? (
-                <Sparkles size={10} />
-              ) : (
-                <CheckCircle2 size={10} />
-              )}
-              {historyLanguageChip(entry)}
-            </Chip.Label>
-          </Chip>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex min-w-0 flex-1 items-start gap-3 text-left"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted">
+            <span>{new Date(entry.created_at).toLocaleString()}</span>
+            <span>{entry.duration_seconds.toFixed(1)}s</span>
+            <span>
+              {isTranslate
+                ? "翻译"
+                : (entry.source ?? "fn") === "transcribe"
+                  ? "转写"
+                  : "Fn"}
+            </span>
+            {isVideo ? <span>视频</span> : null}
+            <Chip
+              size="sm"
+              variant="soft"
+              color={entry.refined || isTranslate ? "accent" : "default"}
+            >
+              <Chip.Label className="inline-flex items-center gap-1">
+                {isTranslate ? (
+                  <Languages size={10} />
+                ) : entry.refined || showDiff ? (
+                  <Sparkles size={10} />
+                ) : (
+                  <CheckCircle2 size={10} />
+                )}
+                {historyLanguageChip(entry)}
+              </Chip.Label>
+            </Chip>
+          </div>
+          {showTranslatePair ? (
+            <div className="mt-1.5 line-clamp-4">
+              <SemanticPair
+                before={entry.raw_text}
+                after={entry.text}
+                compact
+              />
+            </div>
+          ) : showDiff ? (
+            <div className="mt-1.5 line-clamp-3">
+              <RefineDiff before={entry.raw_text} after={entry.text} compact />
+            </div>
+          ) : (
+            <p className="mt-1.5 line-clamp-2 text-[14px] leading-snug text-foreground">
+              {entry.text || "（空）"}
+            </p>
+          )}
         </div>
-        {showTranslatePair ? (
-          <div className="mt-1.5 line-clamp-4">
-            <RefineFromTo
-              before={entry.raw_text}
-              after={entry.text}
-              beforeLabel="原"
-              afterLabel="译"
-            />
-          </div>
-        ) : showDiff ? (
-          <div className="mt-1.5 line-clamp-3">
-            <RefineDiff before={entry.raw_text} after={entry.text} compact />
-          </div>
-        ) : (
-          <p className="mt-1.5 line-clamp-2 text-[14px] leading-snug text-foreground">
-            {entry.text || "（空）"}
-          </p>
-        )}
-      </div>
-      <ChevronDown
-        size={16}
-        className={cn(
-          "mt-1 shrink-0 text-muted transition-transform duration-200",
-          open && "rotate-180",
-        )}
-      />
-    </button>
+        <ChevronDown
+          size={16}
+          className={cn(
+            "mt-1 shrink-0 text-muted transition-transform duration-200",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      <button
+        type="button"
+        className="mt-0.5 shrink-0 rounded-lg p-1.5 text-muted transition hover:bg-danger/10 hover:text-danger"
+        title="删除"
+        aria-label="删除"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+      >
+        <Trash2 size={14} aria-hidden />
+      </button>
+    </div>
   );
 }
 
@@ -289,49 +317,29 @@ function ExpandedViewer({
 
   return (
     <SectionCard className="!p-4">
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <p className="text-[12px] text-muted">详情</p>
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            onPress={() => {
-              void navigator.clipboard.writeText(entry.text);
-              toast.success("已复制");
-            }}
-          >
-            <Clipboard size={14} />
-            复制
-          </Button>
-          <Button size="sm" variant="secondary" onPress={onClose}>
-            收起
-          </Button>
-        </div>
+      <div className="mb-3 flex items-center justify-end gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          onPress={() => {
+            void navigator.clipboard.writeText(entry.text);
+            toast.success("已复制");
+          }}
+        >
+          <Clipboard size={14} />
+          复制
+        </Button>
+        <Button size="sm" variant="secondary" onPress={onClose}>
+          收起
+        </Button>
       </div>
       {isTranslate && showDiff ? (
         <div className="mb-4 rounded-2xl border border-border bg-surface-secondary/40 px-3.5 py-3">
-          <p className="mb-2 text-[11px] text-muted">
-            原文 → 译文
-            {entry.translate_target_language
-              ? ` · ${translateTargetLabel(entry.translate_target_language)}`
-              : ""}
-          </p>
-          <RefineFromTo
-            before={entry.raw_text}
-            after={entry.text}
-            beforeLabel="原"
-            afterLabel="译"
-          />
+          <SemanticPair before={entry.raw_text} after={entry.text} />
         </div>
       ) : showDiff ? (
         <div className="mb-4 rounded-2xl border border-border bg-surface-secondary/40 px-3.5 py-3">
-          <p className="mb-2 text-[11px] text-muted">纠错对照 · 红删绿增</p>
           <RefineDiff before={entry.raw_text} after={entry.text} />
-          <RefineFromTo
-            className="mt-3 border-t border-border/60 pt-3"
-            before={entry.raw_text}
-            after={entry.text}
-          />
         </div>
       ) : null}
       {mediaSrc ? (

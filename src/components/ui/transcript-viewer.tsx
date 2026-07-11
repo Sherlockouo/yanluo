@@ -2,14 +2,24 @@
  * Transcript + media playback.
  * Jobs-like reading: one thought at a time, breathing room, auto-follow.
  * Alignment uses ElevenLabs CharacterAlignmentResponseModel shape.
+ *
+ * Compound API for cover modals:
+ *   <TranscriptViewer.Root ...>
+ *     <TranscriptViewer.Media />     // video / hidden audio
+ *     <TranscriptViewer.Controls />  // play + scrub (pin in Modal.Header)
+ *     <TranscriptViewer.Content />   // scrollable transcript (Modal.Body)
+ *   </TranscriptViewer.Root>
  */
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import { Button } from "@heroui/react";
 import { Focus, List, Pause, Play } from "lucide-react";
@@ -24,20 +34,12 @@ import {
   type TranscriptWord,
 } from "@/lib/alignment";
 import type { CharacterAlignment, TranscriptSegment } from "@/types";
+import { motion } from "framer-motion";
 
 type WordStatus = "spoken" | "unspoken" | "current";
 type ViewMode = "focus" | "read";
 
-export function TranscriptViewer({
-  text,
-  mediaSrc,
-  mediaKind = "audio",
-  durationSeconds,
-  segments,
-  alignment,
-  className,
-  emptyLabel = "暂无转写文本",
-}: {
+type TranscriptViewerProps = {
   text: string;
   audioSrc?: string | null;
   mediaSrc?: string | null;
@@ -47,7 +49,66 @@ export function TranscriptViewer({
   alignment?: CharacterAlignment | null;
   className?: string;
   emptyLabel?: string;
-}) {
+  children?: ReactNode;
+};
+
+type TranscriptCtx = {
+  src: string | null;
+  isVideo: boolean;
+  mediaRef: React.MutableRefObject<HTMLMediaElement | null>;
+  scrollRef: React.MutableRefObject<HTMLDivElement | null>;
+  activeParaRef: React.MutableRefObject<HTMLElement | null>;
+  currentTime: number;
+  duration: number;
+  isPlaying: boolean;
+  setIsScrubbing: (v: boolean) => void;
+  progress: number;
+  mode: ViewMode;
+  setMode: (m: ViewMode) => void;
+  isLong: boolean;
+  hasTimed: boolean;
+  paragraphs: TranscriptParagraph[];
+  plainParagraphs: string[];
+  emptyLabel: string;
+  currentParaIndex: number;
+  isPlayingOrScrubbed: boolean;
+  statusForWord: (word: TranscriptWord) => WordStatus;
+  seekTo: (time: number) => void;
+  togglePlay: () => void;
+  seekToWord: (word: TranscriptWord) => void;
+  seekToParagraph: (para: TranscriptParagraph) => void;
+  onUserScroll: () => void;
+  mediaHandlers: {
+    onPlay: () => void;
+    onPause: () => void;
+    onEnded: () => void;
+    onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => void;
+    onDurationChange: (e: React.SyntheticEvent<HTMLMediaElement>) => void;
+  };
+};
+
+const TranscriptContext = createContext<TranscriptCtx | null>(null);
+
+function useTranscript() {
+  const ctx = useContext(TranscriptContext);
+  if (!ctx) {
+    throw new Error(
+      "TranscriptViewer compound parts must be used within TranscriptViewer.Root",
+    );
+  }
+  return ctx;
+}
+
+function TranscriptRoot({
+  text,
+  mediaSrc,
+  mediaKind = "audio",
+  durationSeconds,
+  segments,
+  alignment,
+  emptyLabel = "暂无转写文本",
+  children,
+}: TranscriptViewerProps) {
   const src = mediaSrc ?? null;
   const isVideo = mediaKind === "video";
   const mediaRef = useRef<HTMLMediaElement | null>(null);
@@ -191,148 +252,382 @@ export function TranscriptViewer({
     [atEnd, currentWordIndex],
   );
 
-  // Auto-follow current paragraph unless the user recently scrolled.
   useEffect(() => {
     if (mode !== "focus" && !isPlaying) return;
     if (Date.now() < userScrollUntil.current) return;
     const node = activeParaRef.current;
     const scroller = scrollRef.current;
     if (!node || !scroller) return;
-    const nodeTop = node.offsetTop;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const nodeRect = node.getBoundingClientRect();
+    const nodeTop = nodeRect.top - scrollerRect.top + scroller.scrollTop;
     const target = Math.max(0, nodeTop - scroller.clientHeight * 0.28);
     scroller.scrollTo({ top: target, behavior: "smooth" });
   }, [currentParaIndex, mode, isPlaying]);
 
-  const onUserScroll = () => {
+  const onUserScroll = useCallback(() => {
     userScrollUntil.current = Date.now() + 2800;
-  };
+  }, []);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const hasTimed = paragraphs.length > 0;
+  const isPlayingOrScrubbed = isPlaying || currentTime > 0;
 
-  const mediaHandlers = {
-    onPlay: () => setIsPlaying(true),
-    onPause: () => setIsPlaying(false),
-    onEnded: () => {
-      setIsPlaying(false);
-      setCurrentTime(duration);
-    },
-    onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => {
-      const d = e.currentTarget.duration;
-      if (Number.isFinite(d) && d > 0) setDuration(d);
-    },
-    onDurationChange: (e: React.SyntheticEvent<HTMLMediaElement>) => {
-      const d = e.currentTarget.duration;
-      if (Number.isFinite(d) && d > 0) setDuration(d);
-    },
-  };
+  const mediaHandlers = useMemo(
+    () => ({
+      onPlay: () => setIsPlaying(true),
+      onPause: () => setIsPlaying(false),
+      onEnded: () => {
+        setIsPlaying(false);
+        setCurrentTime(duration);
+      },
+      onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => {
+        const d = e.currentTarget.duration;
+        if (Number.isFinite(d) && d > 0) setDuration(d);
+      },
+      onDurationChange: (e: React.SyntheticEvent<HTMLMediaElement>) => {
+        const d = e.currentTarget.duration;
+        if (Number.isFinite(d) && d > 0) setDuration(d);
+      },
+    }),
+    [duration],
+  );
+
+  const value = useMemo<TranscriptCtx>(
+    () => ({
+      src,
+      isVideo,
+      mediaRef,
+      scrollRef,
+      activeParaRef,
+      currentTime,
+      duration,
+      isPlaying,
+      setIsScrubbing,
+      progress,
+      mode,
+      setMode,
+      isLong,
+      hasTimed,
+      paragraphs,
+      plainParagraphs,
+      emptyLabel,
+      currentParaIndex,
+      isPlayingOrScrubbed,
+      statusForWord,
+      seekTo,
+      togglePlay,
+      seekToWord,
+      seekToParagraph,
+      onUserScroll,
+      mediaHandlers,
+    }),
+    [
+      src,
+      isVideo,
+      currentTime,
+      duration,
+      isPlaying,
+      progress,
+      mode,
+      isLong,
+      hasTimed,
+      paragraphs,
+      plainParagraphs,
+      emptyLabel,
+      currentParaIndex,
+      isPlayingOrScrubbed,
+      statusForWord,
+      seekTo,
+      togglePlay,
+      seekToWord,
+      seekToParagraph,
+      onUserScroll,
+      mediaHandlers,
+    ],
+  );
 
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-4 rounded-2xl border border-border bg-surface-secondary/40 p-4",
-        className,
-      )}
-    >
-      {src && isVideo ? (
-        <video
-          ref={(el) => {
-            mediaRef.current = el;
-          }}
-          src={src}
-          preload="metadata"
-          playsInline
-          className="max-h-64 w-full rounded-xl bg-black object-contain sm:max-h-72"
-          {...mediaHandlers}
-        />
-      ) : src ? (
-        <audio
-          ref={(el) => {
-            mediaRef.current = el;
-          }}
-          src={src}
-          preload="metadata"
-          className="sr-only"
-          {...mediaHandlers}
-        />
-      ) : null}
+    <TranscriptContext.Provider value={value}>
+      {children}
+    </TranscriptContext.Provider>
+  );
+}
 
-      {(hasTimed || plainParagraphs.length > 0) && isLong ? (
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] text-muted">
-            {mode === "focus"
-              ? "专注模式 · 跟随当前一句"
-              : "全文模式 · 可滚动阅读"}
-          </p>
-          <div className="flex overflow-hidden rounded-full border border-border bg-surface">
-            <button
-              type="button"
-              className={cn(
-                "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] transition",
-                mode === "focus"
-                  ? "bg-accent/15 font-medium text-accent"
-                  : "text-muted hover:text-foreground",
-              )}
-              onClick={() => setMode("focus")}
-            >
-              <Focus size={12} aria-hidden />
-              专注
-            </button>
-            <button
-              type="button"
-              className={cn(
-                "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] transition",
-                mode === "read"
-                  ? "bg-accent/15 font-medium text-accent"
-                  : "text-muted hover:text-foreground",
-              )}
-              onClick={() => setMode("read")}
-            >
-              <List size={12} aria-hidden />
-              全文
-            </button>
-          </div>
-        </div>
-      ) : null}
+/** Cache orientation by media src to avoid layout flash on reopen. */
+const orientationCache = new Map<string, "landscape" | "portrait">();
 
-      <div
-        ref={scrollRef}
-        onScroll={onUserScroll}
+function TranscriptMedia({
+  className,
+  videoClassName,
+}: {
+  className?: string;
+  videoClassName?: string;
+}) {
+  const { src, isVideo, mediaRef, mediaHandlers } = useTranscript();
+  const [orientation, setOrientation] = useState<"landscape" | "portrait" | null>(
+    () => (src ? orientationCache.get(src) ?? null : null),
+  );
+
+  useEffect(() => {
+    setOrientation(src ? orientationCache.get(src) ?? null : null);
+  }, [src]);
+
+  const syncOrientation = useCallback(
+    (el: HTMLVideoElement | null) => {
+      if (!el || !el.videoWidth || !el.videoHeight) return;
+      const next =
+        el.videoWidth >= el.videoHeight ? "landscape" : "portrait";
+      if (src) orientationCache.set(src, next);
+      setOrientation((prev) => (prev === next ? prev : next));
+    },
+    [src],
+  );
+
+  if (!src) return null;
+
+  if (isVideo) {
+    const { onLoadedMetadata, ...restMediaHandlers } = mediaHandlers;
+    const ready = orientation != null;
+    return (
+      <video
+        ref={(el) => {
+          mediaRef.current = el;
+          syncOrientation(el);
+        }}
+        src={src}
+        preload="metadata"
+        playsInline
         className={cn(
-          "transcript-scroll relative overflow-y-auto overscroll-contain",
-          isLong ? "max-h-[min(52vh,420px)]" : "max-h-[min(60vh,520px)]",
+          "rounded-xl bg-black object-contain",
+          videoClassName,
+          className,
+          // Hold off painting until ratio is known so landscape/portrait
+          // classes never swap visibly.
+          !ready && "pointer-events-none invisible absolute h-px w-px",
+          ready &&
+            orientation === "portrait" &&
+            "h-auto max-h-[min(52vh,28rem)] w-auto max-w-full",
+          ready &&
+            orientation === "landscape" &&
+            "h-auto max-h-[min(40vh,22rem)] w-full",
+        )}
+        {...restMediaHandlers}
+        onLoadedMetadata={(e) => {
+          syncOrientation(e.currentTarget);
+          onLoadedMetadata(e);
+        }}
+      />
+    );
+  }
+
+  return (
+    <audio
+      ref={(el) => {
+        mediaRef.current = el;
+      }}
+      src={src}
+      preload="metadata"
+      className={cn("sr-only", className)}
+      {...mediaHandlers}
+    />
+  );
+}
+
+function TranscriptControls({ className }: { className?: string }) {
+  const {
+    src,
+    isPlaying,
+    togglePlay,
+    progress,
+    duration,
+    currentTime,
+    seekTo,
+    setIsScrubbing,
+  } = useTranscript();
+
+  if (!src) return null;
+
+  return (
+    <motion.div className={cn("flex flex-col gap-2", className)}
+    initial={{ opacity: 0}}
+    animate={{ opacity: 1}}
+    exit={{ opacity: 0}}
+    transition={{ duration: 0.8}}
+    >
+      <div className="flex items-center gap-3">
+        <Button
+          size="sm"
+          variant="secondary"
+          isIconOnly
+          aria-label={isPlaying ? "暂停" : "播放"}
+          onPress={togglePlay}
+        >
+          {isPlaying ? <Pause size={16} /> : <Play size={16} />}
+        </Button>
+        <ScrubTrack
+          progress={progress}
+          duration={duration}
+          onScrubStart={() => setIsScrubbing(true)}
+          onScrubEnd={() => setIsScrubbing(false)}
+          onScrub={seekTo}
+        />
+      </div>
+      <div className="flex justify-between text-[11px] tabular-nums text-muted">
+        <span>{formatClock(currentTime)}</span>
+        <span>{formatClock(duration)}</span>
+      </div>
+    </motion.div>
+  );
+}
+
+function TranscriptModeToggle({ className }: { className?: string }) {
+  const { isLong, hasTimed, plainParagraphs, mode, setMode } = useTranscript();
+
+  if (!((hasTimed || plainParagraphs.length > 0) && isLong)) return null;
+
+  return (
+    <div className={cn("flex items-center justify-between gap-2", className)}>
+      <p className="text-[11px] text-muted">
+        {mode === "focus" ? "专注模式 · 跟随当前一句" : "全文模式 · 可滚动阅读"}
+      </p>
+      <div className="flex overflow-hidden rounded-full border border-border bg-surface">
+        <button
+          type="button"
+          className={cn(
+            "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] transition",
+            mode === "focus"
+              ? "bg-accent/15 font-medium text-accent"
+              : "text-muted hover:text-foreground",
+          )}
+          onClick={() => setMode("focus")}
+        >
+          <Focus size={12} aria-hidden />
+          专注
+        </button>
+        <button
+          type="button"
+          className={cn(
+            "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] transition",
+            mode === "read"
+              ? "bg-accent/15 font-medium text-accent"
+              : "text-muted hover:text-foreground",
+          )}
+          onClick={() => setMode("read")}
+        >
+          <List size={12} aria-hidden />
+          全文
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TranscriptContent({
+  className,
+  scroll = true,
+  fill = false,
+}: {
+  className?: string;
+  /** When false, parent (e.g. Modal.Body) owns scrolling; we bind auto-follow to it. */
+  scroll?: boolean;
+  /** Use flex-1 min-h-0 instead of max-height when this element scrolls. */
+  fill?: boolean;
+}) {
+  const {
+    scrollRef,
+    activeParaRef,
+    onUserScroll,
+    mode,
+    isLong,
+    hasTimed,
+    paragraphs,
+    plainParagraphs,
+    emptyLabel,
+    currentParaIndex,
+    isPlayingOrScrubbed,
+    statusForWord,
+    seekToWord,
+    seekToParagraph,
+  } = useTranscript();
+
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (scroll) return;
+    const node = rootRef.current;
+    if (!node) return;
+
+    let el: HTMLElement | null = node.parentElement;
+    while (el) {
+      const { overflowY } = getComputedStyle(el);
+      if (
+        overflowY === "auto" ||
+        overflowY === "scroll" ||
+        overflowY === "overlay"
+      ) {
+        scrollRef.current = el as HTMLDivElement;
+        const handler = () => onUserScroll();
+        el.addEventListener("scroll", handler, { passive: true });
+        return () => {
+          el?.removeEventListener("scroll", handler);
+          if (scrollRef.current === el) scrollRef.current = null;
+        };
+      }
+      el = el.parentElement;
+    }
+  }, [scroll, scrollRef, onUserScroll]);
+
+  return (
+    <div ref={rootRef} className={cn("flex flex-col gap-3", className)}>
+      <div
+        ref={scroll ? scrollRef : undefined}
+        onScroll={scroll ? onUserScroll : undefined}
+        className={cn(
+          "transcript-scroll relative",
+          scroll && "overflow-y-auto overscroll-contain",
+          scroll &&
+            (fill
+              ? "min-h-0 flex-1"
+              : isLong
+                ? "max-h-[min(52vh,420px)]"
+                : "max-h-[min(60vh,520px)]"),
           mode === "focus" && "px-1",
         )}
       >
         {hasTimed ? (
           <div
             className={cn(
-              "mx-auto flex flex-col max-w-[40rem] ",
+              "mx-auto flex max-w-[40rem] flex-col",
               mode === "focus" ? "gap-5 py-6" : "gap-4 py-2",
             )}
           >
             {paragraphs.map((para, pi) => {
               const isActive = pi === currentParaIndex;
-              const isPast =
-                currentParaIndex >= 0 && pi < currentParaIndex;
-              const isFuture =
-                currentParaIndex >= 0 && pi > currentParaIndex;
+              const isPast = currentParaIndex >= 0 && pi < currentParaIndex;
+              const isFuture = currentParaIndex >= 0 && pi > currentParaIndex;
               const dim =
                 mode === "focus" &&
                 currentParaIndex >= 0 &&
                 !isActive &&
-                (isPlaying || currentTime > 0);
+                isPlayingOrScrubbed;
 
               return (
                 <section
                   key={para.id}
-                  ref={isActive ? (el) => {
-                    activeParaRef.current = el;
-                  } : undefined}
+                  ref={
+                    isActive
+                      ? (el) => {
+                          activeParaRef.current = el;
+                        }
+                      : undefined
+                  }
                   data-active={isActive || undefined}
                   className={cn(
                     "group relative rounded-2xl transition-all duration-300",
-                    mode === "focus" && isActive && "bg-accent/[0.06] px-4 py-3",
+                    mode === "focus" &&
+                      isActive &&
+                      "bg-accent/[0.06] px-4 py-3",
                     mode === "read" && "px-1",
                     dim && isPast && "opacity-[0.34]",
                     dim && isFuture && "opacity-[0.22]",
@@ -351,11 +646,7 @@ export function TranscriptViewer({
                       mode === "focus" && isActive
                         ? "text-[17px] leading-[1.85] sm:text-[18px]"
                         : "text-[15px] leading-[1.75] sm:text-base",
-                      mode === "focus" && isActive
-                        ? "text-foreground"
-                        : dim
-                          ? "text-foreground"
-                          : "text-foreground",
+                      "text-foreground",
                     )}
                   >
                     {para.words.map((word) => {
@@ -399,36 +690,37 @@ export function TranscriptViewer({
           <p className="py-6 text-center text-sm text-muted">{emptyLabel}</p>
         )}
       </div>
-
-      {src ? (
-        <div className="flex flex-col gap-2 border-t border-border/60 pt-3">
-          <div className="flex items-center gap-3">
-            <Button
-              size="sm"
-              variant="secondary"
-              isIconOnly
-              aria-label={isPlaying ? "暂停" : "播放"}
-              onPress={togglePlay}
-            >
-              {isPlaying ? <Pause size={16} /> : <Play size={16} />}
-            </Button>
-            <ScrubTrack
-              progress={progress}
-              duration={duration}
-              onScrubStart={() => setIsScrubbing(true)}
-              onScrubEnd={() => setIsScrubbing(false)}
-              onScrub={seekTo}
-            />
-          </div>
-          <div className="flex justify-between text-[11px] tabular-nums text-muted">
-            <span>{formatClock(currentTime)}</span>
-            <span>{formatClock(duration)}</span>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
+
+/** Default stacked layout: media → text → controls. */
+export function TranscriptViewer({
+  className,
+  ...props
+}: TranscriptViewerProps) {
+  return (
+    <TranscriptRoot {...props}>
+      <div
+        className={cn(
+          "flex flex-col gap-4 rounded-2xl border border-border bg-surface-secondary/40 p-4",
+          className,
+        )}
+      >
+        <TranscriptMedia />
+        <TranscriptModeToggle />
+        <TranscriptContent />
+        <TranscriptControls className="border-t border-border/60 pt-3" />
+      </div>
+    </TranscriptRoot>
+  );
+}
+
+TranscriptViewer.Root = TranscriptRoot;
+TranscriptViewer.Media = TranscriptMedia;
+TranscriptViewer.Controls = TranscriptControls;
+TranscriptViewer.Content = TranscriptContent;
+TranscriptViewer.ModeToggle = TranscriptModeToggle;
 
 function ScrubTrack({
   progress,

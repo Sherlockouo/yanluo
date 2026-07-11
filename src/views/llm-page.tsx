@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import {
   Button,
-  Description,
   Input,
   Label,
   Switch,
@@ -14,11 +13,7 @@ import {
   PageShell,
   SectionCard,
 } from "@/components/shared/page-shell";
-import {
-  hasRefineDiff,
-  RefineDiff,
-  RefineFromTo,
-} from "@/components/ui/refine-diff";
+import { hasRefineDiff, RefineDiff } from "@/components/ui/refine-diff";
 import { useApp } from "@/app-context";
 
 export function LlmPage() {
@@ -29,7 +24,9 @@ export function LlmPage() {
       history
         .filter(
           (e) =>
-            e.refined && hasRefineDiff(e.raw_text, e.text),
+            e.refined &&
+            (e.source ?? "fn") !== "translate" &&
+            hasRefineDiff(e.raw_text, e.text),
         )
         .slice(0, 40),
     [history],
@@ -37,7 +34,7 @@ export function LlmPage() {
 
   return (
     <PageShell className="max-w-5xl">
-      <PageHeader title="LLM" subtitle="保守纠错，不改写。" />
+      <PageHeader title="LLM" />
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <SectionCard className="flex h-fit flex-col gap-5">
@@ -51,7 +48,6 @@ export function LlmPage() {
                   <div className="text-sm font-semibold text-foreground">
                     启用纠错
                   </div>
-                  <Description>仅修复明显识别错误。</Description>
                 </div>
                 <Switch.Control>
                   <Switch.Thumb />
@@ -103,18 +99,10 @@ export function LlmPage() {
           </div>
         </SectionCard>
 
-        <SectionCard
-          title="纠错记录"
-          description={
-            refinedEntries.length
-              ? "红为原文，绿为纠错后。"
-              : "开启纠错后，有改动的结果会出现在这里。"
-          }
-        >
+        <SectionCard title="纠错记录">
           {refinedEntries.length === 0 ? (
             <EmptyState
               title="还没有纠错记录"
-              description="Fn 录音或转写完成后，若 LLM 改动了文本，会显示在此。"
               icon={<Sparkles size={18} />}
             />
           ) : (
@@ -128,32 +116,19 @@ export function LlmPage() {
                     <span>{new Date(entry.created_at).toLocaleString()}</span>
                     <span>{entry.duration_seconds.toFixed(1)}s</span>
                     <span>
-                      {(entry.source ?? "fn") === "transcribe"
-                        ? "转写"
-                        : (entry.source ?? "fn") === "translate"
-                          ? "翻译"
-                          : "Fn"}
+                      {(entry.source ?? "fn") === "transcribe" ? "转写" : "Fn"}
                     </span>
-                    <span className="inline-flex items-center gap-1 text-success">
-                      <Sparkles size={10} aria-hidden />
-                      refined
-                    </span>
+                    <Sparkles
+                      size={10}
+                      className="text-success"
+                      aria-label="refined"
+                    />
                   </div>
                   <RefineDiff
                     before={entry.raw_text}
                     after={entry.text}
                     compact
                   />
-                  <details className="mt-2">
-                    <summary className="cursor-pointer select-none text-[11px] text-muted hover:text-foreground">
-                      分列对照
-                    </summary>
-                    <RefineFromTo
-                      className="mt-2"
-                      before={entry.raw_text}
-                      after={entry.text}
-                    />
-                  </details>
                 </article>
               ))}
             </div>

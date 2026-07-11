@@ -43,6 +43,7 @@ type AppContextValue = {
   addTerm: () => void;
   saveVocabulary: (vocabulary: string[]) => Promise<void>;
   clearHistory: () => Promise<void>;
+  deleteHistory: (id: string) => Promise<void>;
   pruneHistory: (keep: number) => Promise<void>;
   pruneHistoryOlderThan: (days: number) => Promise<void>;
   markSession: (mode: "fn" | "translate" | "transcribe") => void;
@@ -280,6 +281,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       listen<string>("partial-error", (event) => {
         toast.warning(event.payload);
       }),
+      listen<string>("audio-capture-warning", (event) => {
+        toast.warning(event.payload);
+      }),
     ]).then((items) => {
       if (disposed) {
         items.forEach((unlisten) => unlisten());
@@ -373,6 +377,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await loadHistory();
   }, [loadHistory]);
 
+  const deleteHistory = useCallback(
+    async (id: string) => {
+      await invoke("delete_history_entry", { id });
+      await loadHistory();
+    },
+    [loadHistory],
+  );
+
   const pruneHistory = useCallback(
     async (keep: number) => {
       await invoke("prune_history", { keep });
@@ -413,6 +425,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addTerm,
       saveVocabulary,
       clearHistory,
+      deleteHistory,
       pruneHistory,
       pruneHistoryOlderThan,
       markSession,
@@ -434,6 +447,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addTerm,
       saveVocabulary,
       clearHistory,
+      deleteHistory,
       pruneHistory,
       pruneHistoryOlderThan,
       markSession,

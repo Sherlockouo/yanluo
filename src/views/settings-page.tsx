@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Button,
   Kbd,
@@ -55,6 +55,12 @@ type PermissionStatus = {
   apple_speech_available?: boolean;
 };
 
+type PermissionRequestResult = {
+  message: string;
+  granted: boolean;
+  open_settings: boolean;
+};
+
 type PermKind =
   | "accessibility"
   | "input_monitoring"
@@ -90,37 +96,37 @@ const TABS: { id: SettingsTab; label: string }[] = [
 const PERMS: {
   kind: PermKind;
   title: string;
-  description: string;
+  blurb: string;
   icon: typeof Shield;
 }[] = [
   {
     kind: "accessibility",
     title: "辅助功能",
-    description: "Fn 全局监听与粘贴到前台应用需要此权限。",
+    blurb: "粘贴识别结果到其他应用",
     icon: Shield,
   },
   {
     kind: "input_monitoring",
     title: "输入监视",
-    description: "监听 Fn / Shift+Fn 与 Esc 取消。",
+    blurb: "全局快捷键（含 Fn）",
     icon: Keyboard,
   },
   {
     kind: "microphone",
     title: "麦克风",
-    description: "录音转写需要麦克风访问。",
+    blurb: "录制外部声音",
     icon: Mic,
   },
   {
     kind: "speech_recognition",
     title: "语音识别",
-    description: "使用 Apple Speech 时需要此权限。",
+    blurb: "Apple Speech 引擎",
     icon: Ear,
   },
   {
     kind: "screen_recording",
     title: "屏幕录制",
-    description: "「只录系统 / 两者都录」时采集系统播放声音（不保存画面）。",
+    blurb: "采集系统播放音频",
     icon: Monitor,
   },
 ];
@@ -141,7 +147,7 @@ export function SettingsPage() {
 
   return (
     <PageShell>
-      <PageHeader title="设置" subtitle="常规、快捷键、权限与版本更新。" />
+      <PageHeader title="设置" />
 
       <div className="settings-tabs max-w-2xl" role="tablist">
         {TABS.map((item) => (
@@ -178,11 +184,7 @@ function GeneralPanel() {
 
   return (
     <>
-      <SectionCard
-        className="max-w-2xl flex flex-col gap-5"
-        title="外观"
-        description="主题对主窗口与浮动胶囊同时生效。"
-      >
+      <SectionCard className="max-w-2xl flex flex-col gap-5" title="外观">
         <div className="grid grid-cols-2 gap-2">
           {(
             [
@@ -212,11 +214,7 @@ function GeneralPanel() {
         </div>
       </SectionCard>
 
-      <SectionCard
-        className="max-w-2xl flex flex-col gap-5"
-        title="全局语言"
-        description="影响 Fn 录音、文件转写与系统菜单语言选项。"
-      >
+      <SectionCard className="max-w-2xl flex flex-col gap-5" title="全局语言">
         <Select
           className="w-full"
           selectedKey={config.language}
@@ -251,29 +249,13 @@ function GeneralPanel() {
         </Button>
       </SectionCard>
 
-      <SectionCard
-        className="max-w-2xl flex flex-col gap-5"
-        title="录音源"
-        description="Fn / 快捷键录音采集哪里的声音。「只录系统 / 两者都录」走数字通路抓取播放内容，不是会议室那种回声消除；需要屏幕录制权限。"
-      >
+      <SectionCard className="max-w-2xl flex flex-col gap-5" title="录音源">
         <div className="grid gap-2">
           {(
             [
-              {
-                id: "external" as const,
-                title: "只录外部",
-                hint: "麦克风输入（默认，debug 最稳）",
-              },
-              {
-                id: "system" as const,
-                title: "只录系统",
-                hint: "扬声器正在播放的声音（ScreenCaptureKit，需屏幕录制）",
-              },
-              {
-                id: "both" as const,
-                title: "两者都录",
-                hint: "麦克风 + 系统播放混合；系统音失败时自动退回只录外部",
-              },
+              { id: "external" as const, title: "只录外部" },
+              { id: "system" as const, title: "只录系统" },
+              { id: "both" as const, title: "两者都录" },
             ] as const
           ).map((item) => {
             const active =
@@ -283,17 +265,14 @@ function GeneralPanel() {
                 key={item.id}
                 type="button"
                 className={cn(
-                  "flex flex-col items-start rounded-xl border px-3.5 py-3 text-left transition-colors",
+                  "flex items-center rounded-xl border px-3.5 py-3 text-left text-sm font-medium transition-colors",
                   active
                     ? "border-foreground/20 bg-default text-foreground"
                     : "border-border bg-transparent text-muted hover:bg-default/50",
                 )}
                 onClick={() => updateConfig("audio_capture_mode", item.id)}
               >
-                <span className="text-sm font-medium text-foreground">
-                  {item.title}
-                </span>
-                <span className="mt-0.5 text-[12px] text-muted">{item.hint}</span>
+                {item.title}
               </button>
             );
           })}
@@ -378,36 +357,28 @@ function HotkeysPanel() {
   const rows: {
     slot: "transcribe" | "translate" | "cancel";
     title: string;
-    description: string;
     binding: HotkeyBinding;
   }[] = [
     {
       slot: "transcribe",
       title: "转录",
-      description: "识别后粘贴原文（可走 LLM 纠错）",
       binding: config.hotkey_transcribe,
     },
     {
       slot: "translate",
       title: "翻译",
-      description: "识别后翻译为目标语言并粘贴（需配置 LLM）",
       binding: config.hotkey_translate,
     },
     {
       slot: "cancel",
       title: "取消",
-      description: "丢弃当前录音，不粘贴",
       binding: config.hotkey_cancel,
     },
   ];
 
   return (
     <>
-      <SectionCard
-        className="max-w-2xl flex flex-col gap-4"
-        title="全局快捷键"
-        description="支持多键组合（⇧+Fn、⌃+Space 等）。Fn 组合在松开 Fn 时启动（可先按 Fn 再按 ⇧）；普通键在按下时启动。Esc 取消录制。"
-      >
+      <SectionCard className="max-w-2xl flex flex-col gap-4" title="全局快捷键">
         <div className="flex flex-col gap-3">
           {rows.map((row) => {
             const active = listening === row.slot;
@@ -416,13 +387,8 @@ function HotkeysPanel() {
                 key={row.slot}
                 className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-default/30 px-3.5 py-3"
               >
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-foreground">
-                    {row.title}
-                  </div>
-                  <p className="mt-0.5 text-[12px] text-muted">
-                    {row.description}
-                  </p>
+                <div className="min-w-0 text-sm font-medium text-foreground">
+                  {row.title}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   {active ? (
@@ -439,7 +405,7 @@ function HotkeysPanel() {
                       type="button"
                       className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground transition hover:border-foreground/25 hover:bg-default"
                       onClick={() => void startCapture(row.slot)}
-                      title="点击修改快捷键"
+                      title="修改快捷键"
                     >
                       {hotkeySegments(row.binding.label).map((part, i) => (
                         <span key={`${row.slot}-${part}-${i}`} className="inline-flex items-center gap-1">
@@ -454,19 +420,9 @@ function HotkeysPanel() {
             );
           })}
         </div>
-        {listening ? (
-          <p className="text-[12px] text-muted">
-            正在录制「{rows.find((r) => r.slot === listening)?.title}」。可先按
-            ⇧/⌃/⌥/⌘，再按 Fn 或字母键；任意顺序按住 Fn 再加修饰键，松开 Fn 即可。
-          </p>
-        ) : null}
       </SectionCard>
 
-      <SectionCard
-        className="max-w-2xl flex flex-col gap-5"
-        title="翻译目标语言"
-        description="翻译快捷键会将识别结果翻译到此语言。"
-      >
+      <SectionCard className="max-w-2xl flex flex-col gap-5" title="翻译目标语言">
         <Select
           className="w-full"
           selectedKey={config.translate_target_language}
@@ -488,8 +444,9 @@ function HotkeysPanel() {
           <Select.Popover>
             <ListBox>
               {TRANSLATE_LANGUAGES.map(([value, label]) => (
-                <ListBox.Item key={value} id={value} textValue={label}>
-                  {label}
+                <ListBox.Item key={value} id={value} textValue={`${label} ${value}`}>
+                  <span>{label}</span>
+                  <span className="ml-auto font-mono text-[11px] text-muted">{value}</span>
                   <ListBox.ItemIndicator />
                 </ListBox.Item>
               ))}
@@ -513,6 +470,7 @@ function PermissionsPanel() {
   const [perms, setPerms] = useState<PermissionStatus | null>(null);
   const [busy, setBusy] = useState<PermKind | null>(null);
   const [hint, setHint] = useState<string | null>(null);
+  const lastOpenAt = useRef<Record<string, number>>({});
 
   const refresh = useCallback(async () => {
     try {
@@ -534,14 +492,32 @@ function PermissionsPanel() {
     };
   }, [refresh]);
 
-  const requestThenOpen = async (kind: PermKind) => {
+  const openSettingsOnce = async (kind: PermKind) => {
+    const now = Date.now();
+    const prev = lastOpenAt.current[kind] ?? 0;
+    // Avoid stacking System Settings activations from rapid clicks.
+    if (now - prev < 4000) {
+      setHint("系统设置已打开，请在对应开关中开启本应用。");
+      return;
+    }
+    lastOpenAt.current[kind] = now;
+    await invoke("open_permission_settings", { kind });
+  };
+
+  const authorize = async (kind: PermKind) => {
+    if (busy) return;
     setBusy(kind);
     setHint(null);
     try {
-      // Request first so this binary appears in the Privacy list, then open the pane.
-      const message = await invoke<string>("request_permission", { kind });
-      setHint(message);
-      await invoke("open_permission_settings", { kind });
+      const result = await invoke<PermissionRequestResult>("request_permission", {
+        kind,
+      });
+      setHint(result.message);
+      // Only open Settings when the OS dialog cannot finish the grant
+      // (e.g. mic/speech previously denied). Never stack on top of Apple prompts.
+      if (result.open_settings) {
+        await openSettingsOnce(kind);
+      }
       window.setTimeout(() => void refresh(), 1200);
     } catch (error) {
       setHint(error instanceof Error ? error.message : String(error));
@@ -555,15 +531,8 @@ function PermissionsPanel() {
 
   if (!isMac) {
     return (
-      <SectionCard
-        title="系统权限"
-        description="当前平台无需 macOS 隐私权限。"
-        className="max-w-2xl"
-      >
-        <p className="text-[13px] leading-relaxed text-muted">
-          辅助功能 / 输入监视 / Apple Speech 仅在 macOS 使用。Linux / Windows
-          请直接配置麦克风与云端凭证。
-        </p>
+      <SectionCard title="系统权限" className="max-w-2xl">
+        <p className="text-[13px] text-muted">当前平台无需 macOS 隐私权限。</p>
       </SectionCard>
     );
   }
@@ -572,7 +541,7 @@ function PermissionsPanel() {
     <>
       <SectionCard
         title="系统权限"
-        description="先点「请求权限」让本进程出现在列表里，再打开系统设置打开开关。"
+        description="点「去授权」即可。系统弹窗能完成的不会再强开设置。"
         className="max-w-2xl"
       >
         <div>
@@ -595,9 +564,7 @@ function PermissionsPanel() {
                   <div className="text-sm font-medium text-foreground">
                     {item.title}
                   </div>
-                  <p className="mt-0.5 text-[12px] leading-relaxed text-muted">
-                    {item.description}
-                  </p>
+                  <div className="mt-0.5 text-[12px] text-muted">{item.blurb}</div>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                   <span
@@ -617,27 +584,27 @@ function PermissionsPanel() {
                     <Button
                       size="sm"
                       variant="primary"
-                      isDisabled={busy === item.kind}
-                      onPress={() => void requestThenOpen(item.kind)}
+                      isDisabled={busy !== null}
+                      onPress={() => void authorize(item.kind)}
                     >
-                      请求权限
+                      去授权
                     </Button>
                   ) : null}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    isDisabled={busy === item.kind}
-                    onPress={() =>
-                      void invoke("open_permission_settings", {
-                        kind: item.kind,
-                      }).then(() =>
-                        window.setTimeout(() => void refresh(), 800),
-                      )
-                    }
-                  >
-                    <ExternalLink size={14} />
-                    系统设置
-                  </Button>
+                  {!granted ? (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      isDisabled={busy !== null}
+                      onPress={() =>
+                        void openSettingsOnce(item.kind).then(() =>
+                          window.setTimeout(() => void refresh(), 800),
+                        )
+                      }
+                    >
+                      <ExternalLink size={14} />
+                      系统设置
+                    </Button>
+                  ) : null}
                 </div>
               </div>
             );
@@ -645,25 +612,20 @@ function PermissionsPanel() {
         </div>
       </SectionCard>
 
-      <SectionCard
-        className="max-w-2xl"
-        title="调试：列表里找不到本应用？"
-        description="打开系统设置不会自动登记进程；必须先「请求权限」或实际录音一次。"
-      >
+      <SectionCard className="max-w-2xl" title="说明">
         <ul className="flex flex-col gap-2 text-[13px] leading-relaxed text-muted">
           <li>
-            · 必须先点「请求权限」——只打开系统设置不会把本应用登记进列表。
+            · 正式签名安装包：麦克风 / 语音识别 / 屏幕录制通常随 Bundle ID
+            保留，重装不必再点允许。
+          </li>
+          <li>
+            · 辅助功能、输入监视由 macOS 按应用路径管理，重装或换路径后需重新打开开关（系统限制，应用无法代记）。
           </li>
           <li>
             · <code className="text-foreground">tauri dev</code>{" "}
-            时列表名通常是{" "}
+            列表名多为{" "}
             <code className="text-foreground">asr-workshop</code>
-            ，不是「ASR Workshop」。
-          </li>
-          <li>
-            · 麦克风 / 语音识别必须在打包后的 .app 里请求——
-            <code className="text-foreground">tauri dev</code>{" "}
-            裸二进制没有 Info.plist，系统会直接闪退（TCC）。
+            ；麦克风等需在打包 .app 中请求。
           </li>
         </ul>
         {exePath ? (
@@ -741,11 +703,7 @@ function UpdatesPanel() {
 
   return (
     <>
-      <SectionCard
-        className="max-w-2xl flex flex-col gap-4"
-        title="当前版本"
-        description="检查 GitHub Releases 获取更新与发版说明。"
-      >
+      <SectionCard className="max-w-2xl flex flex-col gap-4" title="当前版本">
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-foreground">
@@ -806,11 +764,7 @@ function UpdatesPanel() {
         </div>
       </SectionCard>
 
-      <SectionCard
-        className="max-w-2xl"
-        title="Release Log"
-        description="最近发版说明。"
-      >
+      <SectionCard className="max-w-2xl" title="Release Log">
         <div className="flex flex-col gap-5">
           {logEntries.map((entry) => (
             <article key={`${entry.version}-${entry.date}`} className="release-entry">

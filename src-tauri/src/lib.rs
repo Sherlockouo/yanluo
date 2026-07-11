@@ -54,7 +54,7 @@ pub fn main() {
                 }
                 if let Some(window) = handle.get_webview_window("floating-lang") {
                     let _ = window.hide();
-                    raise_floating_hud_level(&window, false);
+                    // Do not raise/orderFront while hidden — that flashed the EN chip on launch.
                 }
                 let app_restore = app.handle().clone();
                 let _ = app_restore.clone().run_on_main_thread(move || {
@@ -82,6 +82,7 @@ pub fn main() {
             commands::cancel_hotkey_capture,
             commands::get_history,
             commands::clear_history,
+            commands::delete_history_entry,
             commands::prune_history,
             commands::prune_history_older_than,
             commands::test_llm_refinement,
@@ -90,6 +91,8 @@ pub fn main() {
             hud::recenter_floating_hud,
             hud::set_floating_theme,
             hud::popup_translate_target_menu,
+            hud::set_floating_lang_menu_open,
+            hud::set_translate_target_language,
             commands::get_permission_status,
             commands::open_permission_settings,
             commands::request_permission,

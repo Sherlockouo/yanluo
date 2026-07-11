@@ -1,18 +1,13 @@
 import { useMemo } from "react";
-import {
-  Description,
-  Label,
-  ListBox,
-  Select,
-} from "@heroui/react";
-import { Languages, Sparkles } from "lucide-react";
+import { Label, ListBox, Select } from "@heroui/react";
+import { Languages } from "lucide-react";
 import {
   EmptyState,
   PageHeader,
   PageShell,
   SectionCard,
 } from "@/components/shared/page-shell";
-import { RefineFromTo } from "@/components/ui/refine-diff";
+import { SemanticPair } from "@/components/ui/refine-diff";
 import { TRANSLATE_LANGUAGES, translateTargetLabel } from "@/lib/constants";
 import { useApp } from "@/app-context";
 
@@ -37,20 +32,10 @@ export function TranslatePage() {
 
   return (
     <PageShell className="max-w-5xl">
-      <PageHeader
-        title="翻译"
-        subtitle={`${config.hotkey_translate.label} · 只显示译文 · 稳定前缀流式译`}
-      />
+      <PageHeader title="翻译" subtitle={config.hotkey_translate.label} />
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <SectionCard className="flex h-fit flex-col gap-5">
-          <div>
-            <p className="text-sm font-semibold text-foreground">目标语言</p>
-            <p className="mt-1 text-[13px] text-muted">
-              识别稳定后异步翻译；松键补译尾巴后粘贴。
-            </p>
-          </div>
-
           <Select
             selectedKey={config.translate_target_language}
             onSelectionChange={(key) => {
@@ -71,10 +56,9 @@ export function TranslatePage() {
             <Select.Popover>
               <ListBox>
                 {TRANSLATE_LANGUAGES.map(([value, label]) => (
-                  <ListBox.Item key={value} id={value} textValue={label} onClick={() => {
-                    updateConfig("translate_target_language", value);
-                  }}>
-                    {label}
+                  <ListBox.Item key={value} id={value} textValue={`${label} ${value}`}>
+                    <span>{label}</span>
+                    <span className="ml-auto font-mono text-[11px] text-muted">{value}</span>
                     <ListBox.ItemIndicator />
                   </ListBox.Item>
                 ))}
@@ -84,35 +68,23 @@ export function TranslatePage() {
 
           <div className="rounded-2xl border border-border bg-surface-secondary/40 px-3.5 py-3 text-[13px] leading-relaxed text-muted">
             <p>
-              热键 <span className="text-foreground">{config.hotkey_translate.label}</span>
-            </p>
-            <p className="mt-1">
-              LLM：{llmReady ? (
+              <span className="text-foreground">{config.hotkey_translate.label}</span>
+              {" · "}
+              {llmReady ? (
                 <span className="text-success">
-                  {config.llm_model} @ {config.llm_api_base_url}
+                  {config.llm_model}
                 </span>
               ) : (
-                <span className="text-danger">请先在 LLM 页配置 Base URL 与 Model</span>
+                <span className="text-danger">LLM 未配置</span>
               )}
             </p>
-            <Description className="mt-2">
-              HUD 不显示原文，只显示译文。流式译需 Qwen；Apple / ElevenLabs 为松键后整段译。
-            </Description>
           </div>
         </SectionCard>
 
-        <SectionCard
-          title="翻译记录"
-          description={
-            entries.length
-              ? `目标 ${targetLabel} · 上为原文，下为译文`
-              : "⇧+Fn 录音翻译后会出现在这里。"
-          }
-        >
+        <SectionCard title="翻译记录">
           {entries.length === 0 ? (
             <EmptyState
               title="还没有翻译记录"
-              description="按住翻译热键说话，松键后粘贴译文。"
               icon={<Languages size={18} />}
             />
           ) : (
@@ -126,17 +98,15 @@ export function TranslatePage() {
                     <span>{new Date(entry.created_at).toLocaleString()}</span>
                     <span>{entry.duration_seconds.toFixed(1)}s</span>
                     <span className="inline-flex items-center gap-1 text-accent">
-                      <Sparkles size={10} aria-hidden />
-                      译为{" "}
+                      <Languages size={10} aria-hidden />
                       {translateTargetLabel(entry.translate_target_language) ||
                         targetLabel}
                     </span>
                   </div>
-                  <RefineFromTo
+                  <SemanticPair
                     before={entry.raw_text || "（空）"}
                     after={entry.text || "（空）"}
-                    beforeLabel="原"
-                    afterLabel="译"
+                    compact
                   />
                 </article>
               ))}

@@ -222,11 +222,11 @@ pub(crate) fn configure_floating_hud_panel(window: &tauri::WebviewWindow, corner
     configure_floating_overlay_panel(window, corner_radius, true, true);
 }
 
-/// Translate-target chip / menu: no native shadow or vibrancy.
-/// Those leave a rectangular “box” under the CSS-rounded menu when the window resizes.
+/// Translate-target chip / menu: frosted like the HUD, but never a native shadow
+/// (shadow + resize left a rectangular ring under the rounded menu).
 #[cfg(target_os = "macos")]
-pub(crate) fn configure_floating_lang_panel(window: &tauri::WebviewWindow) {
-    configure_floating_overlay_panel(window, 0.0, false, false);
+pub(crate) fn configure_floating_lang_panel(window: &tauri::WebviewWindow, corner_radius: f64) {
+    configure_floating_overlay_panel(window, corner_radius, false, true);
 }
 
 #[cfg(target_os = "macos")]

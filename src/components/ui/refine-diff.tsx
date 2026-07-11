@@ -1,8 +1,10 @@
 /**
  * Inline red/green refine diff: deletions (raw) → insertions (refined).
  * Character-level LCS — works for CJK ASR corrections.
+ * SemanticPair: stacked source → result without edit marks (translate etc.).
  */
 import { useMemo } from "react";
+import { ArrowDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 export type DiffPart = {
@@ -133,37 +135,39 @@ export function RefineDiff({
   );
 }
 
-/** Two-line from → to when you want explicit before/after, not inline mix. */
-export function RefineFromTo({
+/** Stacked source → result without labels or strikethrough (translate etc.). */
+export function SemanticPair({
   before,
   after,
   className,
-  beforeLabel = "原",
-  afterLabel = "纠",
+  compact,
 }: {
   before: string;
   after: string;
   className?: string;
-  beforeLabel?: string;
-  afterLabel?: string;
+  compact?: boolean;
 }) {
+  const textClass = compact
+    ? "text-[13px] leading-snug"
+    : "text-[14px] leading-relaxed";
+
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
-      <p className="text-[13px] leading-snug">
-        <span className="mr-1.5 text-[10px] font-medium uppercase tracking-wide text-danger">
-          {beforeLabel}
-        </span>
-        <span className="text-danger line-through decoration-(--danger)/50">
-          {before || "（空）"}
-        </span>
+      <p className={cn("text-pretty wrap-break-word text-muted", textClass)}>
+        {before || "（空）"}
       </p>
-      <p className="text-[13px] leading-snug">
-        <span className="mr-1.5 text-[10px] font-medium uppercase tracking-wide text-success">
-          {afterLabel}
-        </span>
-        <span className="font-medium text-success">
-          {after || "（空）"}
-        </span>
+      <ArrowDown
+        size={12}
+        className="shrink-0 text-muted/70"
+        aria-hidden
+      />
+      <p
+        className={cn(
+          "text-pretty wrap-break-word font-medium text-foreground",
+          textClass,
+        )}
+      >
+        {after || "（空）"}
       </p>
     </div>
   );

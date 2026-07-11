@@ -4,14 +4,13 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, Chip, toast } from "@heroui/react";
+import { Button, Chip, Modal, toast } from "@heroui/react";
 import {
-  CheckCircle2,
   Clipboard,
   FileAudio,
   FileVideo,
   Plus,
-  Sparkles,
+  Trash2,
   Upload,
 } from "lucide-react";
 import type { HistoryEntry, TranscriptionResult } from "@/types";
@@ -119,6 +118,7 @@ export function TranscribePage() {
     modelLoaded,
     markSession,
     loadHistory,
+    deleteHistory,
   } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const stored = useMemo(() => readStored(), []);
@@ -140,8 +140,6 @@ export function TranscribePage() {
   const [dragOver, setDragOver] = useState(false);
   const historyLenRef = useRef(0);
   const bootedRef = useRef(false);
-  /** True only when we defaulted to upload because history had not loaded yet. */
-  const awaitingHistoryDefaultRef = useRef(false);
 
   const processing = processingName != null;
   const screen: "upload" | "processing" | "result" = processing
@@ -205,6 +203,7 @@ export function TranscribePage() {
   );
 
   // Hydrate URL once from storage so leaving the page still remembers view.
+  // Default is upload — never auto-open result just because history exists.
   useEffect(() => {
     if (bootedRef.current) return;
     bootedRef.current = true;
@@ -230,23 +229,10 @@ export function TranscribePage() {
       go(stored.view, { id: stored.activeId });
       return;
     }
-    if (sessionEntries.length > 0) {
-      go("result", { id: sessionEntries[0].id });
-      return;
-    }
-    awaitingHistoryDefaultRef.current = true;
     go("upload");
     // intentionally once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // History arrived after a virgin upload default → open latest result once.
-  useEffect(() => {
-    if (!awaitingHistoryDefaultRef.current) return;
-    if (sessionEntries.length === 0) return;
-    awaitingHistoryDefaultRef.current = false;
-    go("result", { id: sessionEntries[0].id });
-  }, [go, sessionEntries]);
 
   // Job finished → newest result page.
   useEffect(() => {
@@ -295,17 +281,34 @@ export function TranscribePage() {
   }, [activeEntry?.id, activeId, processingName, view]);
 
   const enterUpload = () => {
-    awaitingHistoryDefaultRef.current = false;
     go("upload", { processingName: null, clearSelection: true });
   };
 
   const selectEntry = (id: string) => {
-    awaitingHistoryDefaultRef.current = false;
     go("result", { id, processingName: null });
   };
 
+  const removeEntry = async (id: string) => {
+    if (!window.confirm("确定删除这条转写记录？")) return;
+    const remaining = sessionEntries.filter((e) => e.id !== id);
+    const nextId =
+      activeId === id || activeEntry?.id === id
+        ? (remaining[0]?.id ?? null)
+        : activeId;
+    try {
+      await deleteHistory(id);
+      toast.success("已删除");
+      if (remaining.length === 0) {
+        go("upload", { processingName: null });
+      } else if (nextId && nextId !== activeId) {
+        go("result", { id: nextId, processingName: null });
+      }
+    } catch (error) {
+      toast.danger(`删除失败: ${error}`);
+    }
+  };
+
   const acceptPath = (path: string) => {
-    awaitingHistoryDefaultRef.current = false;
     setSelectedPath(path);
     go("upload", { processingName: null });
   };
@@ -370,7 +373,6 @@ export function TranscribePage() {
     const name = fileName(path);
 
     // Switch away from upload immediately — before the backend round-trip.
-    awaitingHistoryDefaultRef.current = false;
     historyLenRef.current = sessionEntries.length;
     go("upload", { processingName: name, clearSelection: true });
     markSession("transcribe");
@@ -395,11 +397,11 @@ export function TranscribePage() {
       <PageHeader
         title="转写"
         subtitle={
-          screen === "upload"
-            ? "选择一段音频或视频。"
-            : screen === "processing"
-              ? "正在识别，请稍候。"
-              : "播放时跟随当前一句。"
+          screen === "processing"
+            ? "正在识别…"
+            : screen === "result"
+              ? "播放时跟随当前一句。"
+              : undefined
         }
         action={
           screen === "result" ? (
@@ -452,6 +454,7 @@ export function TranscribePage() {
             sessionEntries={sessionEntries}
             languageLabel={languageLabel}
             onSelect={selectEntry}
+            onDelete={(id) => void removeEntry(id)}
             onNew={enterUpload}
           />
         ) : null}
@@ -600,103 +603,51 @@ function ResultPhase({
   sessionEntries,
   languageLabel,
   onSelect,
+  onDelete,
   onNew,
 }: {
   activeEntry: HistoryEntry | null;
   sessionEntries: HistoryEntry[];
   languageLabel: string;
   onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
   onNew: () => void;
 }) {
-  return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,340px)]">
-      <SectionCard>
-        {activeEntry ? (
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-                <span>{new Date(activeEntry.created_at).toLocaleString()}</span>
-                <span>{activeEntry.duration_seconds.toFixed(1)}s</span>
-                <Chip
-                  size="sm"
-                  variant="soft"
-                  color={activeEntry.refined ? "accent" : "default"}
-                >
-                  <Chip.Label className="inline-flex items-center gap-1">
-                    {activeEntry.refined ? (
-                      <Sparkles size={11} />
-                    ) : (
-                      <CheckCircle2 size={11} />
-                    )}
-                    {activeEntry.language || languageLabel}
-                    {activeEntry.refined ? " · refined" : ""}
-                  </Chip.Label>
-                </Chip>
-              </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                onPress={() => {
-                  void navigator.clipboard.writeText(activeEntry.text);
-                  toast.success("已复制");
-                }}
-              >
-                <Clipboard size={14} aria-hidden />
-                复制
-              </Button>
-            </div>
-            <TranscriptViewer
-              text={activeEntry.text}
-              mediaSrc={
-                activeEntry.audio_path
-                  ? convertFileSrc(activeEntry.audio_path)
-                  : null
-              }
-              mediaKind={
-                isVideoMediaKind(
-                  activeEntry.media_kind,
-                  activeEntry.audio_path,
-                )
-                  ? "video"
-                  : "audio"
-              }
-              durationSeconds={activeEntry.duration_seconds}
-              segments={activeEntry.segments}
-              alignment={activeEntry.alignment}
-              emptyLabel="（空结果）"
-            />
-            {activeEntry.raw_text &&
-            activeEntry.raw_text !== activeEntry.text ? (
-              <details className="text-xs text-muted">
-                <summary className="cursor-pointer select-none">
-                  查看原始识别（纠错前）
-                </summary>
-                <p className="mt-2 whitespace-pre-wrap leading-relaxed">
-                  {activeEntry.raw_text}
-                </p>
-              </details>
-            ) : null}
-          </div>
-        ) : (
-          <div className="grid min-h-[200px] place-items-center gap-3 text-center">
-            <p className="text-sm text-muted">还没有转写结果</p>
-            <Button variant="primary" onPress={onNew}>
-              <Plus size={16} aria-hidden />
-              开始转写
-            </Button>
-          </div>
-        )}
-      </SectionCard>
+  const [detailOpen, setDetailOpen] = useState(false);
+  const openedForIdRef = useRef<string | null>(null);
 
-      <SectionCard
-        title="转写记录"
-        description="点击条目可回放。"
-        className="h-fit max-h-[calc(100vh-10rem)] overflow-y-auto"
-      >
-        <div className="flex flex-col gap-2">
+  // Open cover when landing on / selecting a result; don't re-open after dismiss.
+  useEffect(() => {
+    if (!activeEntry) {
+      setDetailOpen(false);
+      openedForIdRef.current = null;
+      return;
+    }
+    if (openedForIdRef.current === activeEntry.id) return;
+    openedForIdRef.current = activeEntry.id;
+    setDetailOpen(true);
+  }, [activeEntry]);
+
+  const selectAndOpen = (id: string) => {
+    if (activeEntry?.id === id) {
+      setDetailOpen(true);
+      return;
+    }
+    openedForIdRef.current = null;
+    onSelect(id);
+  };
+
+  return (
+    <>
+      <SectionCard title="转写记录" className="mx-auto w-full max-w-2xl">
+        <div className="flex max-h-[calc(100vh-12rem)] flex-col gap-2 overflow-y-auto">
           {sessionEntries.length === 0 ? (
-            <div className="grid min-h-[100px] place-items-center text-sm text-muted">
-              还没有转写记录
+            <div className="grid min-h-[200px] place-items-center gap-3 text-center">
+              <p className="text-sm text-muted">还没有转写结果</p>
+              <Button variant="primary" onPress={onNew}>
+                <Plus size={16} aria-hidden />
+                开始转写
+              </Button>
             </div>
           ) : (
             sessionEntries.map((entry) => (
@@ -704,13 +655,97 @@ function ResultPhase({
                 key={entry.id}
                 entry={entry}
                 active={activeEntry?.id === entry.id}
-                onSelect={() => onSelect(entry.id)}
+                onSelect={() => selectAndOpen(entry.id)}
+                onDelete={() => onDelete(entry.id)}
               />
             ))
           )}
         </div>
       </SectionCard>
-    </div>
+
+      {activeEntry ? (
+        <Modal.Backdrop
+          isOpen={detailOpen}
+          onOpenChange={setDetailOpen}
+          variant="opaque"
+        >
+          <Modal.Container scroll="inside">
+            <Modal.Dialog className="flex w-full max-w-6xl max-h-[calc(100dvh-1rem)] flex-col overflow-hidden sm:max-h-[calc(100dvh-5rem)]">
+              <TranscriptViewer.Root
+                key={activeEntry.id}
+                text={activeEntry.text}
+                mediaSrc={
+                  activeEntry.audio_path
+                    ? convertFileSrc(activeEntry.audio_path)
+                    : null
+                }
+                mediaKind={
+                  isVideoMediaKind(
+                    activeEntry.media_kind,
+                    activeEntry.audio_path,
+                  )
+                    ? "video"
+                    : "audio"
+                }
+                durationSeconds={activeEntry.duration_seconds}
+                segments={activeEntry.segments}
+                alignment={activeEntry.alignment}
+                emptyLabel="（空结果）"
+              >
+                <Modal.CloseTrigger />
+                <Modal.Body className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <div className="flex min-h-0 flex-1 flex-col gap-4">
+                    <div className="flex w-full shrink-0 flex-wrap items-start justify-between gap-2 pr-8">
+                      <div className="min-w-0">
+                        <Modal.Heading>转写详情</Modal.Heading>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted">
+                          <span>
+                            {new Date(activeEntry.created_at).toLocaleString()}
+                          </span>
+                          <span>{activeEntry.duration_seconds.toFixed(1)}s</span>
+                          <Chip size="sm" variant="soft" color="default">
+                            <Chip.Label>
+                              {activeEntry.language || languageLabel}
+                            </Chip.Label>
+                          </Chip>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onPress={() => {
+                          void navigator.clipboard.writeText(activeEntry.text);
+                          toast.success("已复制");
+                        }}
+                      >
+                        <Clipboard size={14} aria-hidden />
+                        复制
+                      </Button>
+                    </div>
+
+                    <div className="flex min-h-0  gap-6">
+                      <div className="flex flex-3 w-[min(64%,24rem)] shrink-0 flex-col items-center justify-center gap-4 px-3">
+                        <TranscriptViewer.Media />
+                        <TranscriptViewer.Controls className="w-full" />
+                      </div>
+
+                      <div className="flex min-h-0 min-w-0 flex-2 flex-col gap-3">
+                        <TranscriptViewer.ModeToggle className="shrink-0" />
+                        <TranscriptViewer.Content
+                          scroll
+                          fill
+                          className="min-h-0"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </Modal.Body>
+              </TranscriptViewer.Root>
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      ) : null}
+    </>
   );
 }
 
@@ -718,28 +753,44 @@ function HistoryRow({
   entry,
   active,
   onSelect,
+  onDelete,
 }: {
   entry: HistoryEntry;
   active: boolean;
   onSelect: () => void;
+  onDelete: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`w-full rounded-xl border px-3 py-2.5 text-left transition ${
-        active
+    <div
+      className={`flex w-full gap-2 rounded-xl items-center border px-3 py-2.5 transition ${active
           ? "border-accent/40 bg-accent/10"
           : "border-border bg-surface-secondary/30 hover:bg-surface-secondary/60"
-      }`}
+        }`}
     >
-      <div className="flex items-center justify-between gap-2 text-[11px] text-muted">
-        <span>{new Date(entry.created_at).toLocaleString()}</span>
-        <span>{entry.duration_seconds.toFixed(1)}s</span>
+      <div
+        onClick={onSelect}
+        className="min-w-0 flex-1 text-left cursor-pointer"
+      >
+        <div className="flex items-center justify-between gap-2 text-[11px] text-muted">
+          <span>{new Date(entry.created_at).toLocaleString()}</span>
+          <span>{entry.duration_seconds.toFixed(1)}s</span>
+        </div>
+        <p className="mt-1 line-clamp-2 text-sm leading-snug text-foreground">
+          {entry.text || "（空）"}
+        </p>
       </div>
-      <p className="mt-1 line-clamp-2 text-sm leading-snug text-foreground">
-        {entry.text || "（空）"}
-      </p>
-    </button>
+      <Button
+        type="button"
+        variant="ghost"
+        className="mt-0.5 shrink-0 rounded-lg p-1.5 text-muted transition hover:bg-danger/10 hover:text-danger"
+        aria-label="删除"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete();
+        }}
+      >
+        <Trash2 size={14} aria-hidden />
+      </Button>
+    </div>
   );
 }

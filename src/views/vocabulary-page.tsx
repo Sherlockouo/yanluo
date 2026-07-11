@@ -20,10 +20,7 @@ export function VocabularyPage() {
 
   return (
     <PageShell>
-      <PageHeader
-        title="词库"
-        subtitle="识别后替换。例：配森=Python"
-      />
+      <PageHeader title="词库" />
 
       <SectionCard className="max-w-2xl flex flex-col gap-5">
         <div className="flex items-end gap-2">
@@ -49,10 +46,7 @@ export function VocabularyPage() {
 
         <div className="flex min-h-[160px] flex-wrap content-start gap-2 rounded-2xl border border-border bg-surface-secondary/40 p-4">
           {config.vocabulary.length === 0 ? (
-            <EmptyState
-              title="还没有词条"
-              description="添加术语或「错词=正确」映射。"
-            />
+            <EmptyState title="还没有词条" />
           ) : (
             config.vocabulary.map((term) => (
               <button
@@ -64,7 +58,7 @@ export function VocabularyPage() {
                     config.vocabulary.filter((t) => t !== term),
                   )
                 }
-                title="点击删除"
+                title="删除"
               >
                 <Chip
                   size="sm"

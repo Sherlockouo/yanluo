@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Button, Input, Label, ListBox, Select, TextField } from "@heroui/react";
 import { FolderOpen, Save } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { Link } from "react-router-dom";
 import type { AsrProvider } from "@/types";
 import { LANGUAGES } from "@/lib/constants";
 import {
@@ -51,7 +52,7 @@ export function AsrPage() {
     setSavedHint(null);
     try {
       await saveConfig();
-      setSavedHint("已保存到本地");
+      setSavedHint("已保存");
     } catch (error) {
       setSavedHint(error instanceof Error ? error.message : String(error));
     } finally {
@@ -61,7 +62,7 @@ export function AsrPage() {
 
   return (
     <PageShell>
-      <PageHeader title="ASR" subtitle="选择引擎后配置对应参数，保存到本地。" />
+      <PageHeader title="ASR" />
 
       <SectionCard className="max-w-2xl flex flex-col gap-5">
         <Select
@@ -99,7 +100,7 @@ export function AsrPage() {
 
         {!appleAvailable ? (
           <p className="text-[12px] leading-relaxed text-muted">
-            Apple Speech 仅在 macOS 可用；当前平台请使用 ElevenLabs 或 Qwen。
+            Apple Speech 仅在 macOS 可用。
           </p>
         ) : null}
 
@@ -130,11 +131,7 @@ export function AsrPage() {
       </SectionCard>
 
       {config.asr_provider === "elevenlabs" ? (
-        <SectionCard
-          className="max-w-2xl flex flex-col gap-5"
-          title="ElevenLabs 设置"
-          description="API Key 与模型写入本地 config.json，仅本机使用。"
-        >
+        <SectionCard className="max-w-2xl flex flex-col gap-5" title="ElevenLabs">
           <TextField
             fullWidth
             variant="secondary"
@@ -163,7 +160,7 @@ export function AsrPage() {
             onPress={() => void persist()}
           >
             <Save size={16} />
-            保存凭证
+            保存
           </Button>
           {savedHint ? (
             <p className="text-[12px] text-muted">{savedHint}</p>
@@ -172,11 +169,7 @@ export function AsrPage() {
       ) : null}
 
       {config.asr_provider === "qwen" ? (
-        <SectionCard
-          className="max-w-2xl flex flex-col gap-5"
-          title="Qwen 本地设置"
-          description="模型目录与 Aligner 路径保存到本地。"
-        >
+        <SectionCard className="max-w-2xl flex flex-col gap-5" title="Qwen 本地">
           <TextField
             fullWidth
             variant="secondary"
@@ -236,10 +229,6 @@ export function AsrPage() {
               <Input className="font-mono text-[13px]" />
             </TextField>
           </div>
-          <p className="text-[12px] leading-relaxed text-muted">
-            流式分块秒数与未固定 token 数。更大切块更稳、延迟更高；unfixed
-            越大越能回滚修正尾部。
-          </p>
 
           <div className="grid grid-cols-2 gap-2">
             <Button
@@ -249,7 +238,7 @@ export function AsrPage() {
               onPress={() => void persist()}
             >
               <Save size={16} />
-              保存设置
+              保存
             </Button>
             <Button
               fullWidth
@@ -271,14 +260,11 @@ export function AsrPage() {
       ) : null}
 
       {config.asr_provider === "apple" ? (
-        <SectionCard
-          className="max-w-2xl flex flex-col gap-4"
-          title="Apple Speech"
-          description="使用系统语音识别，无需云端密钥。"
-        >
-          <p className="text-[13px] leading-relaxed text-muted">
-            请在「设置 → 权限」中授权麦克风与语音识别。开发模式下列表名多为{" "}
-            <code className="text-foreground">asr-workshop</code>。
+        <SectionCard className="max-w-2xl flex flex-col gap-4" title="Apple Speech">
+          <p className="text-[13px] text-muted">
+            <Link to="/settings" className="text-accent hover:underline">
+              设置 → 权限
+            </Link>
           </p>
           <Button
             fullWidth
@@ -287,7 +273,7 @@ export function AsrPage() {
             onPress={() => void persist()}
           >
             <Save size={16} />
-            保存引擎选择
+            保存
           </Button>
           {savedHint ? (
             <p className="text-[12px] text-muted">{savedHint}</p>

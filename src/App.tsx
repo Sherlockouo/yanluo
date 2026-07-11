@@ -39,7 +39,7 @@ function resolveFloatingKind(): "hud" | "lang" | null {
  * Multi-window entry:
  * - main          → control panel (React Router)
  * - floating      → ASR HUD capsule
- * - floating-lang → translate target chip (native menu)
+ * - floating-lang → translate target chip (in-window menu)
  *
  * IMPORTANT: HeroUI Toast.Provider children are toast *content renderers*,
  * not app wrappers. Keep Provider as a sibling of the routed app.

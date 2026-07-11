@@ -9,6 +9,9 @@ use core_graphics::event::{
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
+use crate::hud::{
+    close_floating_lang_menu, floating_lang_menu_is_open, floating_status_slot,
+};
 use crate::state::*;
 use crate::config::*;
 
@@ -57,6 +60,34 @@ fn merge_mods(peak: &mut Vec<String>, current: &[String]) {
         }
     }
     peak.sort();
+}
+
+/// True while cancel hotkey should be consumed (recording / processing HUD).
+fn cancel_hotkey_is_actionable(app: &AppHandle) -> bool {
+    if let Some(engine) = app.try_state::<AsrEngine>() {
+        if engine.inner().recording.load(Ordering::Acquire) {
+            return true;
+        }
+        if engine
+            .inner()
+            .recorder
+            .lock()
+            .map(|g| g.is_some())
+            .unwrap_or(false)
+        {
+            return true;
+        }
+    }
+    floating_status_slot(app)
+        .lock()
+        .map(|s| {
+            s.visible
+                && matches!(
+                    s.state.as_str(),
+                    "recording" | "processing" | "refining"
+                )
+        })
+        .unwrap_or(false)
 }
 
 pub(crate) fn start_fn_event_tap(app: AppHandle) {
@@ -239,9 +270,22 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
 
                             let (hk_transcribe, hk_translate, hk_cancel) = read_hotkeys(&app_cb);
 
-                            if binding_matches(&hk_cancel, &key, &mods) {
-                                let _ = app_cb.emit("escape-key-down", ());
+                            // Lang menu Esc close is independent of the cancel hotkey binding.
+                            if key == "escape"
+                                && mods.is_empty()
+                                && floating_lang_menu_is_open()
+                            {
+                                close_floating_lang_menu(&app_cb);
                                 return CallbackResult::Drop;
+                            }
+
+                            if binding_matches(&hk_cancel, &key, &mods) {
+                                // Never swallow cancel when idle — other apps need the key.
+                                if cancel_hotkey_is_actionable(&app_cb) {
+                                    let _ = app_cb.emit("escape-key-down", ());
+                                    return CallbackResult::Drop;
+                                }
+                                return CallbackResult::Keep;
                             }
 
                             // Non-Fn action hotkeys (e.g. ⌃+Space) — full equivalent of ⇧+Fn etc.
