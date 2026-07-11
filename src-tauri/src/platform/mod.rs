@@ -4,6 +4,10 @@ use core_foundation::base::{CFRelease, TCFType};
 use core_foundation::string::{CFString, CFStringRef};
 #[cfg(target_os = "macos")]
 use std::ffi::c_void;
+#[cfg(not(target_os = "macos"))]
+use std::io::Write;
+#[cfg(not(target_os = "macos"))]
+use std::process::Command;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager};
 use crate::hud::*;
@@ -215,6 +219,23 @@ pub(crate) fn raise_floating_hud_level(window: &tauri::WebviewWindow, order_fron
 
 #[cfg(target_os = "macos")]
 pub(crate) fn configure_floating_hud_panel(window: &tauri::WebviewWindow, corner_radius: f64) {
+    configure_floating_overlay_panel(window, corner_radius, true, true);
+}
+
+/// Translate-target chip / menu: no native shadow or vibrancy.
+/// Those leave a rectangular “box” under the CSS-rounded menu when the window resizes.
+#[cfg(target_os = "macos")]
+pub(crate) fn configure_floating_lang_panel(window: &tauri::WebviewWindow) {
+    configure_floating_overlay_panel(window, 0.0, false, false);
+}
+
+#[cfg(target_os = "macos")]
+fn configure_floating_overlay_panel(
+    window: &tauri::WebviewWindow,
+    corner_radius: f64,
+    has_shadow: bool,
+    with_vibrancy: bool,
+) {
     use objc2_app_kit::{
         NSColor, NSMainMenuWindowLevel, NSWindow, NSWindowCollectionBehavior, NSWindowStyleMask,
     };
@@ -243,7 +264,7 @@ pub(crate) fn configure_floating_hud_panel(window: &tauri::WebviewWindow, corner
 
         ns_window.setOpaque(false);
         ns_window.setBackgroundColor(Some(&NSColor::clearColor()));
-        ns_window.setHasShadow(true);
+        ns_window.setHasShadow(has_shadow);
         ns_window.setMovableByWindowBackground(true);
         ns_window.setIgnoresMouseEvents(false);
         ns_window.setLevel(NSMainMenuWindowLevel + 2);
@@ -255,6 +276,11 @@ pub(crate) fn configure_floating_hud_panel(window: &tauri::WebviewWindow, corner
             | NSWindowCollectionBehavior::CanJoinAllApplications
             | NSWindowCollectionBehavior::Transient;
         ns_window.setCollectionBehavior(behavior);
+    }
+
+    if !with_vibrancy {
+        eprintln!("[floating] overlay panel without vibrancy/shadow");
+        return;
     }
 
     if let Err(e) = apply_vibrancy(

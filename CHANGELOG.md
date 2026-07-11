@@ -2,6 +2,12 @@
 
 All notable changes to ASR Workshop are documented in this file.
 
+## [0.5.2] — 2026-07-11
+
+### Fixed
+- Linux CI: install `libasound2-dev` for cpal/alsa
+- Windows build: import `std::process::Command` for clipboard helper
+
 ## [0.5.1] — 2026-07-10
 
 ### Fixed
