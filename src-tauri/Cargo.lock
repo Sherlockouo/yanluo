@@ -3387,7 +3387,6 @@ dependencies = [
 [[package]]
 name = "qwen3-asr-rs"
 version = "0.2.0"
-source = "git+https://github.com/Sherlockouo/qwen3_asr_rs?branch=feat%2Fforced-aligner#a3996d883467658079738ca42ded802b47ed9b6a"
 dependencies = [
  "anyhow",
  "axum",

@@ -95,7 +95,12 @@ export function AsrHud() {
     }).then((u) => {
       unlistenLevel = u;
     });
-    void listen<{ text: string }>("partial-result", (event) =>
+    void listen<{
+      text: string;
+      committed?: string;
+      active?: string;
+      segment_index?: number;
+    }>("partial-result", (event) =>
       setPayload((prev) => ({
         ...prev,
         visible: true,

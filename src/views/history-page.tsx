@@ -317,22 +317,7 @@ function ExpandedViewer({
 
   return (
     <SectionCard className="!p-4">
-      <div className="mb-3 flex items-center justify-end gap-2">
-        <Button
-          size="sm"
-          variant="secondary"
-          onPress={() => {
-            void navigator.clipboard.writeText(entry.text);
-            toast.success("已复制");
-          }}
-        >
-          <Clipboard size={14} />
-          复制
-        </Button>
-        <Button size="sm" variant="secondary" onPress={onClose}>
-          收起
-        </Button>
-      </div>
+      
       {isTranslate && showDiff ? (
         <div className="mb-4 rounded-2xl border border-border bg-surface-secondary/40 px-3.5 py-3">
           <SemanticPair before={entry.raw_text} after={entry.text} />
@@ -356,6 +341,19 @@ function ExpandedViewer({
           {entry.text || "（空）"}
         </p>
       )}
+      <div className="mb-3 flex items-center justify-end gap-2">
+        <Button
+          size="sm"
+          variant="secondary"
+          onPress={() => {
+            void navigator.clipboard.writeText(entry.text);
+            toast.success("已复制");
+          }}
+        >
+          <Clipboard size={14} />
+          复制
+        </Button>
+      </div>
     </SectionCard>
   );
 }

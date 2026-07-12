@@ -219,43 +219,11 @@ export function SettingsPage() {
 }
 
 function GeneralPanel() {
-  const { config, updateConfig, saveConfig, theme, setTheme } = useApp();
+  const { config, updateConfig, saveConfig } = useApp();
 
-  const setThemeMode = (next: ThemeMode) => {
-    setTheme(next);
-  };
 
   return (
     <>
-      <SectionCard className="max-w-2xl flex flex-col gap-5" title="外观">
-        <div className="grid grid-cols-2 gap-2">
-          {(
-            [
-              { id: "dark", label: "深色", icon: Moon },
-              { id: "light", label: "浅色", icon: Sun },
-            ] as const
-          ).map((item) => {
-            const Icon = item.icon;
-            const active = theme === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className={cn(
-                  "flex items-center justify-center gap-2 rounded-xl border px-3 py-3 text-sm font-medium transition-colors",
-                  active
-                    ? "border-foreground/20 bg-default text-foreground"
-                    : "border-border bg-transparent text-muted hover:bg-default/50",
-                )}
-                onClick={() => setThemeMode(item.id)}
-              >
-                <Icon size={15} />
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-      </SectionCard>
 
       <SectionCard className="max-w-2xl flex flex-col gap-5" title="全局语言">
         <Select
@@ -489,7 +457,6 @@ function HotkeysPanel() {
               {TRANSLATE_LANGUAGES.map(([value, label]) => (
                 <ListBox.Item key={value} id={value} textValue={`${label} ${value}`}>
                   <span>{label}</span>
-                  <span className="ml-auto font-mono text-[11px] text-muted">{value}</span>
                   <ListBox.ItemIndicator />
                 </ListBox.Item>
               ))}

@@ -614,27 +614,14 @@ function ResultPhase({
   onNew: () => void;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
-  const openedForIdRef = useRef<string | null>(null);
 
-  // Open cover when landing on / selecting a result; don't re-open after dismiss.
   useEffect(() => {
-    if (!activeEntry) {
-      setDetailOpen(false);
-      openedForIdRef.current = null;
-      return;
-    }
-    if (openedForIdRef.current === activeEntry.id) return;
-    openedForIdRef.current = activeEntry.id;
-    setDetailOpen(true);
+    if (!activeEntry) setDetailOpen(false);
   }, [activeEntry]);
 
   const selectAndOpen = (id: string) => {
-    if (activeEntry?.id === id) {
-      setDetailOpen(true);
-      return;
-    }
-    openedForIdRef.current = null;
-    onSelect(id);
+    if (activeEntry?.id !== id) onSelect(id);
+    setDetailOpen(true);
   };
 
   return (

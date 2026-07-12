@@ -71,15 +71,33 @@ pub(crate) fn take_translate_stream(app: &AppHandle) -> (String, String) {
 }
 
 /// Fn / transcribe: emit ASR partials. Translate: track text, never show raw on HUD.
+#[allow(dead_code)]
 pub(crate) fn handle_asr_partial(app: &AppHandle, text: &str) {
-    if text.is_empty() {
+    handle_asr_partial_ex(app, text, "", text, 0);
+}
+
+/// Emit structured partial (committed + active). `text` is the HUD display string.
+pub(crate) fn handle_asr_partial_ex(
+    app: &AppHandle,
+    text: &str,
+    committed: &str,
+    active: &str,
+    segment_index: usize,
+) {
+    if text.is_empty() && committed.is_empty() && active.is_empty() {
         return;
     }
     let mode = AsrEngine::session_mode(app);
     if mode != "translate" {
-        let _ = app.emit("partial-result", &PartialResult {
-            text: text.to_string(),
-        });
+        let _ = app.emit(
+            "partial-result",
+            &PartialResult {
+                text: text.to_string(),
+                committed: committed.to_string(),
+                active: active.to_string(),
+                segment_index,
+            },
+        );
         return;
     }
 
@@ -199,9 +217,7 @@ fn apply_stream_translation(app: &AppHandle, epoch: u64, segment: &str, translat
     emit_floating_status(app, true, "recording", &out, 0.0);
     let _ = app.emit(
         "partial-result",
-        &PartialResult {
-            text: out,
-        },
+        &PartialResult::display(out),
     );
 }
 
@@ -296,16 +312,12 @@ pub(crate) fn retarget_translate_stream(app: &AppHandle) {
     emit_floating_status(app, true, "recording", "", 0.0);
     let _ = app.emit(
         "partial-result",
-        &PartialResult {
-            text: String::new(),
-        },
+        &PartialResult::display(String::new()),
     );
     let _ = app.emit_to(
         "floating",
         "partial-result",
-        &PartialResult {
-            text: String::new(),
-        },
+        &PartialResult::display(String::new()),
     );
 
     if asr.trim().is_empty() || !llm_ready(&config) {
@@ -357,7 +369,7 @@ fn apply_retarget_translation(app: &AppHandle, epoch: u64, asr: &str, translated
         st.out_done.clone()
     };
     emit_floating_status(app, true, "recording", &out, 0.0);
-    let payload = PartialResult { text: out };
+    let payload = PartialResult::display(out);
     let _ = app.emit("partial-result", &payload);
     let _ = app.emit_to("floating", "partial-result", &payload);
 }

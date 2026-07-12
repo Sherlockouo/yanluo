@@ -418,9 +418,7 @@ pub(crate) fn finalize_successful_result(
         emit_floating_status(app, true, "processing", &result.text, 0.0);
         let _ = app.emit(
             "partial-result",
-            PartialResult {
-                text: result.text.clone(),
-            },
+            PartialResult::display(result.text.clone()),
         );
         match inject_text_via_paste_on_main(app, &result.text) {
             Ok(()) => {
@@ -1163,35 +1161,130 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                 };
 
                 let chunk_samples = (chunk_sec * 16000.0) as usize;
+                let seg_cfg = {
+                    let cfg = app
+                        .state::<AsrEngine>()
+                        .inner()
+                        .config
+                        .lock()
+                        .map(|c| c.clone())
+                        .unwrap_or_default();
+                    SegmentConfig::from_app_ms(
+                        cfg.vad_energy_threshold,
+                        cfg.vad_min_silence_ms,
+                        cfg.vad_commit_hold_ms,
+                        cfg.vad_min_segment_ms,
+                        cfg.vad_max_segment_sec,
+                        cfg.vad_overlap_ms,
+                    )
+                };
 
                 eprintln!(
-                    "[mlx-worker] streaming: chunk={}s ({} samples), rollback={}",
-                    chunk_sec, chunk_samples, rollback_tokens
+                    "[mlx-worker] streaming: chunk={}s ({} samples), rollback={}, max_seg={:.0}s, overlap={}ms",
+                    chunk_sec,
+                    chunk_samples,
+                    rollback_tokens,
+                    seg_cfg.max_segment_samples as f64 / 16000.0,
+                    seg_cfg.overlap_samples * 1000 / 16000
                 );
 
                 let qwen_lang = language
                     .as_deref()
                     .and_then(language_for_qwen);
-                let mut stream_state =
-                    match inf.init_streaming(qwen_lang.as_deref(), rollback_tokens) {
-                        Ok(s) => s,
-                        Err(e) => {
-                            eprintln!("[mlx-worker] init_streaming failed: {}", e);
-                            let _ = app.emit("partial-error", &format!("init_streaming: {e}"));
-                            continue;
+
+                let open_stream =
+                    |inf: &mut qwen3_asr_rs::inference::AsrInference| -> Option<qwen3_asr_rs::inference::StreamingState> {
+                        match inf.init_streaming(qwen_lang.as_deref(), rollback_tokens) {
+                            Ok(s) => Some(s),
+                            Err(e) => {
+                                eprintln!("[mlx-worker] init_streaming failed: {}", e);
+                                let _ = app.emit("partial-error", &format!("init_streaming: {e}"));
+                                None
+                            }
                         }
                     };
 
+                let Some(mut stream_state) = open_stream(inf) else {
+                    continue;
+                };
+
                 eprintln!(
-                    "[mlx-worker] streaming loop started (rollback={})",
+                    "[mlx-worker] segmented streaming loop started (rollback={})",
                     rollback_tokens
                 );
-                let mut partial_count = 0usize;
-                let mut last_transcribed_samples = 0usize;
 
-                // --- Self-paced streaming loop ---
-                // After each transcription, wait for at least chunk_sec of new
-                // audio before the next round.
+                let vad = EnergyVad::from_config(&seg_cfg);
+                let mut clock = SegmentClock::new(seg_cfg.clone());
+                let frame_len = vad.frame_samples();
+                let mut vad = vad;
+
+                let mut vad_fed = 0usize;
+                let mut seg_start: Option<usize> = None;
+                let mut last_partial_abs = 0usize;
+                let mut committed_text = String::new();
+                let mut active_text = String::new();
+                let mut segment_index = 0usize;
+                let mut partial_count = 0usize;
+                let mut last_language = String::new();
+
+                let emit_partial = |app: &AppHandle,
+                                    committed: &str,
+                                    active: &str,
+                                    segment_index: usize| {
+                    let text = display_text(committed, active);
+                    if text.is_empty() {
+                        return;
+                    }
+                    handle_asr_partial_ex(app, &text, committed, active, segment_index);
+                    tick_translate_stable(app);
+                };
+
+                let commit_segment =
+                    |inf: &mut qwen3_asr_rs::inference::AsrInference,
+                     stream_state: &mut qwen3_asr_rs::inference::StreamingState,
+                     samples: &[f32],
+                     start: usize,
+                     end: usize,
+                     committed_text: &mut String,
+                     active_text: &mut String,
+                     last_language: &mut String,
+                     reason: &str|
+                     -> bool {
+                        let end = end.min(samples.len()).max(start);
+                        if end <= start {
+                            active_text.clear();
+                            return true;
+                        }
+                        let seg = &samples[start..end];
+                        eprintln!(
+                            "[mlx-worker] commit segment ({reason}): {:.1}s–{:.1}s ({:.1}s)",
+                            start as f64 / 16000.0,
+                            end as f64 / 16000.0,
+                            seg.len() as f64 / 16000.0
+                        );
+                        match inf.streaming_transcribe(seg, stream_state) {
+                            Ok(r) => {
+                                if !r.language.is_empty() {
+                                    *last_language = r.language;
+                                }
+                                append_segment_text(committed_text, &r.text);
+                                active_text.clear();
+                                true
+                            }
+                            Err(e) => {
+                                eprintln!("[mlx-worker] segment commit failed: {e}");
+                                let _ = app.emit("partial-error", &format!("segment commit: {e}"));
+                                // Keep last active hypothesis if final failed.
+                                if !active_text.is_empty() {
+                                    append_segment_text(committed_text, active_text);
+                                    active_text.clear();
+                                }
+                                false
+                            }
+                        }
+                    };
+
+                // --- Self-paced segmented streaming loop ---
                 loop {
                     if !recording.load(Ordering::Acquire) {
                         break;
@@ -1202,45 +1295,158 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
 
                     let samples = match AsrEngine::get_audio_snapshot(&app) {
                         Some(s) => s,
-                        None => break, // recorder gone
+                        None => break,
                     };
 
-                    // Wait until enough new audio has accumulated.
-                    let new_samples = samples.len().saturating_sub(last_transcribed_samples);
-                    if samples.len() < chunk_samples || new_samples < chunk_samples {
+                    // Drive VAD / segment clock on newly available audio.
+                    while vad_fed + frame_len <= samples.len() {
+                        let frame = &samples[vad_fed..vad_fed + frame_len];
+                        let speech = vad.is_speech(frame);
+                        let events = clock.on_frame(vad_fed, frame_len, speech);
+                        vad_fed += frame_len;
+
+                        for ev in events {
+                            match ev {
+                                SegmentEvent::Open { start_sample } => {
+                                    seg_start = Some(start_sample);
+                                    last_partial_abs = start_sample;
+                                    active_text.clear();
+                                    eprintln!(
+                                        "[mlx-worker] segment #{} open @ {:.1}s",
+                                        segment_index,
+                                        start_sample as f64 / 16000.0
+                                    );
+                                }
+                                SegmentEvent::Commit { end_sample }
+                                | SegmentEvent::HardCut { end_sample } => {
+                                    let is_hard = matches!(ev, SegmentEvent::HardCut { .. });
+                                    let reason = if is_hard { "hard-cap" } else { "vad-silence" };
+                                    if let Some(start) = seg_start {
+                                        let _ = commit_segment(
+                                            inf,
+                                            &mut stream_state,
+                                            &samples,
+                                            start,
+                                            end_sample,
+                                            &mut committed_text,
+                                            &mut active_text,
+                                            &mut last_language,
+                                            reason,
+                                        );
+                                        emit_partial(
+                                            &app,
+                                            &committed_text,
+                                            "",
+                                            segment_index,
+                                        );
+
+                                        match open_stream(inf) {
+                                            Some(s) => stream_state = s,
+                                            None => {
+                                                seg_start = None;
+                                                break;
+                                            }
+                                        }
+                                        segment_index += 1;
+                                    }
+                                    let next = clock.next_start_after_cut(end_sample);
+                                    if is_hard {
+                                        // Continuous speech — reopen immediately with overlap.
+                                        clock.force_open(next);
+                                        seg_start = Some(next);
+                                        last_partial_abs = next;
+                                        active_text.clear();
+                                        eprintln!(
+                                            "[mlx-worker] segment #{} reopen @ {:.1}s (overlap)",
+                                            segment_index,
+                                            next as f64 / 16000.0
+                                        );
+                                    } else {
+                                        seg_start = None;
+                                        last_partial_abs = next;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // In-segment partial: only feed the *current segment* window.
+                    let Some(start) = seg_start.or_else(|| clock.active_start()) else {
+                        continue;
+                    };
+                    if samples.len() <= start {
+                        continue;
+                    }
+                    let new_in_seg = samples.len().saturating_sub(last_partial_abs);
+                    if samples.len().saturating_sub(start) < chunk_samples
+                        || new_in_seg < chunk_samples
+                    {
                         continue;
                     }
 
+                    let seg_pcm = &samples[start..];
                     partial_count += 1;
-                    let duration = samples.len() as f64 / 16000.0;
                     eprintln!(
-                        "[mlx-worker] partial #{}: {:.1}s audio (+{:.1}s new)",
+                        "[mlx-worker] partial #{} seg#{}: {:.1}s window (+{:.1}s new)",
                         partial_count,
-                        duration,
-                        new_samples as f64 / 16000.0
+                        segment_index,
+                        seg_pcm.len() as f64 / 16000.0,
+                        new_in_seg as f64 / 16000.0
                     );
 
-                    match inf.streaming_transcribe_partial(&samples, &mut stream_state) {
+                    match inf.streaming_transcribe_partial(seg_pcm, &mut stream_state) {
                         Ok(r) => {
-                            last_transcribed_samples = samples.len();
-
+                            last_partial_abs = samples.len();
+                            if !r.language.is_empty() {
+                                last_language = r.language.clone();
+                            }
                             if recording.load(Ordering::Acquire) {
+                                active_text = r.text;
                                 eprintln!(
-                                    "[mlx-worker] partial #{} done: lang={} text_len={}",
+                                    "[mlx-worker] partial #{} done: lang={} active_len={} committed_len={}",
                                     partial_count,
-                                    r.language,
-                                    r.text.len()
+                                    last_language,
+                                    active_text.len(),
+                                    committed_text.len()
                                 );
-                                if !r.text.is_empty() {
-                                    // Fn: show ASR. Translate: accumulate only (HUD = translation).
-                                    handle_asr_partial(&app, &r.text);
-                                    tick_translate_stable(&app);
-                                }
+                                emit_partial(
+                                    &app,
+                                    &committed_text,
+                                    &active_text,
+                                    segment_index,
+                                );
                             }
                         }
                         Err(e) => {
                             eprintln!("[mlx-worker] partial #{} failed: {}", partial_count, e);
                             let _ = app.emit("partial-error", &format!("{e}"));
+                            // RoPE exhaustion mid-segment: force-cut and reopen.
+                            if format!("{e}").contains("RoPE position table exhausted") {
+                                if let Some(start) = seg_start {
+                                    let end = samples.len();
+                                    let _ = commit_segment(
+                                        inf,
+                                        &mut stream_state,
+                                        &samples,
+                                        start,
+                                        end,
+                                        &mut committed_text,
+                                        &mut active_text,
+                                        &mut last_language,
+                                        "rope-guard",
+                                    );
+                                    if let Some(s) = open_stream(inf) {
+                                        stream_state = s;
+                                    }
+                                    segment_index += 1;
+                                    let next = end.saturating_sub(seg_cfg.overlap_samples);
+                                    clock = SegmentClock::new(seg_cfg.clone());
+                                    clock.force_open(next);
+                                    seg_start = Some(next);
+                                    last_partial_abs = next;
+                                    active_text.clear();
+                                }
+                            }
                         }
                     }
                 }
@@ -1248,7 +1454,6 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                 eprintln!("[mlx-worker] streaming loop ended, doing final transcription");
 
                 // --- Final transcription ---
-                // Take the recorder, stop it, get all samples.
                 let samples = match AsrEngine::take_recorder_and_stop(&app) {
                     Some(s) => s,
                     None => {
@@ -1260,15 +1465,15 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                             let _ = app.emit(
                                 "transcription-result",
                                 &TranscriptionResult {
-                        text: String::new(),
-                        raw_text: String::new(),
-                        language: String::new(),
-                        duration_seconds: 0.0,
-                        refined: false,
-                        error: Some("Recorder not found".into()),
-                        segments: Vec::new(),
-                        alignment: None,
-                    },
+                                    text: String::new(),
+                                    raw_text: String::new(),
+                                    language: String::new(),
+                                    duration_seconds: 0.0,
+                                    refined: false,
+                                    error: Some("Recorder not found".into()),
+                                    segments: Vec::new(),
+                                    alignment: None,
+                                },
                             );
                         }
                         continue;
@@ -1286,30 +1491,37 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                 }
 
                 let duration = samples.len() as f64 / 16000.0;
-                eprintln!("[mlx-worker] final: {:.1}s audio", duration);
+                eprintln!("[mlx-worker] final: {:.1}s audio, {} segments committed", duration, segment_index);
 
-                // Final transcription: process everything including tail frames.
-                let mut result = match inf.streaming_transcribe(&samples, &mut stream_state) {
-                    Ok(r) => TranscriptionResult {
-                        text: r.text.clone(),
-                        raw_text: r.text,
-                        language: r.language,
-                        duration_seconds: r.duration_seconds,
-                        refined: false,
-                        error: None,
-                        segments: Vec::new(),
-                        alignment: None,
-                    },
-                    Err(e) => TranscriptionResult {
-                        text: String::new(),
-                        raw_text: String::new(),
-                        language: String::new(),
-                        duration_seconds: duration,
-                        refined: false,
-                        error: Some(format!("{e}")),
-                        segments: Vec::new(),
-                        alignment: None,
-                    },
+                // Commit any still-open segment (including trailing silence audio).
+                if let Some(start) = seg_start.or_else(|| clock.active_start()) {
+                    if start < samples.len() {
+                        let _ = commit_segment(
+                            inf,
+                            &mut stream_state,
+                            &samples,
+                            start,
+                            samples.len(),
+                            &mut committed_text,
+                            &mut active_text,
+                            &mut last_language,
+                            "final",
+                        );
+                    }
+                } else if !active_text.is_empty() {
+                    append_segment_text(&mut committed_text, &active_text);
+                    active_text.clear();
+                }
+
+                let mut result = TranscriptionResult {
+                    text: committed_text.clone(),
+                    raw_text: committed_text.clone(),
+                    language: last_language.clone(),
+                    duration_seconds: duration,
+                    refined: false,
+                    error: None,
+                    segments: Vec::new(),
+                    alignment: None,
                 };
 
                 if result.error.is_none() && !result.text.trim().is_empty() {
@@ -1506,7 +1718,26 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
 #[cfg_attr(not(feature = "qwen-local"), allow(dead_code))]
 #[derive(Clone, Serialize)]
 pub(crate) struct PartialResult {
+    /// Full HUD string (`committed` + `active`).
     pub(crate) text: String,
+    #[serde(default)]
+    pub(crate) committed: String,
+    #[serde(default)]
+    pub(crate) active: String,
+    #[serde(default)]
+    pub(crate) segment_index: usize,
+}
+
+impl PartialResult {
+    pub(crate) fn display(text: impl Into<String>) -> Self {
+        let text = text.into();
+        Self {
+            committed: String::new(),
+            active: text.clone(),
+            text,
+            segment_index: 0,
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]

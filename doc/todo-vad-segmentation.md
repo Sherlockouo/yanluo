@@ -1,6 +1,7 @@
 # TODO: VAD 分段与内存优化
 
-> **已收敛**：整体设计见 [`design-streaming-asr-vad.md`](./design-streaming-asr-vad.md)。本文保留问题陈述与早期方案草稿。
+> **已收敛**：阶段表 [`ROADMAP-streaming-asr-vad.md`](./ROADMAP-streaming-asr-vad.md)；架构 [`design-streaming-asr-vad.md`](./design-streaming-asr-vad.md)。  
+> **实现进度**：S0+S1 已交付；S1.1 调切段质量（过早 VAD 会伤准确度）。
 
 ## 问题
 

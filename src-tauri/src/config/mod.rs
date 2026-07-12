@@ -177,6 +177,24 @@ pub(crate) struct AppConfig {
     /// Qwen streaming unfixed token count (`unfixed_token_num` / rollback_tokens).
     #[serde(default = "default_unfixed_token_num")]
     pub(crate) unfixed_token_num: usize,
+    /// Energy VAD RMS threshold (linear PCM).
+    #[serde(default = "default_vad_energy_threshold")]
+    pub(crate) vad_energy_threshold: f32,
+    /// Silence duration (ms) before a commit candidate.
+    #[serde(default = "default_vad_min_silence_ms")]
+    pub(crate) vad_min_silence_ms: u64,
+    /// Extra silence hold (ms) after candidate before commit.
+    #[serde(default = "default_vad_commit_hold_ms")]
+    pub(crate) vad_commit_hold_ms: u64,
+    /// Minimum segment length (ms).
+    #[serde(default = "default_vad_min_segment_ms")]
+    pub(crate) vad_min_segment_ms: u64,
+    /// Hard-cap segment length (seconds) — RoPE / KV guard.
+    #[serde(default = "default_vad_max_segment_sec")]
+    pub(crate) vad_max_segment_sec: f64,
+    /// Overlap into next segment after a cut (ms).
+    #[serde(default = "default_vad_overlap_ms")]
+    pub(crate) vad_overlap_ms: u64,
     #[serde(default = "default_hotkey_transcribe")]
     pub(crate) hotkey_transcribe: HotkeyBinding,
     #[serde(default = "default_hotkey_translate")]
@@ -202,7 +220,32 @@ pub(crate) fn default_chunk_size_sec() -> f64 {
 }
 
 pub(crate) fn default_unfixed_token_num() -> usize {
-    2
+    5
+}
+
+pub(crate) fn default_vad_energy_threshold() -> f32 {
+    // Enter threshold; exit = 40% via SegmentConfig::from_app_ms (hysteresis).
+    0.010
+}
+
+pub(crate) fn default_vad_min_silence_ms() -> u64 {
+    900
+}
+
+pub(crate) fn default_vad_commit_hold_ms() -> u64 {
+    500
+}
+
+pub(crate) fn default_vad_min_segment_ms() -> u64 {
+    2500
+}
+
+pub(crate) fn default_vad_max_segment_sec() -> f64 {
+    90.0
+}
+
+pub(crate) fn default_vad_overlap_ms() -> u64 {
+    500
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -225,6 +268,12 @@ impl Default for AppConfig {
             translate_target_language: default_translate_target_language(),
             chunk_size_sec: default_chunk_size_sec(),
             unfixed_token_num: default_unfixed_token_num(),
+            vad_energy_threshold: default_vad_energy_threshold(),
+            vad_min_silence_ms: default_vad_min_silence_ms(),
+            vad_commit_hold_ms: default_vad_commit_hold_ms(),
+            vad_min_segment_ms: default_vad_min_segment_ms(),
+            vad_max_segment_sec: default_vad_max_segment_sec(),
+            vad_overlap_ms: default_vad_overlap_ms(),
             hotkey_transcribe: default_hotkey_transcribe(),
             hotkey_translate: default_hotkey_translate(),
             hotkey_cancel: default_hotkey_cancel(),

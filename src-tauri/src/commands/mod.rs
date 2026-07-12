@@ -328,8 +328,26 @@ pub(crate) fn start_recording(
 
     spawn_audio_level_pump(app.clone(), engine.inner().recording.clone());
 
-    let chunk_sec = chunk_sec.unwrap_or(config.chunk_size_sec.max(0.2));
-    let rollback_tokens = rollback_tokens.unwrap_or(config.unfixed_token_num.max(1));
+    // Segmented streaming quality floors (S1.1). Tiny chunk/rollback from
+    // older config.json causes unstable hypotheses and feels like "worse ASR".
+    let raw_chunk = chunk_sec.unwrap_or(config.chunk_size_sec.max(0.2));
+    let chunk_sec = if raw_chunk < 0.8 {
+        eprintln!(
+            "[asr] chunk_sec={raw_chunk:.2} too small for segmented streaming; clamping to 0.8s"
+        );
+        0.8
+    } else {
+        raw_chunk
+    };
+    let raw_rollback = rollback_tokens.unwrap_or(config.unfixed_token_num.max(1));
+    let rollback_tokens = if raw_rollback < 3 {
+        eprintln!(
+            "[asr] rollback_tokens={raw_rollback} too small; clamping to 3 (prefer 5)"
+        );
+        3
+    } else {
+        raw_rollback
+    };
     let language = language.or_else(|| {
         engine
             .inner()

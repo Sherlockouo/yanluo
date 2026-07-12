@@ -34,8 +34,8 @@ export function TranslatePage() {
     <PageShell className="max-w-5xl">
       <PageHeader title="翻译" subtitle={config.hotkey_translate.label} />
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
-        <SectionCard className="flex h-fit flex-col gap-5">
+      <div className="flex min-h-0  gap-5 ">
+        <SectionCard className="flex h-fit flex-3 flex-col gap-5">
           <Select
             selectedKey={config.translate_target_language}
             onSelectionChange={(key) => {
@@ -58,7 +58,6 @@ export function TranslatePage() {
                 {TRANSLATE_LANGUAGES.map(([value, label]) => (
                   <ListBox.Item key={value} id={value} textValue={`${label} ${value}`}>
                     <span>{label}</span>
-                    <span className="ml-auto font-mono text-[11px] text-muted">{value}</span>
                     <ListBox.ItemIndicator />
                   </ListBox.Item>
                 ))}
@@ -81,14 +80,14 @@ export function TranslatePage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="翻译记录">
+        <SectionCard title="翻译记录" className="flex flex-7 min-h-0">
           {entries.length === 0 ? (
             <EmptyState
               title="还没有翻译记录"
               icon={<Languages size={18} />}
             />
           ) : (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 max-h-[min(72vh,640px)] overflow-y-scroll">
               {entries.map((entry) => (
                 <article
                   key={entry.id}

@@ -2,7 +2,7 @@
 name = "asr-workshop"
 version = "0.1.1"
 description = "Desktop app for Qwen3-ASR, built with Tauri 2.0"
-authors = ["you"]
+authors = ["Sherlockouo"]
 edition = "2021"
 
 [lib]
@@ -35,11 +35,12 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSView", "NSColor", "NSGraphics", "NSPasteboard", "NSPasteboardItem", "NSAppearance", "NSApplication", "NSRunningApplication", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSString"] }
 
-# Qwen3-ASR Rust implementation (ForcedAligner branch, MLX — macOS).
+# Qwen3-ASR Rust implementation (local tree; MLX — macOS).
 # Enable with `--features qwen-local` (Apple Silicon recommended).
+# Path dep for co-development with segmented streaming / VAD work.
+# Switch back to git `feat/forced-aligner` after pushing engine changes.
 [dependencies.qwen3-asr-rs]
-git = "https://github.com/Sherlockouo/qwen3_asr_rs"
-branch = "feat/forced-aligner"
+path = "../../qwen3_asr_rs"
 default-features = false
 features = ["mlx"]
 optional = true
