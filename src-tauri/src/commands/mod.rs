@@ -331,11 +331,11 @@ pub(crate) fn start_recording(
     // Segmented streaming quality floors (S1.1). Tiny chunk/rollback from
     // older config.json causes unstable hypotheses and feels like "worse ASR".
     let raw_chunk = chunk_sec.unwrap_or(config.chunk_size_sec.max(0.2));
-    let chunk_sec = if raw_chunk < 0.8 {
+    let chunk_sec = if raw_chunk < 1.0 {
         eprintln!(
-            "[asr] chunk_sec={raw_chunk:.2} too small for segmented streaming; clamping to 0.8s"
+            "[asr] chunk_sec={raw_chunk:.2} too small for segmented streaming; clamping to 1.0s"
         );
-        0.8
+        1.0
     } else {
         raw_chunk
     };

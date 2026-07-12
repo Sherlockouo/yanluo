@@ -1,6 +1,6 @@
 # 设计：高性能流式 ASR + VAD
 
-> 状态: **S0+S1 已交付**；**S1.1 进行中**（切段质量）。权威阶段表见 [`ROADMAP-streaming-asr-vad.md`](./ROADMAP-streaming-asr-vad.md)。  
+> 状态: **S0–S2 已交付**；下一阶段 **S3**（WebRTC VAD）。权威阶段表见 [`ROADMAP-streaming-asr-vad.md`](./ROADMAP-streaming-asr-vad.md)。  
 > 创建: 2026-07-12 · 实现: 2026-07-12  
 > 取代 / 收敛: `todo-streaming-asr.md`（历史背景）、`todo-vad-segmentation.md`（问题陈述）、`incremental-kv-cache-investigation.md`（已验证基线）
 
@@ -11,12 +11,13 @@
 | RoPE `max_positions=8192` + `ensure_rope_span` | ✅ S0 | `qwen3_asr_rs/src/inference.rs` |
 | Energy VAD + `SegmentClock` | ✅ S1 | `asr-cli/.../audio/vad.rs` |
 | 按段 PCM 切片 + `init_streaming` 重置 | ✅ S1 | `transcription/mod.rs` StartStreaming |
-| Hard cap 90s + overlap | ✅ S1 / 调优中 S1.1 | `AppConfig` / `SegmentConfig` |
-| Hysteresis + 保守静音默认 | 🔄 S1.1 | `EnergyVad` enter/exit |
+| Hard cap 90s + overlap | ✅ S1 / S1.1 | `AppConfig` / `SegmentConfig` |
+| Hysteresis + 保守静音默认 | ✅ S1.1 | `EnergyVad` enter/exit |
 | `PartialResult{committed,active,segment_index}` | ✅ S1 | transcription + HUD 仍读 `text` |
+| 跨段 text prefix（cap） | ✅ S2 | `init_streaming_with_context` + worker |
+| commit → translate nudge | ✅ S2 | `notify_asr_committed` |
 | asr-cli → path `../../qwen3_asr_rs` | ✅ | 联调；推送后可改回 git |
 | WebRTC VAD | ❌ S3 | |
-| 跨段 text prefix | ❌ S2 | |
 
 ## 1. 目标与非目标
 

@@ -250,6 +250,9 @@ function GeneralPanel() {
             </ListBox>
           </Select.Popover>
         </Select>
+        <p className="text-[12px] leading-relaxed text-muted">
+          主要说中文时选「简体中文」更稳；「自动」会按系统语言偏置，并推迟锁定英文，减轻开头被听成英文。
+        </p>
         <Button
           fullWidth
           variant="primary"

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Label, ListBox, Select } from "@heroui/react";
+import { Kbd, Label, ListBox, Select } from "@heroui/react";
 import { Languages } from "lucide-react";
 import {
   EmptyState,
@@ -67,7 +67,9 @@ export function TranslatePage() {
 
           <div className="rounded-2xl border border-border bg-surface-secondary/40 px-3.5 py-3 text-[13px] leading-relaxed text-muted">
             <p>
-              <span className="text-foreground">{config.hotkey_translate.label}</span>
+              <Kbd>
+                {config.hotkey_translate.label}
+              </Kbd>
               {" · "}
               {llmReady ? (
                 <span className="text-success">
@@ -87,7 +89,7 @@ export function TranslatePage() {
               icon={<Languages size={18} />}
             />
           ) : (
-            <div className="flex flex-col gap-3 max-h-[min(72vh,640px)] overflow-y-scroll">
+            <div className="flex flex-col gap-3 max-h-[min(64vh,640px)] overflow-y-scroll">
               {entries.map((entry) => (
                 <article
                   key={entry.id}

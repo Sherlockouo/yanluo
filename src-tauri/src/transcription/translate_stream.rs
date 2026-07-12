@@ -121,6 +121,32 @@ pub(crate) fn handle_asr_partial_ex(
     }
 }
 
+/// VAD/hard-cap commit: freeze ASR prefix and nudge translate without waiting
+/// for another STABLE_MS of idle partials.
+pub(crate) fn notify_asr_committed(app: &AppHandle, committed: &str) {
+    if AsrEngine::session_mode(app) != "translate" {
+        return;
+    }
+    let text = super::sanitize_asr_for_translate(committed);
+    if text.is_empty() {
+        return;
+    }
+    if let Ok(mut st) = app.state::<AsrEngine>().inner().translate_stream.lock() {
+        if !st.src_done.is_empty() && !text.starts_with(&st.src_done) {
+            st.src_done.clear();
+            st.out_done.clear();
+            st.epoch = st.epoch.wrapping_add(1);
+            st.inflight = false;
+        }
+        st.last_asr = text;
+        // Make the next tick eligible immediately.
+        st.last_change = Instant::now()
+            .checked_sub(Duration::from_millis(STABLE_MS as u64 + 50))
+            .unwrap_or_else(Instant::now);
+    }
+    tick_translate_stable(app);
+}
+
 /// Called on the streaming poll loop (~50ms). Spawns async translate when prefix is stable.
 pub(crate) fn tick_translate_stable(app: &AppHandle) {
     if AsrEngine::session_mode(app) != "translate" {

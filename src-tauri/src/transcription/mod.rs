@@ -1007,6 +1007,103 @@ pub(crate) fn language_for_qwen(language: &str) -> Option<String> {
     }
 }
 
+/// When UI language is `auto`, bias from the OS primary locale.
+/// Short first chunks often emit `language English` for Chinese speech; a soft
+/// prior avoids that without requiring the user to pick 简体中文.
+#[cfg(feature = "qwen-local")]
+pub(crate) fn resolve_qwen_language(configured: Option<&str>) -> Option<String> {
+    if let Some(lang) = configured.and_then(language_for_qwen) {
+        return Some(lang);
+    }
+    os_asr_language_hint().and_then(language_for_qwen)
+}
+
+#[cfg(feature = "qwen-local")]
+fn os_asr_language_hint() -> Option<&'static str> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("defaults")
+            .args(["read", "-g", "AppleLanguages"])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let raw = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+        // First preferred language usually appears as "zh-hans-cn" / "en-us".
+        if raw.contains("zh-") || raw.contains("\"zh\"") {
+            return Some("zh-CN");
+        }
+        if raw.contains("ja-") || raw.contains("\"ja\"") {
+            return Some("ja-JP");
+        }
+        if raw.contains("ko-") || raw.contains("\"ko\"") {
+            return Some("ko-KR");
+        }
+        if raw.contains("en-") || raw.contains("\"en\"") {
+            return Some("en-US");
+        }
+        None
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+
+/// Decide whether auto-detect should stick to a language for the rest of the session.
+/// English needs more audio evidence — short CN speech is often mislabeled English.
+pub(crate) fn sticky_language_decision(
+    detected: &str,
+    text: &str,
+    segment_secs: f64,
+    chunk_id: usize,
+    unfixed_chunk_num: usize,
+) -> Option<&'static str> {
+    let cjk = text.chars().filter(|c| is_cjk_char(*c)).count();
+    if cjk >= 2 {
+        return Some("chinese");
+    }
+    if chunk_id < unfixed_chunk_num && segment_secs < 2.0 {
+        return None;
+    }
+    match detected.trim().to_ascii_lowercase().as_str() {
+        "chinese" | "zh" | "zh-cn" | "zh-tw" | "mandarin" => Some("chinese"),
+        "japanese" | "ja" | "ja-jp" => Some("japanese"),
+        "korean" | "ko" | "ko-kr" => Some("korean"),
+        "english" | "en" | "en-us" | "en-gb" => {
+            // Delay English lock: first ~2–3s of CN often looks like English.
+            if segment_secs >= 3.0 && chunk_id >= unfixed_chunk_num.saturating_add(1) {
+                Some("english")
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn is_cjk_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{4E00}'..='\u{9FFF}'
+            | '\u{3400}'..='\u{4DBF}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{3000}'..='\u{303F}'
+            | '\u{3040}'..='\u{30FF}'
+            | '\u{AC00}'..='\u{D7AF}'
+    )
+}
+
+/// HUD should stay quiet while the first streaming calls are still warming up.
+pub(crate) fn streaming_hypothesis_warm(
+    chunk_id: usize,
+    unfixed_chunk_num: usize,
+    segment_secs: f64,
+) -> bool {
+    chunk_id >= unfixed_chunk_num || segment_secs >= 2.0
+}
+
 pub(crate) fn language_for_apple(language: &str) -> String {
     match language.trim() {
         "" | "auto" => "zh-CN".into(),
@@ -1161,7 +1258,7 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                 };
 
                 let chunk_samples = (chunk_sec * 16000.0) as usize;
-                let seg_cfg = {
+                let (seg_cfg, max_context_tokens) = {
                     let cfg = app
                         .state::<AsrEngine>()
                         .inner()
@@ -1169,33 +1266,65 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                         .lock()
                         .map(|c| c.clone())
                         .unwrap_or_default();
-                    SegmentConfig::from_app_ms(
-                        cfg.vad_energy_threshold,
-                        cfg.vad_min_silence_ms,
-                        cfg.vad_commit_hold_ms,
-                        cfg.vad_min_segment_ms,
-                        cfg.vad_max_segment_sec,
-                        cfg.vad_overlap_ms,
+                    (
+                        SegmentConfig::from_app_ms(
+                            cfg.vad_energy_threshold,
+                            cfg.vad_min_silence_ms,
+                            cfg.vad_commit_hold_ms,
+                            cfg.vad_min_segment_ms,
+                            cfg.vad_max_segment_sec,
+                            cfg.vad_overlap_ms,
+                        ),
+                        cfg.cross_segment_prefix_tokens,
                     )
                 };
 
                 eprintln!(
-                    "[mlx-worker] streaming: chunk={}s ({} samples), rollback={}, max_seg={:.0}s, overlap={}ms",
+                    "[mlx-worker] streaming: chunk={}s ({} samples), rollback={}, max_seg={:.0}s, overlap={}ms, ctx_tokens={}",
                     chunk_sec,
                     chunk_samples,
                     rollback_tokens,
                     seg_cfg.max_segment_samples as f64 / 16000.0,
-                    seg_cfg.overlap_samples * 1000 / 16000
+                    seg_cfg.overlap_samples * 1000 / 16000,
+                    max_context_tokens
                 );
 
-                let qwen_lang = language
-                    .as_deref()
-                    .and_then(language_for_qwen);
+                let configured_lang = language.as_deref();
+                let mut sticky_qwen_lang = resolve_qwen_language(configured_lang);
+                let user_forced_lang = configured_lang.and_then(language_for_qwen).is_some();
+                let mut lang_locked = sticky_qwen_lang.is_some();
+                eprintln!(
+                    "[mlx-worker] asr language: config={} → qwen={:?} (locked={})",
+                    configured_lang.unwrap_or("auto"),
+                    sticky_qwen_lang,
+                    lang_locked
+                );
 
                 let open_stream =
-                    |inf: &mut qwen3_asr_rs::inference::AsrInference| -> Option<qwen3_asr_rs::inference::StreamingState> {
-                        match inf.init_streaming(qwen_lang.as_deref(), rollback_tokens) {
-                            Ok(s) => Some(s),
+                    |inf: &mut qwen3_asr_rs::inference::AsrInference,
+                     context: &str,
+                     lang: Option<&str>|
+                     -> Option<qwen3_asr_rs::inference::StreamingState> {
+                        let ctx = if context.trim().is_empty() || max_context_tokens == 0 {
+                            None
+                        } else {
+                            Some(context)
+                        };
+                        match inf.init_streaming_with_context(
+                            lang,
+                            rollback_tokens,
+                            ctx,
+                            max_context_tokens,
+                        ) {
+                            Ok(s) => {
+                                if ctx.is_some() || lang.is_some() {
+                                    eprintln!(
+                                        "[mlx-worker] init_streaming lang={lang:?} context_chars={}",
+                                        context.chars().count()
+                                    );
+                                }
+                                Some(s)
+                            }
                             Err(e) => {
                                 eprintln!("[mlx-worker] init_streaming failed: {}", e);
                                 let _ = app.emit("partial-error", &format!("init_streaming: {e}"));
@@ -1204,7 +1333,9 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                         }
                     };
 
-                let Some(mut stream_state) = open_stream(inf) else {
+                let Some(mut stream_state) =
+                    open_stream(inf, "", sticky_qwen_lang.as_deref())
+                else {
                     continue;
                 };
 
@@ -1339,8 +1470,9 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                                             "",
                                             segment_index,
                                         );
+                                        notify_asr_committed(&app, &committed_text);
 
-                                        match open_stream(inf) {
+                                        match open_stream(inf, &committed_text, sticky_qwen_lang.as_deref()) {
                                             Some(s) => stream_state = s,
                                             None => {
                                                 seg_start = None;
@@ -1395,26 +1527,83 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                     );
 
                     match inf.streaming_transcribe_partial(seg_pcm, &mut stream_state) {
-                        Ok(r) => {
+                        Ok(mut r) => {
                             last_partial_abs = samples.len();
                             if !r.language.is_empty() {
                                 last_language = r.language.clone();
                             }
+
+                            let seg_secs = seg_pcm.len() as f64 / 16000.0;
+                            // Auto mode: lock language once evidence is strong enough.
+                            // CJK in text or delayed English lock; then re-decode segment
+                            // with a forced language prefix so the wrong EN bias cannot stick.
+                            if !user_forced_lang && !lang_locked {
+                                if let Some(lock) = sticky_language_decision(
+                                    &last_language,
+                                    &r.text,
+                                    seg_secs,
+                                    stream_state.chunk_id,
+                                    stream_state.unfixed_chunk_num,
+                                ) {
+                                    eprintln!(
+                                        "[mlx-worker] sticky language lock → {lock} (was {:?}, seg={seg_secs:.1}s chunk={})",
+                                        sticky_qwen_lang,
+                                        stream_state.chunk_id
+                                    );
+                                    sticky_qwen_lang = Some(lock.to_string());
+                                    lang_locked = true;
+                                    if let Some(s) =
+                                        open_stream(inf, &committed_text, sticky_qwen_lang.as_deref())
+                                    {
+                                        stream_state = s;
+                                        match inf
+                                            .streaming_transcribe_partial(seg_pcm, &mut stream_state)
+                                        {
+                                            Ok(r2) => {
+                                                if !r2.language.is_empty() {
+                                                    last_language = r2.language.clone();
+                                                }
+                                                r = r2;
+                                            }
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "[mlx-worker] re-decode after lang lock failed: {e}"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             if recording.load(Ordering::Acquire) {
                                 active_text = r.text;
-                                eprintln!(
-                                    "[mlx-worker] partial #{} done: lang={} active_len={} committed_len={}",
-                                    partial_count,
-                                    last_language,
-                                    active_text.len(),
-                                    committed_text.len()
+                                let warm = streaming_hypothesis_warm(
+                                    stream_state.chunk_id,
+                                    stream_state.unfixed_chunk_num,
+                                    seg_secs,
                                 );
-                                emit_partial(
-                                    &app,
-                                    &committed_text,
-                                    &active_text,
-                                    segment_index,
-                                );
+                                if warm {
+                                    eprintln!(
+                                        "[mlx-worker] partial #{} done: lang={} active_len={} committed_len={}",
+                                        partial_count,
+                                        last_language,
+                                        active_text.len(),
+                                        committed_text.len()
+                                    );
+                                    emit_partial(
+                                        &app,
+                                        &committed_text,
+                                        &active_text,
+                                        segment_index,
+                                    );
+                                } else {
+                                    eprintln!(
+                                        "[mlx-worker] partial #{} warming (HUD suppressed): lang={} seg={seg_secs:.1}s chunk={}",
+                                        partial_count,
+                                        last_language,
+                                        stream_state.chunk_id
+                                    );
+                                }
                             }
                         }
                         Err(e) => {
@@ -1435,7 +1624,7 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                                         &mut last_language,
                                         "rope-guard",
                                     );
-                                    if let Some(s) = open_stream(inf) {
+                                    if let Some(s) = open_stream(inf, &committed_text, sticky_qwen_lang.as_deref()) {
                                         stream_state = s;
                                     }
                                     segment_index += 1;
@@ -1780,5 +1969,37 @@ Just vaguely in general, we feature the Apple II. language English";
             sanitize_asr_for_translate("Hello, world."),
             "Hello, world."
         );
+    }
+}
+
+#[cfg(test)]
+mod streaming_lang_tests {
+    use super::{sticky_language_decision, streaming_hypothesis_warm};
+
+    #[test]
+    fn cjk_forces_chinese_even_if_labeled_english() {
+        assert_eq!(
+            sticky_language_decision("English", "我们今天开会", 1.0, 0, 2),
+            Some("chinese")
+        );
+    }
+
+    #[test]
+    fn english_lock_delayed() {
+        assert_eq!(
+            sticky_language_decision("English", "hello world", 1.5, 1, 2),
+            None
+        );
+        assert_eq!(
+            sticky_language_decision("English", "hello world", 3.2, 3, 2),
+            Some("english")
+        );
+    }
+
+    #[test]
+    fn warm_after_unfixed_or_two_seconds() {
+        assert!(!streaming_hypothesis_warm(0, 2, 1.0));
+        assert!(streaming_hypothesis_warm(2, 2, 1.0));
+        assert!(streaming_hypothesis_warm(0, 2, 2.0));
     }
 }

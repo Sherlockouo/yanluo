@@ -25,10 +25,10 @@ export const defaultConfig: AppConfig = {
   asr_provider: "apple",
   elevenlabs_api_key: "",
   elevenlabs_model: "scribe_v2",
-  // auto = Qwen language detect (best for CN-EN mix). Forced zh-CN caused pure-Chinese bias.
+  // auto = detect; on Chinese macOS we soft-force chinese to avoid EN mis-detect.
   language: "auto",
   translate_target_language: "en-US",
-  chunk_size_sec: 1.0,
+  chunk_size_sec: 1.5,
   unfixed_token_num: 2,
   hotkey_transcribe: defaultHotkeyTranscribe,
   hotkey_translate: defaultHotkeyTranslate,
@@ -50,7 +50,7 @@ export function hotkeySegments(label: string): string[] {
 }
 
 export const LANGUAGES: [string, string][] = [
-  ["auto", "自动检测（中英混合）"],
+  ["auto", "自动检测（系统语言优先）"],
   ["zh-CN", "简体中文"],
   ["zh-TW", "繁體中文"],
   ["en-US", "English"],

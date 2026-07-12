@@ -20,8 +20,8 @@
 |------|----------------------|--------------------------------------|------|
 | **S0 止血** | 长录音不崩；RoPE 护栏；按段切片契约 | RoPE↑ + `ensure_rope_span` + **按段 PCM 窗口**（缺一切仍会崩或假增量） | ✅ 2026-07-12 |
 | **S1 可切段** | Energy VAD + hard-cap + overlap + 段重置 + `PartialResult{committed,active}` | 切段决策 + 引擎 reset + 事件模型一起上；否则要么崩要么 UI 假连续 | ✅ 2026-07-12（质量默认偏激进，见 S1.1） |
-| **S1.1 切段质量** | 不伤识别的切段默认；hysteresis；防碎段 | **调参 + hysteresis + min_segment/overlap** 同批；单改阈值不够 | 🔄 默认已放宽 + hysteresis + chunk/rollback 下限（2026-07-12） |
-| **S2 语境** | 跨段 text prefix（cap tokens）+ commit 驱动 translate | prefix API + worker 注入 + 边界回归；不做「无 cap 的无限 prefix」 | ⬜ |
+| **S1.1 切段质量** | 不伤识别的切段默认；hysteresis；防碎段 | **调参 + hysteresis + min_segment/overlap** 同批；单改阈值不够 | ✅ 2026-07-12 |
+| **S2 语境** | 跨段 text prefix（cap tokens）+ commit 驱动 translate | prefix API + worker 注入 + 边界回归；不做「无 cap 的无限 prefix」 | ✅ 2026-07-12 |
 | **S3 抗噪 VAD** | WebRTC（或 Silero）backend，Energy 作 fallback | `VadBackend` trait 已有则只换实现；与 SegmentClock 契约不变 | ⬜ |
 | **S4 打磨** | 动态 RoPE / ring buffer / 边界去重 / 设置页暴露 VAD | 可选；不阻塞 S2/S3 | ⬜ |
 
@@ -71,3 +71,4 @@
 | 日期 | 变更 |
 |------|------|
 | 2026-07-12 | S0+S1 落地；本文建立；启动 S1.1（质量默认 + hysteresis） |
+| 2026-07-12 | S1.1 完成；**S2 完成**：`init_streaming_with_context` + worker 注入 capped committed prefix + `notify_asr_committed` |

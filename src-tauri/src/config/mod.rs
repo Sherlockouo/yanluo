@@ -195,6 +195,9 @@ pub(crate) struct AppConfig {
     /// Overlap into next segment after a cut (ms).
     #[serde(default = "default_vad_overlap_ms")]
     pub(crate) vad_overlap_ms: u64,
+    /// Max tokens of committed text injected as cross-segment context (0 = off).
+    #[serde(default = "default_cross_segment_prefix_tokens")]
+    pub(crate) cross_segment_prefix_tokens: usize,
     #[serde(default = "default_hotkey_transcribe")]
     pub(crate) hotkey_transcribe: HotkeyBinding,
     #[serde(default = "default_hotkey_translate")]
@@ -216,7 +219,8 @@ pub(crate) fn default_translate_target_language() -> String {
 }
 
 pub(crate) fn default_chunk_size_sec() -> f64 {
-    1.0
+    // 1.5s: first hypothesis has enough audio; 1.0s felt weak on sentence starts.
+    1.5
 }
 
 pub(crate) fn default_unfixed_token_num() -> usize {
@@ -248,6 +252,10 @@ pub(crate) fn default_vad_overlap_ms() -> u64 {
     500
 }
 
+pub(crate) fn default_cross_segment_prefix_tokens() -> usize {
+    64
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum AsrProvider {
@@ -274,6 +282,7 @@ impl Default for AppConfig {
             vad_min_segment_ms: default_vad_min_segment_ms(),
             vad_max_segment_sec: default_vad_max_segment_sec(),
             vad_overlap_ms: default_vad_overlap_ms(),
+            cross_segment_prefix_tokens: default_cross_segment_prefix_tokens(),
             hotkey_transcribe: default_hotkey_transcribe(),
             hotkey_translate: default_hotkey_translate(),
             hotkey_cancel: default_hotkey_cancel(),
