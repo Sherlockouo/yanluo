@@ -1,7 +1,8 @@
 # TODO: 流式 ASR 优化
 
-> 状态:待实现
+> 状态:历史文档（段内增量 KV 已落地；长时方案见新设计）
 > 创建时间:2026-07-04
+> **现行设计**：[`design-streaming-asr-vad.md`](./design-streaming-asr-vad.md)
 > 关联仓库:`qwen3_asr_rs_fork`(Rust ASR 引擎)、`Qwen3-ASR`(Python 官方仓库)
 
 ## 背景

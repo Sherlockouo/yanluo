@@ -59,7 +59,7 @@ impl AudioRecorder {
         let want_mic = matches!(mode, AudioCaptureMode::External | AudioCaptureMode::Both);
         let want_system = matches!(mode, AudioCaptureMode::System | AudioCaptureMode::Both);
 
-        let mic_stream = if want_mic {
+        let mut mic_stream = if want_mic {
             Some(start_mic_stream(mic_samples.clone())?)
         } else {
             None
@@ -68,15 +68,26 @@ impl AudioRecorder {
         let (system, effective_mode, fallback_warning) = if want_system {
             match SystemAudioCapture::start(system_samples.clone()) {
                 Ok(cap) => (Some(cap), mode, None),
-                Err(err) if want_mic => {
-                    // Dev / missing screen-recording permission: keep mic alive.
+                Err(err) => {
+                    // Screen-recording TCC denied / unavailable: keep going on mic
+                    // even when the user picked「只录系统」— better than hard-fail.
                     let msg = format!(
-                        "系统音频不可用（{err}），已退回只录麦克风。戴耳机时请到「设置 → 权限」授予屏幕录制，并选「只录系统」或「两者都录」。"
+                        "系统音频不可用（{err}），已退回只录麦克风。需要录系统声时请到「设置 → 权限」授予屏幕录制。"
                     );
                     eprintln!("[audio] {msg}");
+                    if mic_stream.is_none() {
+                        match start_mic_stream(mic_samples.clone()) {
+                            Ok(stream) => mic_stream = Some(stream),
+                            Err(mic_err) => {
+                                return Err(format!(
+                                    "系统音频不可用（{err}）；麦克风也启动失败（{mic_err}）"
+                                )
+                                .into());
+                            }
+                        }
+                    }
                     (None, AudioCaptureMode::External, Some(msg))
                 }
-                Err(err) => return Err(err),
             }
         } else {
             (None, mode, None)

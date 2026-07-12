@@ -1,5 +1,7 @@
 # TODO: VAD 分段与内存优化
 
+> **已收敛**：整体设计见 [`design-streaming-asr-vad.md`](./design-streaming-asr-vad.md)。本文保留问题陈述与早期方案草稿。
+
 ## 问题
 
 当前流式 ASR 始终处理完整音频（从头累积），随着录音时间增长：

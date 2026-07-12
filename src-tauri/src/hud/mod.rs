@@ -194,8 +194,8 @@ pub(crate) fn emit_floating_status(app: &AppHandle, visible: bool, state: &str, 
 
 pub(crate) const FLOATING_HUD_H: f64 = 56.0;
 /// Fixed HUD width — transcript scrolls inside; window does not grow.
-pub(crate) const FLOATING_HUD_MIN_W: f64 = 320.0;
-pub(crate) const FLOATING_HUD_MAX_W: f64 = 320.0;
+pub(crate) const FLOATING_HUD_MIN_W: f64 = 400.0;
+pub(crate) const FLOATING_HUD_MAX_W: f64 = 400.0;
 pub(crate) const FLOATING_HUD_BOTTOM_INSET: f64 = 48.0;
 pub(crate) const FLOATING_HUD_CORNER_RADIUS: f64 = 28.0;
 /// Separate translate-target chip appended after the capsule.
