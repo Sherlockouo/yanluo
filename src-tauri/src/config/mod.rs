@@ -164,6 +164,9 @@ pub(crate) struct AppConfig {
     /// Qwen3-ForcedAligner model directory (word/char timestamps).
     #[serde(default)]
     pub(crate) align_model_dir: String,
+    /// Catalog id e.g. `Qwen3-ASR-0.6B`.
+    #[serde(default = "default_asr_model_id")]
+    pub(crate) asr_model_id: String,
     pub(crate) asr_provider: AsrProvider,
     pub(crate) elevenlabs_api_key: String,
     pub(crate) elevenlabs_model: String,
@@ -177,7 +180,13 @@ pub(crate) struct AppConfig {
     /// Qwen streaming unfixed token count (`unfixed_token_num` / rollback_tokens).
     #[serde(default = "default_unfixed_token_num")]
     pub(crate) unfixed_token_num: usize,
-    /// Energy VAD RMS threshold (linear PCM).
+    /// VAD backend: `webrtc` (default) or `energy`.
+    #[serde(default = "default_vad_backend")]
+    pub(crate) vad_backend: String,
+    /// WebRTC aggressiveness 0..=3 (Quality..VeryAggressive). Default 2.
+    #[serde(default = "default_vad_aggression")]
+    pub(crate) vad_aggression: u8,
+    /// Energy VAD RMS threshold (linear PCM); used when backend is `energy`.
     #[serde(default = "default_vad_energy_threshold")]
     pub(crate) vad_energy_threshold: f32,
     /// Silence duration (ms) before a commit candidate.
@@ -208,9 +217,17 @@ pub(crate) struct AppConfig {
     #[serde(default)]
     pub(crate) audio_capture_mode: AudioCaptureMode,
     pub(crate) llm_enabled: bool,
+    #[serde(default = "default_llm_provider")]
+    pub(crate) llm_provider: String,
     pub(crate) llm_api_base_url: String,
     pub(crate) llm_api_key: String,
     pub(crate) llm_model: String,
+    /// Empty = built-in refine prompt.
+    #[serde(default)]
+    pub(crate) llm_refine_prompt: String,
+    /// Empty = built-in translate prompt (`{target}` placeholder).
+    #[serde(default)]
+    pub(crate) llm_translate_prompt: String,
     pub(crate) vocabulary: Vec<String>,
 }
 
@@ -225,6 +242,14 @@ pub(crate) fn default_chunk_size_sec() -> f64 {
 
 pub(crate) fn default_unfixed_token_num() -> usize {
     5
+}
+
+pub(crate) fn default_vad_backend() -> String {
+    "webrtc".into()
+}
+
+pub(crate) fn default_vad_aggression() -> u8 {
+    2
 }
 
 pub(crate) fn default_vad_energy_threshold() -> f32 {
@@ -256,6 +281,14 @@ pub(crate) fn default_cross_segment_prefix_tokens() -> usize {
     64
 }
 
+pub(crate) fn default_asr_model_id() -> String {
+    "Qwen3-ASR-0.6B".into()
+}
+
+pub(crate) fn default_llm_provider() -> String {
+    "openai".into()
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum AsrProvider {
@@ -269,6 +302,7 @@ impl Default for AppConfig {
         Self {
             asr_model_dir: String::new(),
             align_model_dir: default_align_model_dir(),
+            asr_model_id: default_asr_model_id(),
             asr_provider: default_asr_provider(),
             elevenlabs_api_key: String::new(),
             elevenlabs_model: "scribe_v2".into(),
@@ -276,6 +310,8 @@ impl Default for AppConfig {
             translate_target_language: default_translate_target_language(),
             chunk_size_sec: default_chunk_size_sec(),
             unfixed_token_num: default_unfixed_token_num(),
+            vad_backend: default_vad_backend(),
+            vad_aggression: default_vad_aggression(),
             vad_energy_threshold: default_vad_energy_threshold(),
             vad_min_silence_ms: default_vad_min_silence_ms(),
             vad_commit_hold_ms: default_vad_commit_hold_ms(),
@@ -288,9 +324,12 @@ impl Default for AppConfig {
             hotkey_cancel: default_hotkey_cancel(),
             audio_capture_mode: AudioCaptureMode::External,
             llm_enabled: false,
+            llm_provider: default_llm_provider(),
             llm_api_base_url: "https://api.openai.com/v1".into(),
             llm_api_key: String::new(),
             llm_model: "gpt-4o-mini".into(),
+            llm_refine_prompt: String::new(),
+            llm_translate_prompt: String::new(),
             vocabulary: Vec::new(),
         }
     }

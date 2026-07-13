@@ -561,18 +561,41 @@ html.light[data-floating="1"] .hud-text-switching .hud-text-scroll {
 .hud-text-scroll {
   display: inline-block;
   white-space: nowrap;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: #ffffff;
-  line-height: 1.2;
-  font-family: var(--font-sans);
-  text-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.92);
+  line-height: 1.35;
+  /* PingFang first — SF Pro semibold looks fuzzy/cramped on CJK transcripts. */
+  font-family:
+    "PingFang SC", "Hiragino Sans GB", "Helvetica Neue",
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", ui-sans-serif, system-ui,
+    sans-serif;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 html.light[data-floating="1"] .hud-text-scroll {
+  color: rgba(16, 16, 18, 0.88);
+}
+
+.hud-text-committed {
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 450;
+}
+
+.hud-text-active {
+  color: rgba(255, 255, 255, 0.96);
+  font-weight: 560;
+}
+
+html.light[data-floating="1"] .hud-text-committed {
+  color: rgba(16, 16, 18, 0.48);
+}
+
+html.light[data-floating="1"] .hud-text-active {
   color: rgba(16, 16, 18, 0.92);
-  text-shadow: 0 0.5px 0.5px rgba(255, 255, 255, 0.55);
 }
 
 .hud-text-refining .hud-text-scroll {

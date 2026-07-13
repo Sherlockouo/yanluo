@@ -1,12 +1,16 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   Button,
   Input,
   Label,
+  ListBox,
+  Select,
   Switch,
+  TextArea,
   TextField,
 } from "@heroui/react";
-import { Save, Sparkles } from "lucide-react";
+import { Link } from "react-router-dom";
+import { RotateCcw, Save, Sparkles } from "lucide-react";
 import {
   EmptyState,
   PageHeader,
@@ -15,9 +19,25 @@ import {
 } from "@/components/shared/page-shell";
 import { hasRefineDiff, RefineDiff } from "@/components/ui/refine-diff";
 import { useApp } from "@/app-context";
+import {
+  DEFAULT_LLM_REFINE_PROMPT,
+  DEFAULT_LLM_TRANSLATE_PROMPT,
+  LLM_PROVIDER_PRESETS,
+} from "@/lib/constants";
 
 export function LlmPage() {
   const { config, updateConfig, saveConfig, testLlm, history } = useApp();
+  const [customModel, setCustomModel] = useState(false);
+
+  const preset = useMemo(
+    () =>
+      LLM_PROVIDER_PRESETS.find((p) => p.id === config.llm_provider) ??
+      LLM_PROVIDER_PRESETS[LLM_PROVIDER_PRESETS.length - 1],
+    [config.llm_provider],
+  );
+
+  const modelInList = preset.models.includes(config.llm_model);
+  const showCustomField = customModel || !modelInList || preset.models.length === 0;
 
   const refinedEntries = useMemo(
     () =>
@@ -32,9 +52,21 @@ export function LlmPage() {
     [history],
   );
 
+  const refineValue = config.llm_refine_prompt || DEFAULT_LLM_REFINE_PROMPT;
+  const translateValue =
+    config.llm_translate_prompt || DEFAULT_LLM_TRANSLATE_PROMPT;
+
   return (
     <PageShell className="max-w-5xl">
       <PageHeader title="LLM" />
+
+      <p className="text-[13px] text-muted">
+        Provider / Base URL / API Key 在{" "}
+        <Link to="/settings?tab=llm" className="text-accent hover:underline">
+          设置 → LLM
+        </Link>
+        。
+      </p>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
         <SectionCard className="flex h-fit flex-col gap-5">
@@ -56,36 +88,92 @@ export function LlmPage() {
             </Switch>
           </div>
 
-          <TextField
-            fullWidth
-            variant="secondary"
-            value={config.llm_api_base_url}
-            onChange={(value) => updateConfig("llm_api_base_url", value)}
-          >
-            <Label>API Base URL</Label>
-            <Input placeholder="https://api.openai.com/v1" />
-          </TextField>
+          {preset.models.length > 0 ? (
+            <Select
+              className="w-full flex"
+              selectedKey={
+                showCustomField && !modelInList ? "__custom__" : config.llm_model
+              }
+              onSelectionChange={(key) => {
+                if (key == null) return;
+                const id = String(key);
+                if (id === "__custom__") {
+                  setCustomModel(true);
+                  return;
+                }
+                setCustomModel(false);
+                updateConfig("llm_model", id);
+              }}
+            >
+              <Label>Model（{preset.label}）</Label>
+              <Select.Trigger className="flex items-center justify-between p-4">
+                <Select.Value />
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover>
+                <ListBox className="gap-2 p-2">
+                  {preset.models.map((m) => (
+                    <ListBox.Item key={m} id={m} textValue={m}>
+                      {m}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  ))}
+                  <ListBox.Item id="__custom__" textValue="自定义">
+                    自定义…
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                </ListBox>
+              </Select.Popover>
+            </Select>
+          ) : null}
+
+          {showCustomField ? (
+            <TextField
+              fullWidth
+              variant="secondary"
+              value={config.llm_model}
+              onChange={(value) => updateConfig("llm_model", value)}
+            >
+              <Label>自定义 Model</Label>
+              <Input placeholder="gpt-4o-mini" />
+            </TextField>
+          ) : null}
 
           <TextField
             fullWidth
             variant="secondary"
-            type="password"
-            value={config.llm_api_key}
-            onChange={(value) => updateConfig("llm_api_key", value)}
+            value={refineValue}
+            onChange={(value) => updateConfig("llm_refine_prompt", value)}
           >
-            <Label>API Key</Label>
-            <Input placeholder="可留空（Ollama 等本地服务）" />
+            <Label>纠错 Prompt</Label>
+            <TextArea rows={8} className="min-h-[10rem] font-mono text-[12px]" />
           </TextField>
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={() => updateConfig("llm_refine_prompt", "")}
+          >
+            <RotateCcw size={14} />
+            恢复默认纠错 Prompt
+          </Button>
 
           <TextField
             fullWidth
             variant="secondary"
-            value={config.llm_model}
-            onChange={(value) => updateConfig("llm_model", value)}
+            value={translateValue}
+            onChange={(value) => updateConfig("llm_translate_prompt", value)}
           >
-            <Label>Model</Label>
-            <Input placeholder="gpt-4o-mini" />
+            <Label>翻译 Prompt（{"{target}"} 占位）</Label>
+            <TextArea rows={10} className="min-h-[12rem] font-mono text-[12px]" />
           </TextField>
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={() => updateConfig("llm_translate_prompt", "")}
+          >
+            <RotateCcw size={14} />
+            恢复默认翻译 Prompt
+          </Button>
 
           <div className="form-actions">
             <Button fullWidth variant="secondary" onPress={() => void testLlm()}>

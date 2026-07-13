@@ -7,6 +7,7 @@ mod history;
 mod hotkey;
 mod hud;
 mod menu;
+mod models;
 mod paste;
 mod permissions;
 mod platform;
@@ -77,6 +78,8 @@ pub fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::set_model_dir,
             commands::get_model_dir,
+            models::get_model_status,
+            models::download_qwen_asr_model,
             commands::get_app_config,
             commands::save_app_config,
             commands::begin_hotkey_capture,

@@ -3,18 +3,31 @@
 //! Engine keeps incremental KV *within* a segment; this module decides when to
 //! commit/reset so RoPE / KV stay bounded (see doc/design-streaming-asr-vad.md,
 //! doc/ROADMAP-streaming-asr-vad.md).
+//!
+//! S3: `VadBackend` trait — default WebRTC, Energy fallback. SegmentClock
+//! consumes per-frame speech bools only (contract unchanged).
+
+use webrtc_vad::{SampleRate, Vad, VadMode};
 
 /// 16 kHz mono PCM sample rate used by the recorder / ASR pipeline.
 pub(crate) const SAMPLE_RATE: usize = 16_000;
 
+/// Hangover after last WebRTC speech frame (~240 ms), scaled to frame length.
+fn webrtc_hangover_frames(frame_samples: usize) -> usize {
+    let frame_ms = (frame_samples * 1000) / SAMPLE_RATE;
+    if frame_ms == 0 {
+        return 12;
+    }
+    (240usize).div_ceil(frame_ms).max(1)
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct SegmentConfig {
-    /// Frame size for energy VAD (samples). Default 20 ms.
+    /// Frame size for VAD (samples). Default 20 ms — valid for WebRTC.
     pub frame_samples: usize,
     /// RMS to *enter* speech (Silence → Speech). Higher = harder to open.
     pub energy_enter: f32,
     /// RMS to *leave* speech (Speech → Silence). Must be < enter (hysteresis).
-    /// Lower exit = stay in-speech through quiet syllables / short breaths.
     pub energy_exit: f32,
     /// Silence must last this long before a commit candidate.
     pub min_silence_samples: usize,
@@ -31,7 +44,6 @@ pub(crate) struct SegmentConfig {
 impl Default for SegmentConfig {
     fn default() -> Self {
         // Conservative defaults (S1.1): prefer longer segments over early cuts.
-        // Early VAD commits destroy context and drop accuracy.
         Self {
             frame_samples: SAMPLE_RATE / 50,           // 20 ms
             energy_enter: 0.010,
@@ -84,6 +96,42 @@ pub(crate) enum SegmentEvent {
     HardCut { end_sample: usize },
 }
 
+/// Per-frame speech gate for [`SegmentClock`]. S3: WebRTC or Energy.
+///
+/// Not `Send`: `webrtc-vad`'s `Vad` holds a raw `*mut Fvad`. Created and used
+/// only on the mlx-worker thread.
+pub(crate) trait VadBackend {
+    fn frame_samples(&self) -> usize;
+    fn is_speech(&mut self, frame: &[f32]) -> bool;
+    fn name(&self) -> &'static str;
+}
+
+fn parse_backend_kind(s: &str) -> Option<&'static str> {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "webrtc" | "web-rtc" => Some("webrtc"),
+        "energy" | "rms" => Some("energy"),
+        "silero" => Some("silero"),
+        _ => None,
+    }
+}
+
+fn aggression_to_mode(aggression: u8) -> VadMode {
+    match aggression.min(3) {
+        0 => VadMode::Quality,
+        1 => VadMode::LowBitrate,
+        2 => VadMode::Aggressive,
+        _ => VadMode::VeryAggressive,
+    }
+}
+
+fn f32_frame_to_i16(frame: &[f32], out: &mut [i16]) {
+    let n = frame.len().min(out.len());
+    for i in 0..n {
+        let s = frame[i].clamp(-1.0, 1.0);
+        out[i] = (s * 32767.0).round() as i16;
+    }
+}
+
 /// Energy-gate VAD with hysteresis (reduces false silence mid-phrase).
 #[derive(Debug)]
 pub(crate) struct EnergyVad {
@@ -109,10 +157,6 @@ impl EnergyVad {
         Self::new(cfg.energy_enter, cfg.energy_exit, cfg.frame_samples)
     }
 
-    pub(crate) fn frame_samples(&self) -> usize {
-        self.frame_samples
-    }
-
     fn frame_rms(frame: &[f32]) -> f32 {
         if frame.is_empty() {
             return 0.0;
@@ -123,9 +167,14 @@ impl EnergyVad {
         }
         (sum / frame.len() as f32).sqrt()
     }
+}
 
-    /// Update latch; returns whether this frame counts as speech for SegmentClock.
-    pub(crate) fn is_speech(&mut self, frame: &[f32]) -> bool {
+impl VadBackend for EnergyVad {
+    fn frame_samples(&self) -> usize {
+        self.frame_samples
+    }
+
+    fn is_speech(&mut self, frame: &[f32]) -> bool {
         let rms = Self::frame_rms(frame);
         if self.in_speech {
             if rms < self.exit {
@@ -135,6 +184,182 @@ impl EnergyVad {
             self.in_speech = true;
         }
         self.in_speech
+    }
+
+    fn name(&self) -> &'static str {
+        "energy"
+    }
+}
+
+/// WebRTC VAD (libfvad) with short hangover so breath gaps don't look like silence.
+pub(crate) struct WebRtcVad {
+    inner: Vad,
+    frame_samples: usize,
+    hangover_left: usize,
+    hangover_max: usize,
+    i16_buf: Vec<i16>,
+}
+
+impl WebRtcVad {
+    pub(crate) fn try_new(frame_samples: usize, aggression: u8) -> Result<Self, String> {
+        let frame_samples = frame_samples.max(1);
+        // WebRTC only accepts 10/20/30 ms at 16 kHz → 160/320/480.
+        if !matches!(frame_samples, 160 | 320 | 480) {
+            return Err(format!(
+                "webrtc frame_samples={frame_samples} invalid (need 160/320/480 @ 16kHz)"
+            ));
+        }
+        let mode = aggression_to_mode(aggression);
+        let inner = Vad::new_with_rate_and_mode(SampleRate::Rate16kHz, mode);
+        Ok(Self {
+            inner,
+            frame_samples,
+            hangover_left: 0,
+            hangover_max: webrtc_hangover_frames(frame_samples),
+            i16_buf: vec![0i16; frame_samples],
+        })
+    }
+}
+
+impl VadBackend for WebRtcVad {
+    fn frame_samples(&self) -> usize {
+        self.frame_samples
+    }
+
+    fn is_speech(&mut self, frame: &[f32]) -> bool {
+        if frame.len() < self.frame_samples {
+            // Incomplete frame: treat as silence and burn hangover (no sticky forever).
+            if self.hangover_left > 0 {
+                self.hangover_left -= 1;
+                return true;
+            }
+            return false;
+        }
+        f32_frame_to_i16(&frame[..self.frame_samples], &mut self.i16_buf);
+        let raw = self
+            .inner
+            .is_voice_segment(&self.i16_buf)
+            .unwrap_or(false);
+        if raw {
+            self.hangover_left = self.hangover_max;
+            true
+        } else if self.hangover_left > 0 {
+            self.hangover_left -= 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "webrtc"
+    }
+}
+
+/// Silero VAD (ONNX) — feature `silero-vad`. 512-sample frames @ 16 kHz.
+#[cfg(feature = "silero-vad")]
+pub(crate) struct SileroVad {
+    inner: voice_activity_detector::VoiceActivityDetector,
+    frame_samples: usize,
+    threshold: f32,
+    hangover_left: usize,
+    hangover_max: usize,
+}
+
+#[cfg(feature = "silero-vad")]
+impl SileroVad {
+    pub(crate) fn try_new(threshold: f32) -> Result<Self, String> {
+        let frame_samples = 512usize; // Silero V5 @ 16 kHz fixed window
+        let inner = voice_activity_detector::VoiceActivityDetector::builder()
+            .sample_rate(16_000)
+            .chunk_size(frame_samples)
+            .build()
+            .map_err(|e| format!("silero init: {e}"))?;
+        Ok(Self {
+            inner,
+            frame_samples,
+            threshold: threshold.clamp(0.15, 0.85),
+            hangover_left: 0,
+            hangover_max: webrtc_hangover_frames(frame_samples),
+        })
+    }
+}
+
+#[cfg(feature = "silero-vad")]
+impl VadBackend for SileroVad {
+    fn frame_samples(&self) -> usize {
+        self.frame_samples
+    }
+
+    fn is_speech(&mut self, frame: &[f32]) -> bool {
+        if frame.len() < self.frame_samples {
+            if self.hangover_left > 0 {
+                self.hangover_left -= 1;
+                return true;
+            }
+            return false;
+        }
+        let prob = self.inner.predict(frame[..self.frame_samples].iter().copied());
+        let raw = prob >= self.threshold;
+        if raw {
+            self.hangover_left = self.hangover_max;
+            true
+        } else if self.hangover_left > 0 {
+            self.hangover_left -= 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "silero"
+    }
+}
+
+/// Build VAD from config. Default `webrtc`; unknown / init failure → Energy + log.
+pub(crate) fn make_vad(
+    backend: &str,
+    cfg: &SegmentConfig,
+    aggression: u8,
+) -> Box<dyn VadBackend> {
+    let kind = parse_backend_kind(backend).unwrap_or_else(|| {
+        eprintln!(
+            "[vad] unknown backend {:?}, falling back to energy",
+            backend
+        );
+        "energy"
+    });
+    match kind {
+        "webrtc" => match WebRtcVad::try_new(cfg.frame_samples, aggression) {
+            Ok(v) => Box::new(v),
+            Err(e) => {
+                eprintln!("[vad] webrtc init failed ({e}), falling back to energy");
+                Box::new(EnergyVad::from_config(cfg))
+            }
+        },
+        "silero" => {
+            #[cfg(feature = "silero-vad")]
+            {
+                // Map aggression 0..=3 → threshold 0.35..=0.65 (higher = stricter).
+                let thr = 0.35 + (aggression.min(3) as f32) * 0.10;
+                match SileroVad::try_new(thr) {
+                    Ok(v) => Box::new(v),
+                    Err(e) => {
+                        eprintln!("[vad] silero init failed ({e}), falling back to energy");
+                        Box::new(EnergyVad::from_config(cfg))
+                    }
+                }
+            }
+            #[cfg(not(feature = "silero-vad"))]
+            {
+                eprintln!(
+                    "[vad] silero requested but built without `silero-vad` feature; using energy"
+                );
+                Box::new(EnergyVad::from_config(cfg))
+            }
+        }
+        _ => Box::new(EnergyVad::from_config(cfg)),
     }
 }
 
@@ -247,6 +472,17 @@ impl SegmentClock {
     pub(crate) fn next_start_after_cut(&self, end: usize) -> usize {
         end.saturating_sub(self.cfg.overlap_samples)
     }
+
+    /// After draining recorder samples `[0..dropped)`, subtract from absolute indices.
+    pub(crate) fn rebase(&mut self, dropped: usize) {
+        if dropped == 0 {
+            return;
+        }
+        self.cursor = self.cursor.saturating_sub(dropped);
+        if let Some(s) = self.seg_start.as_mut() {
+            *s = s.saturating_sub(dropped);
+        }
+    }
 }
 
 pub(crate) fn append_segment_text(committed: &mut String, piece: &str) {
@@ -258,7 +494,49 @@ pub(crate) fn append_segment_text(committed: &mut String, piece: &str) {
         *committed = piece.to_string();
         return;
     }
-    if !committed.ends_with([' ', '\n', '。', '！', '？', '.', '!', '?'])
+
+    // Longest Unicode-char suffix/prefix overlap (N >= 2). Also match against
+    // committed with trailing punct stripped so "你好。" + "你好世界" finds "你好".
+    let piece_chars: Vec<char> = piece.chars().collect();
+    let mut overlap = 0usize;
+    for base in [
+        committed.as_str(),
+        committed.trim_end_matches([' ', '\n', '。', '！', '？', '.', '!', '?', ',', '、']),
+    ] {
+        if base.is_empty() {
+            continue;
+        }
+        let base_chars: Vec<char> = base.chars().collect();
+        let max_n = base_chars.len().min(piece_chars.len());
+        for n in (2..=max_n).rev() {
+            if n <= overlap {
+                break;
+            }
+            if base_chars[base_chars.len() - n..] == piece_chars[..n] {
+                overlap = n;
+                break;
+            }
+        }
+    }
+
+    let piece = if overlap >= 2 {
+        let byte_idx = piece
+            .char_indices()
+            .nth(overlap)
+            .map(|(i, _)| i)
+            .unwrap_or(piece.len());
+        &piece[byte_idx..]
+    } else {
+        piece
+    };
+    if piece.is_empty() {
+        return;
+    }
+
+    // After overlap strip, keep any leading space from piece (English); skip
+    // extra glue so CJK joins tight. No-overlap keeps punctuation-aware glue.
+    if overlap < 2
+        && !committed.ends_with([' ', '\n', '。', '！', '？', '.', '!', '?'])
         && !piece.starts_with(['。', '！', '？', '.', ',', '!', '?'])
     {
         committed.push(' ');
@@ -348,5 +626,92 @@ mod tests {
         assert!(vad.is_speech(&loud));
         assert!(vad.is_speech(&quiet));
         assert!(!vad.is_speech(&silence));
+    }
+
+    #[test]
+    fn make_vad_unknown_falls_back_to_energy() {
+        let cfg = SegmentConfig::default();
+        let vad = make_vad("not-a-backend", &cfg, 2);
+        assert_eq!(vad.name(), "energy");
+    }
+
+    #[test]
+    fn make_vad_webrtc_default_name() {
+        let cfg = SegmentConfig::default();
+        let vad = make_vad("webrtc", &cfg, 2);
+        assert_eq!(vad.name(), "webrtc");
+    }
+
+    #[test]
+    fn webrtc_silence_is_not_speech() {
+        let mut vad = WebRtcVad::try_new(320, 2).expect("webrtc init");
+        let silence = vec![0.0f32; 320];
+        // First frames should be silence (no hangover yet).
+        assert!(!vad.is_speech(&silence));
+        assert!(!vad.is_speech(&silence));
+    }
+
+    #[test]
+    fn webrtc_hangover_holds_after_forced_speech() {
+        let mut vad = WebRtcVad::try_new(320, 0).expect("webrtc init");
+        let silence = vec![0.0f32; 320];
+        // Inject hangover without relying on tone classification.
+        vad.hangover_left = vad.hangover_max;
+        assert!(vad.is_speech(&silence));
+        // Burn remaining hangover frames, then silence.
+        for _ in 0..vad.hangover_max {
+            let _ = vad.is_speech(&silence);
+        }
+        assert!(!vad.is_speech(&silence));
+    }
+
+    #[test]
+    fn webrtc_invalid_frame_samples_falls_back_via_make_vad() {
+        let mut cfg = SegmentConfig::default();
+        cfg.frame_samples = 100; // illegal for WebRTC
+        let vad = make_vad("webrtc", &cfg, 2);
+        assert_eq!(vad.name(), "energy");
+    }
+
+    #[test]
+    fn make_vad_energy_explicit() {
+        let cfg = SegmentConfig::default();
+        let vad = make_vad("energy", &cfg, 2);
+        assert_eq!(vad.name(), "energy");
+    }
+
+    #[test]
+    fn append_segment_text_strips_english_overlap() {
+        let mut s = String::from("hello world");
+        append_segment_text(&mut s, "world again");
+        assert_eq!(s, "hello world again");
+    }
+
+    #[test]
+    fn append_segment_text_strips_cjk_overlap() {
+        let mut s = String::from("今天天气");
+        append_segment_text(&mut s, "天气很好");
+        assert_eq!(s, "今天天气很好");
+    }
+
+    #[test]
+    fn append_segment_text_no_false_merge() {
+        let mut s = String::from("abc");
+        append_segment_text(&mut s, "xyz");
+        assert_eq!(s, "abc xyz");
+    }
+
+    #[test]
+    fn append_segment_text_empty_piece_noop() {
+        let mut s = String::from("hello");
+        append_segment_text(&mut s, "   ");
+        assert_eq!(s, "hello");
+    }
+
+    #[test]
+    fn append_segment_text_overlap_after_cjk_punct() {
+        let mut s = String::from("你好。");
+        append_segment_text(&mut s, "你好世界");
+        assert_eq!(s, "你好。世界");
     }
 }

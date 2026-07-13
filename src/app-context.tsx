@@ -245,7 +245,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           await invoke("save_app_config", { config: current });
           await invoke("start_recording", {
             chunkSec: current.chunk_size_sec ?? 1.0,
-            rollbackTokens: current.unfixed_token_num ?? 2,
+            rollbackTokens: current.unfixed_token_num ?? 5,
             language: current.language === "auto" ? null : current.language,
             mode,
           });

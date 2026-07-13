@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -56,9 +56,7 @@ pub(crate) fn get_platform() -> String {
 }
 // ---------------------------------------------------------------------------
 
-pub(crate) fn has_model_weights(path: &Path) -> bool {
-    path.join("model.safetensors").exists() || path.join("model.safetensors.index.json").exists()
-}
+pub(crate) use crate::models::has_model_weights;
 
 #[tauri::command]
 pub(crate) fn set_model_dir(path: String, engine: State<'_, AsrEngine>) -> Result<(), String> {

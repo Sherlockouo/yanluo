@@ -106,6 +106,8 @@ export function AsrHud() {
         visible: true,
         state: prev.state === "idle" ? "recording" : prev.state,
         text: event.payload.text,
+        committed: event.payload.committed ?? "",
+        active: event.payload.active ?? "",
         switching:
           event.payload.text.trim() === "" ? prev.switching : false,
       })),
@@ -150,13 +152,10 @@ function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
   const processing = payload.state === "processing";
   const recording = payload.state === "recording";
   const switching = Boolean(payload.switching);
-  const loading = refining || processing || switching;
   const translating = payload.intention === "translate";
   const lastTextRef = useRef("");
-  const prevShownRef = useRef("");
   const textViewportRef = useRef<HTMLDivElement>(null);
   const sizedRef = useRef(false);
-  const [justRefined, setJustRefined] = useState(false);
 
   if (payload.text.trim()) {
     lastTextRef.current = payload.text;
@@ -164,21 +163,18 @@ function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
     lastTextRef.current = "";
   }
 
+  const committed = (payload.committed ?? "").trim();
+  const active = (payload.active ?? "").trim();
+  const hasSplit = Boolean(committed || active);
+
   const sourceText =
     payload.text.trim() ||
-    (loading && !switching ? lastTextRef.current : "");
+    (refining || processing ? lastTextRef.current : "");
   const displayText = switching ? "" : sourceText;
 
-  useEffect(() => {
-    if (!displayText || displayText === prevShownRef.current) return;
-    const prev = prevShownRef.current;
-    prevShownRef.current = displayText;
-    if (!prev || refining || recording || switching) return;
-    if (!processing) return;
-    setJustRefined(true);
-    const t = window.setTimeout(() => setJustRefined(false), 900);
-    return () => window.clearTimeout(t);
-  }, [displayText, processing, refining, recording, switching]);
+  // Final success: stay green until the capsule unmounts — never flash back to white.
+  const justRefined = processing && !switching && Boolean(displayText.trim());
+  const loading = refining || switching || (processing && !justRefined);
 
   const [overflowing, setOverflowing] = useState(false);
   const smoothed = useSmoothedRms(payload.rms, recording && !switching);
@@ -196,7 +192,7 @@ function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
     if (!el) return;
     el.scrollLeft = el.scrollWidth;
     setOverflowing(el.scrollWidth > el.clientWidth + 1);
-  }, [displayText, loading, switching]);
+  }, [displayText, committed, active, loading, switching]);
 
   return (
     <motion.div
@@ -264,10 +260,22 @@ function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
               exit={{ opacity: 0, filter: "blur(3px)" }}
               transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             >
-              {switching
-                ? "切换中"
-                : displayText ||
-                  (loading ? (translating ? "翻译中" : "处理中") : "")}
+              {switching ? (
+                "切换中"
+              ) : hasSplit && recording && !loading ? (
+                <>
+                  {committed ? (
+                    <span className="hud-text-committed">{committed}</span>
+                  ) : null}
+                  {committed && active ? " " : null}
+                  {active ? (
+                    <span className="hud-text-active">{active}</span>
+                  ) : null}
+                </>
+              ) : (
+                displayText ||
+                (loading ? (translating ? "翻译中" : "处理中") : "")
+              )}
               {(loading || switching) && (displayText || switching) ? (
                 <span className="hud-loading-dots" aria-hidden>
                   <i />

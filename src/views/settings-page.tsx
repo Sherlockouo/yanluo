@@ -2,10 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Button,
+  Input,
   Kbd,
   Label,
   ListBox,
   Select,
+  Switch,
+  TextField,
   toast,
 } from "@heroui/react";
 import {
@@ -18,24 +21,28 @@ import {
   Keyboard,
   Mic,
   Monitor,
-  Moon,
   RefreshCw,
   Save,
   Shield,
-  Sun,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
+import { Link } from "react-router-dom";
 import {
   PageHeader,
   PageShell,
   SectionCard,
 } from "@/components/shared/page-shell";
 import { cn } from "@/lib/cn";
-import { useApp, type ThemeMode } from "@/app-context";
-import { hotkeySegments, LANGUAGES, TRANSLATE_LANGUAGES } from "@/lib/constants";
-import type { HotkeyBinding } from "@/types";
+import { useApp } from "@/app-context";
+import {
+  hotkeySegments,
+  LLM_PROVIDER_PRESETS,
+  LANGUAGES,
+  TRANSLATE_LANGUAGES,
+} from "@/lib/constants";
+import type { AsrProvider, HotkeyBinding, LlmProvider } from "@/types";
 import {
   APP_RELEASES_URL,
   APP_REPO_URL,
@@ -43,7 +50,13 @@ import {
   type ChangelogEntry,
 } from "@/lib/changelog";
 
-type SettingsTab = "general" | "hotkeys" | "permissions" | "updates";
+type SettingsTab =
+  | "general"
+  | "asr"
+  | "llm"
+  | "hotkeys"
+  | "permissions"
+  | "updates";
 
 type PermissionStatus = {
   accessibility: boolean;
@@ -116,6 +129,8 @@ type DownloadInstallResult = {
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "常规" },
+  { id: "asr", label: "ASR" },
+  { id: "llm", label: "LLM" },
   { id: "hotkeys", label: "快捷键" },
   { id: "permissions", label: "权限" },
   { id: "updates", label: "更新" },
@@ -211,10 +226,222 @@ export function SettingsPage() {
       </div>
 
       {tab === "general" ? <GeneralPanel /> : null}
+      {tab === "asr" ? <AsrProviderPanel /> : null}
+      {tab === "llm" ? <LlmProviderPanel /> : null}
       {tab === "hotkeys" ? <HotkeysPanel /> : null}
       {tab === "permissions" ? <PermissionsPanel /> : null}
       {tab === "updates" ? <UpdatesPanel /> : null}
     </PageShell>
+  );
+}
+
+function AsrProviderPanel() {
+  const { config, updateConfig, saveConfig } = useApp();
+  const [appleAvailable, setAppleAvailable] = useState(true);
+
+  useEffect(() => {
+    void invoke<{ apple_speech_available?: boolean; platform?: string }>(
+      "get_app_info",
+    )
+      .then((info) => {
+        const ok = info.apple_speech_available ?? info.platform === "macos";
+        setAppleAvailable(ok);
+        if (!ok && config.asr_provider === "apple") {
+          updateConfig("asr_provider", "elevenlabs");
+        }
+      })
+      .catch(() => setAppleAvailable(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const selectProvider = (next: AsrProvider) => {
+    if (next === "apple" && !appleAvailable) return;
+    updateConfig("asr_provider", next);
+  };
+
+  return (
+    <>
+      <SectionCard className="max-w-2xl flex flex-col gap-5" title="ASR 引擎">
+        <Select
+          className="w-full flex"
+          selectedKey={config.asr_provider}
+          onSelectionChange={(key) => {
+            if (key == null) return;
+            selectProvider(String(key) as AsrProvider);
+          }}
+        >
+          <Label>引擎</Label>
+          <Select.Trigger className="flex items-center justify-between p-4">
+            <Select.Value />
+            <Select.Indicator />
+          </Select.Trigger>
+          <Select.Popover>
+            <ListBox className="gap-3 p-3">
+              {appleAvailable ? (
+                <ListBox.Item id="apple" textValue="Apple Speech">
+                  Apple Speech
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+              ) : null}
+              <ListBox.Item id="elevenlabs" textValue="ElevenLabs Scribe">
+                ElevenLabs Scribe
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+              <ListBox.Item id="qwen" textValue="Qwen 本地">
+                Qwen 本地
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+            </ListBox>
+          </Select.Popover>
+        </Select>
+
+        <p className="text-[12px] leading-relaxed text-muted">
+          型号、下载与 VAD 等在{" "}
+          <Link to="/asr" className="text-accent hover:underline">
+            ASR 页
+          </Link>{" "}
+          配置。
+        </p>
+
+        {config.asr_provider === "apple" ? (
+          <p className="text-[13px] text-muted">
+            需授权麦克风与语音识别，见{" "}
+            <Link
+              to="/settings?tab=permissions"
+              className="text-accent hover:underline"
+            >
+              设置 → 权限
+            </Link>
+            。
+          </p>
+        ) : null}
+
+        {config.asr_provider === "elevenlabs" ? (
+          <div className="flex flex-col gap-4">
+            <TextField
+              fullWidth
+              variant="secondary"
+              type="password"
+              value={config.elevenlabs_api_key}
+              onChange={(value) => updateConfig("elevenlabs_api_key", value)}
+            >
+              <Label>API Key</Label>
+              <Input />
+            </TextField>
+            <TextField
+              fullWidth
+              variant="secondary"
+              value={config.elevenlabs_model}
+              onChange={(value) => updateConfig("elevenlabs_model", value)}
+            >
+              <Label>默认 Model</Label>
+              <Input placeholder="scribe_v2" />
+            </TextField>
+          </div>
+        ) : null}
+
+        <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
+          <Save size={16} />
+          保存
+        </Button>
+      </SectionCard>
+    </>
+  );
+}
+
+function LlmProviderPanel() {
+  const { config, updateConfig, saveConfig } = useApp();
+
+  const selectProvider = (id: LlmProvider) => {
+    const preset = LLM_PROVIDER_PRESETS.find((p) => p.id === id);
+    updateConfig("llm_provider", id);
+    if (preset && id !== "custom" && preset.baseUrl) {
+      updateConfig("llm_api_base_url", preset.baseUrl);
+      if (preset.models[0] && !config.llm_model.trim()) {
+        updateConfig("llm_model", preset.models[0]);
+      }
+    }
+  };
+
+  return (
+    <SectionCard className="max-w-2xl flex flex-col gap-5" title="LLM Provider">
+      <div className="rounded-2xl border border-border bg-surface-secondary/50 px-3 py-2">
+        <Switch
+          isSelected={config.llm_enabled}
+          onChange={(value) => updateConfig("llm_enabled", value)}
+        >
+          <Switch.Content className="w-full justify-between gap-2 p-2">
+            <div className="min-w-0 pr-2">
+              <div className="text-sm font-semibold text-foreground">
+                启用纠错
+              </div>
+            </div>
+            <Switch.Control>
+              <Switch.Thumb />
+            </Switch.Control>
+          </Switch.Content>
+        </Switch>
+      </div>
+
+      <Select
+        className="w-full flex"
+        selectedKey={config.llm_provider}
+        onSelectionChange={(key) => {
+          if (key == null) return;
+          selectProvider(String(key) as LlmProvider);
+        }}
+      >
+        <Label>Provider</Label>
+        <Select.Trigger className="flex items-center justify-between p-4">
+          <Select.Value />
+          <Select.Indicator />
+        </Select.Trigger>
+        <Select.Popover>
+          <ListBox className="gap-2 p-2">
+            {LLM_PROVIDER_PRESETS.map((p) => (
+              <ListBox.Item key={p.id} id={p.id} textValue={p.label}>
+                {p.label}
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+            ))}
+          </ListBox>
+        </Select.Popover>
+      </Select>
+
+      <TextField
+        fullWidth
+        variant="secondary"
+        value={config.llm_api_base_url}
+        onChange={(value) => updateConfig("llm_api_base_url", value)}
+      >
+        <Label>API Base URL</Label>
+        <Input placeholder="https://api.openai.com/v1" />
+      </TextField>
+
+      <TextField
+        fullWidth
+        variant="secondary"
+        type="password"
+        value={config.llm_api_key}
+        onChange={(value) => updateConfig("llm_api_key", value)}
+      >
+        <Label>API Key</Label>
+        <Input placeholder="可留空（Ollama 等本地服务）" />
+      </TextField>
+
+      <p className="text-[12px] leading-relaxed text-muted">
+        模型与 Prompt 在{" "}
+        <Link to="/llm" className="text-accent hover:underline">
+          LLM 页
+        </Link>{" "}
+        编辑。
+      </p>
+
+      <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
+        <Save size={16} />
+        保存
+      </Button>
+    </SectionCard>
   );
 }
 

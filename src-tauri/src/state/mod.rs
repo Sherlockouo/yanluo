@@ -127,6 +127,20 @@ impl AsrEngine {
         rec_guard.as_ref().map(|r| r.0.get_samples())
     }
 
+    /// Hot-path: samples from absolute `from` to end (avoids full-buffer clone).
+    pub(crate) fn get_audio_from(app: &AppHandle, from: usize) -> Option<(usize, Vec<f32>)> {
+        let state = app.state::<AsrEngine>();
+        let rec_guard = state.inner().recorder.lock().ok()?;
+        Some(rec_guard.as_ref()?.0.get_samples_from(from))
+    }
+
+    /// Drain recorder samples before `keep_from` for cold archive.
+    pub(crate) fn drain_audio_before(app: &AppHandle, keep_from: usize) -> Option<Vec<f32>> {
+        let state = app.state::<AsrEngine>();
+        let rec_guard = state.inner().recorder.lock().ok()?;
+        Some(rec_guard.as_ref()?.0.drain_before(keep_from))
+    }
+
     /// Live meter level from the active recorder (avoids cloning the full buffer).
     pub(crate) fn get_audio_rms(app: &AppHandle) -> Option<f32> {
         let state = app.state::<AsrEngine>();

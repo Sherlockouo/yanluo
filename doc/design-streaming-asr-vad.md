@@ -1,23 +1,17 @@
 # 设计：高性能流式 ASR + VAD
 
-> 状态: **S0–S2 已交付**；下一阶段 **S3**（WebRTC VAD）。权威阶段表见 [`ROADMAP-streaming-asr-vad.md`](./ROADMAP-streaming-asr-vad.md)。  
-> 创建: 2026-07-12 · 实现: 2026-07-12  
-> 取代 / 收敛: `todo-streaming-asr.md`（历史背景）、`todo-vad-segmentation.md`（问题陈述）、`incremental-kv-cache-investigation.md`（已验证基线）
+> 状态: **S0–S4 全交付**（含动态 RoPE / PCM ring / 边界去重 / Silero feature）。权威：[`ROADMAP-streaming-asr-vad.md`](./ROADMAP-streaming-asr-vad.md)。  
+> 创建: 2026-07-12 · S3/S4: 2026-07-13
 
 ## 实现对照
 
 | 项 | 状态 | 位置 |
 |----|------|------|
-| RoPE `max_positions=8192` + `ensure_rope_span` | ✅ S0 | `qwen3_asr_rs/src/inference.rs` |
-| Energy VAD + `SegmentClock` | ✅ S1 | `asr-cli/.../audio/vad.rs` |
-| 按段 PCM 切片 + `init_streaming` 重置 | ✅ S1 | `transcription/mod.rs` StartStreaming |
-| Hard cap 90s + overlap | ✅ S1 / S1.1 | `AppConfig` / `SegmentConfig` |
-| Hysteresis + 保守静音默认 | ✅ S1.1 | `EnergyVad` enter/exit |
-| `PartialResult{committed,active,segment_index}` | ✅ S1 | transcription + HUD 仍读 `text` |
-| 跨段 text prefix（cap） | ✅ S2 | `init_streaming_with_context` + worker |
-| commit → translate nudge | ✅ S2 | `notify_asr_committed` |
-| asr-cli → path `../../qwen3_asr_rs` | ✅ | 联调；推送后可改回 git |
-| WebRTC VAD | ❌ S3 | |
+| RoPE 8192 + 按需扩到 16384 | ✅ | `ensure_rope_span` |
+| Energy / WebRTC / Silero | ✅ | `make_vad`；Silero 需 `--features silero-vad` |
+| 按段 PCM + drain 归档 | ✅ | `get_samples_from` / `drain_before` |
+| 边界文本去重 | ✅ | `append_segment_text` |
+| ASR 页 + HUD 分色 | ✅ | `asr-page` / `asr-hud` |
 
 ## 1. 目标与非目标
 
@@ -47,31 +41,29 @@
 | chunk-local attention（流式稳定性） | ✅ | `audio_encoder.set_chunk_local(true)` |
 | rollback prefix（边界抖动控制） | ✅ | `rollback_tokens` / `unfixed_chunk_num` |
 | asr-cli mlx-worker 流式循环 | ✅ | `transcription/mod.rs` `StartStreaming` |
-| 生产 VAD 分段 | ❌ | 无；RMS 仅 HUD |
-| 跨段上下文 | ❌ | 单 `StreamingState` 贯穿整场 |
-| RoPE 表 | ⚠️ 固定 4096 ≈ **~3min** 硬顶 | `init_streaming` `max_positions` |
+| 生产 WebRTC VAD（默认）+ Energy fallback | ✅ S3 | `VadBackend` / `make_vad`；HUD RMS 仍只服务 UI |
+| 跨段 text prefix（capped） | ✅ S2 | `init_streaming_with_context` |
+| RoPE 表（段内） | ✅ S0 | 固定 **8192** + `ensure_rope_span`；靠切段重置，不靠无限加长 |
 
-**关键事实**：`todo-streaming-asr.md` 里「全量重转 O(n²)」已过时。当前产品路径是 **O(段长)** 增量 KV；崩溃点是 **整场当作一段** 导致 RoPE/KV/prefix 失控（见 partial #623 / 241s broadcast 错误）。
+**关键事实**：`todo-streaming-asr.md` 里「全量重转 O(n²)」已过时。当前产品路径是 **段内 O(S) 增量 KV + 段间 reset**。历史崩溃点是「整场当作一段」导致 RoPE/KV/prefix 失控（partial #623 / 241s broadcast）；S0–S1 已堵住。
 
 ---
 
-## 3. 问题模型
+## 3. 问题模型（历史动机；S0–S1 已对症）
+
+若不切段、单段贯穿整场：
 
 ```
 整场录音（单调增长）
   ├─ audio tokens ≈ 13/s
   ├─ KV ≈ O(audio + text)
   ├─ rollback prefix ≈ O(已识别文本)
-  └─ cos/sin[0..4096)  →  pos_start + total_new > 4096  → MLX broadcast 崩溃
+  └─ cos/sin 表耗尽 → MLX broadcast / 清晰 Err（今有 ensure_rope_span）
 ```
 
-单靠抬 `max_positions` 只能推迟崩溃，不能解决：
+单靠抬 `max_positions` 只能推迟崩溃，不能解决长会议 KV、decode 变慢、prefix 变重。
 
-- 长会议 KV 到 GB 级
-- attention 扫更长 cache → decode 变慢
-- prefix 越来越长 → 每次 prefill 变重
-
-**结论**：高性能 = **段内增量 + 段间重置**，不是无限加长单段。
+**结论（已实现）**：高性能 = **段内增量 + 段间重置**，不是无限加长单段。
 
 ---
 
@@ -141,11 +133,7 @@ CommitSegment ──► append committed text
    - 可选：下一段 open 时带 **跨段 prefix**（§6）。
 5. **Hard cap**：即使无静音，段长 ≥ `max_segment_sec`（建议 90–120s）强制切，避免再撞 RoPE。
 
-### 5.3 音频切片契约（关键）
-
-今日 worker 每次 `get_audio_snapshot()` 拿 **全量** buffer，依赖引擎内部 cache 假装增量——RoPE 仍按全局位置累加。
-
-新契约：
+### 5.3 音频切片契约（已落地）
 
 ```text
 segment_pcm = recorder.samples[seg_start_sample .. current]
@@ -154,7 +142,7 @@ engine.streaming_transcribe_partial(segment_pcm, &mut seg_state)
 
 - `seg_start_sample` 在 Commit / Open 时更新。
 - Recorder 仍可保留整场 PCM（final align / 导出），但 **推理窗口 = 当前段**。
-- 可选后续：committed 段 PCM 落盘 / 压缩，热路径只保留「当前段 + 小 overlap」。
+- 可选后续（S4）：committed 段 PCM 落盘 / 压缩，热路径只保留「当前段 + 小 overlap」。
 
 ### 5.4 Overlap（边界质量）
 
@@ -170,36 +158,21 @@ Overlap 区间允许被两段都「看见」；最终文本用 **committed 拼�
 
 ---
 
-## 6. 跨段上下文（质量）
+## 6. 跨段上下文（质量）— **S2 已交付**
 
-段间重置会丢掉 decoder 语境。两种策略，按阶段启用：
+段间重置会丢掉 decoder 语境。独立段（无 prefix）曾作 S1 过渡；**现默认启用 committed text prefix**：
 
-### P0：独立段（先保证稳）
-
-- 每段 `force_language` 继承会话语言。
-- 无文本 prefix。
-- 验收：长录音不崩、延迟稳定；允许段首偶发弱语境。
-
-### P1：Committed text prefix（推荐终态）
-
-下一段 `init_streaming` 后，把上一句（或最近 N 字）作为 **文本 prefix** 注入（类似现有 rollback，但是跨段、只读 committed）：
+下一段 `init_streaming_with_context` 注入最近 N tokens 的 **已 commit** 文本（跨段、只读；与段内 `rollback_tokens` 正交）：
 
 ```text
 [pre_audio][audio_seg][post_audio][lang?][cross_seg_prefix] → decode
 ```
 
-约束：
+约束（已实现）：
 
-- prefix 长度 capped（如 ≤ 64–128 tokens），避免再次拖垮 prefill。
-- 只用 **已 commit** 文本，不用 in-flight（防锁定错误）。
-- 与段内 `rollback_tokens` 正交：跨段 prefix 稳定；段内仍 rollback 尾部 K。
-
-引擎侧可新增显式 API（比偷偷塞进 `StreamingState` 更清晰）：
-
-```rust
-// qwen3_asr_rs（示意）
-inf.init_streaming_with_context(lang, rollback, Some(cross_seg_prefix));
-```
+- prefix 长度 capped（默认 **64** tokens，`cross_segment_prefix_tokens`；可设 0 关闭）。
+- 只用 **已 commit** 文本，不用 in-flight。
+- API：`inf.init_streaming_with_context(lang, rollback, Some(context), max_tokens)`。
 
 ---
 
@@ -213,7 +186,7 @@ inf.init_streaming_with_context(lang, rollback, Some(cross_seg_prefix));
 | WebRTC VAD | 低 | `webrtc-vad` | 中 | **P0/P1 默认** |
 | Silero | 中 | 额外模型 | 好 | P2 可选 |
 
-**推荐路径**：抽象 `VadBackend` trait → 默认 WebRTC；保留 Energy 作 fallback / 测试；Silero 后置。
+**已落地（S3）**：默认 WebRTC + ~240ms hangover；`vad_backend=energy` 可回退；未知/初始化失败 → Energy 并打日志。Silero 仍属 S4/后置。
 
 ### 7.2 接口（asr-cli）
 
@@ -296,20 +269,21 @@ type PartialPayload = {
 | 项 | 动作 |
 |----|------|
 | 段内 incremental API | **保持** |
-| `max_positions` | 提到可覆盖 `max_segment_sec`（如 120s → ~2k+；建议 **8192** 作段内安全垫） |
-| `init_streaming_with_context` | P1 新增 |
-| 防御断言 | `pos_start + total_new <= cos.len` → 清晰错误（非 MLX broadcast） |
-| 依赖接入 | asr-cli 今日用 git `feat/forced-aligner`；联调期建议 **path 依赖本地** `../../qwen3_asr_rs`，合入后再推 git |
+| `max_positions` | ✅ **8192** 段内安全垫 |
+| `init_streaming_with_context` | ✅ S2 |
+| 防御断言 | ✅ `ensure_rope_span` |
+| 依赖接入 | ✅ path `../../qwen3_asr_rs`（联调）；稳定后推 git |
 
 ### 9.2 `asr-cli`（编排）
 
-| 项 | 动作 |
+| 项 | 状态 |
 |----|------|
-| `VadBackend` + `SegmentClock` | 新建 `audio/vad.rs` 或 `transcription/segment.rs` |
-| `mlx_worker` StartStreaming 循环 | 改为段生命周期；**按段切片 PCM** |
-| `AppConfig` | 增加 VAD / max_segment / overlap 参数 |
-| `PartialResult` | 扩展 committed/active |
-| TranslateStreamState | 在 Commit 时推进，不在每个 tick 锁死 |
+| `EnergyVad` + `SegmentClock` | ✅ `audio/vad.rs` |
+| `VadBackend` + WebRTC + Energy | ✅ S3 `make_vad` |
+| `mlx_worker` 段生命周期 + 按段 PCM | ✅ |
+| `AppConfig` VAD / max_segment / overlap / prefix | ✅（ASR 页已暴露） |
+| `PartialResult` committed/active | ✅ HUD 分色 |
+| TranslateStreamState commit 推进 | ✅ `notify_asr_committed` |
 
 ### 9.3 明确不放引擎里的东西
 
@@ -329,13 +303,13 @@ type PartialPayload = {
 | 方案 | Prefill/Decode 成本 | KV 峰值 | 长时稳定性 |
 |------|---------------------|---------|------------|
 | 旧全量重转 | \(O(T^2)\) | \(O(T)\) | 差 |
-| 今日单段增量 | \(O(T)\) 但常数随 T 升 | \(O(T)\) | RoPE ~3min 崩 |
-| **本设计** | \(O(T)\)，常数 ≈ \(O(S)\) | \(O(S)\) | 任意 T |
+| 历史「单段增量不切段」 | \(O(T)\) 常数随 T 升 | \(O(T)\) | RoPE 表耗尽会崩 |
+| **本设计（已落地）** | \(O(T)\)，常数 ≈ \(O(S)\) | \(O(S)\) | 任意 T |
 
 段内仍用已测最优参数作默认：
 
-- `chunk_sec ≈ 1.0`
-- `rollback_tokens ≈ 5`（引擎侧实测甜点；app 默认今日为 2，应对齐基准）
+- `chunk_sec ≈ 1.5`（Rust 默认；worker floor ≥ 1.0）
+- `rollback_tokens ≈ 5`（Rust 默认；worker floor ≥ 3）
 - `unfixed_chunk_num = 2`
 - `max_new_tokens = 32`
 
@@ -353,50 +327,51 @@ type PartialPayload = {
 ## 11. 配置面（建议默认）
 
 ```toml
-# 示意；落入 AppConfig
-chunk_size_sec = 1.0
-unfixed_token_num = 5          # 对齐引擎基准，替换当前默认 2
+# 与 Rust AppConfig 默认对齐（2026-07-13）
+chunk_size_sec = 1.5
+unfixed_token_num = 5
 vad_backend = "webrtc"         # or "energy"
 vad_aggression = 2             # webrtc 0..=3
-min_silence_ms = 400
-commit_hold_ms = 300
-min_segment_ms = 1000
-max_segment_sec = 90
-overlap_ms = 300
-cross_segment_prefix_tokens = 64  # P1；P0 = 0
+vad_min_silence_ms = 900
+vad_commit_hold_ms = 500
+vad_min_segment_ms = 2500
+vad_max_segment_sec = 90
+vad_overlap_ms = 500
+cross_segment_prefix_tokens = 64
 ```
 
 ---
 
-## 12. 分阶段交付
+## 12. 分阶段交付（与 ROADMAP S0–S4 对齐）
 
-### Phase 0 — 止血 + 契约（小，但不是「抬常量糊弄」）
+### S0 — 止血 + 契约 ✅
 
-1. Worker **按逻辑段切片**（即使先用 **硬超时分段** 代替真 VAD）：每 `max_segment_sec` reset `StreamingState`。
-2. RoPE `max_positions` ≥ 覆盖 max_segment + prefix 安全垫（8192）。
-3. narrow 前断言 → 可读错误。
-4. 验收：录 10min+ 不崩；内存曲线锯齿状（段末回落）。
+1. Worker **按逻辑段切片** + hard-cap reset。
+2. RoPE `max_positions=8192` + `ensure_rope_span`。
+3. 验收：录 10min+ 不崩；内存锯齿回落。
 
-### Phase 1 — WebRTC VAD + 事件模型
+### S1 / S1.1 — Energy VAD + 事件模型 + 质量默认 ✅
 
-1. `VadBackend` + `SegmentClock` 接入 worker。
-2. `PartialPayload { committed, active }`；HUD / viewer 适配。
-3. overlap + min/max 段参数可配。
-4. 验收：自然说话停顿处切段；碎段率低；partial 流畅。
+1. `EnergyVad` + `SegmentClock` 接入 worker。
+2. `PartialResult { committed, active, segment_index }`；HUD 仍可用合成 `text`。
+3. overlap + min/max + hysteresis 保守默认。
+4. 验收：自然停顿切段；碎段率低；思维气口不误切。
 
-### Phase 2 — 跨段 prefix + 质量
+### S2 — 跨段 prefix + translate ✅
 
 1. `init_streaming_with_context`。
-2. Commit 驱动 translate。
-3. 边界回归集（中英、快速连读、长停顿）。
-4. 验收：边界 WER / 主观质量 ≥ 单段长音频（在可跑长度内）。
+2. Commit 驱动 translate（`notify_asr_committed`）。
+3. 验收：段首不失忆；边界主观质量可接受。
 
-### Phase 3 — 可选增强
+### S3 — 抗噪 VAD ✅
 
-- Silero backend。
-- committed PCM 冷存储 / 热路径 ring。
-- 动态 RoPE（彻底去掉段内表上限焦虑）。
-- 双缓冲：Commit 时下一段 onset 已缓冲的 PCM 无缝接上。
+1. `VadBackend` trait；WebRTC 默认（hangover），Energy fallback。
+2. `vad_backend` / `vad_aggression` 可配（config.json；设置页 → S4）。
+
+### S4 — 产品打磨 ✅ / 引擎可选 ⬜
+
+- ✅ ASR 页暴露 `vad_*` / prefix；HUD 区分 committed/active。
+- ⬜ Silero；committed PCM ring；动态 RoPE；边界去重。
 
 ---
 
@@ -430,14 +405,14 @@ cross_segment_prefix_tokens = 64  # P1；P0 = 0
 1. **段内增量 KV + 段间 reset**，不走「只加大 RoPE 撑整场」。
 2. **VAD 在 asr-cli**；引擎保持纯推理。
 3. **Hard cap 与 VAD 同时存在**（cap 是正确性护栏）。
-4. **P0 可无跨段 prefix**；P1 再上。
-5. **首发 VAD = WebRTC**（Energy 可作测试双轨）。
+4. **跨段 prefix 默认开启**（cap 64；可关）。
+5. **生产默认 VAD = WebRTC（S3）**；Energy 作显式/fallback；Silero 后置。
 
-### 待实现时确认
+### 已确认 / 余量
 
-- app 默认 `unfixed_token_num` 是否从 2 → 5（建议是）。
-- ForcedAligner：按段对齐还是整场一次（建议 final 整场一次，简单）。
-- Translate：是否仅在 commit 时调用 LLM（建议是）。
+- Rust / 前端 `unfixed_token_num` 默认均为 **5**。
+- ForcedAligner：建议 final 整场一次（未改）。
+- Translate：commit 边界已 `notify_asr_committed` 推进；active 仍可节流。
 
 ---
 
@@ -445,9 +420,11 @@ cross_segment_prefix_tokens = 64  # P1；P0 = 0
 
 | 文档 | 关系 |
 |------|------|
-| `incremental-kv-cache-investigation.md` | **基线证据**：段内方案已验证，本文直接依赖 |
-| `todo-vad-segmentation.md` | 问题与直觉方案正确；细节由本文取代 |
-| `todo-streaming-asr.md` | 历史：方案 A 过时；方案 C ≈ 本文 P1；方案 D 段内已做 |
+| `README.md` | **入口索引**：现状 + 读哪篇 |
+| `ROADMAP-streaming-asr-vad.md` | **阶段权威** |
+| `incremental-kv-cache-investigation.md` | **基线证据**：段内方案已验证 |
+| `todo-vad-segmentation.md` | **归档**：问题直觉正确；细节由 design/ROADMAP 取代 |
+| `todo-streaming-asr.md` | **归档**：方案 A 过时；C≈S1+S2；D≈段内已做 |
 
 ---
 

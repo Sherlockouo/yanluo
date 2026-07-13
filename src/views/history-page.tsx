@@ -303,7 +303,7 @@ function HistoryRow({
 
 function ExpandedViewer({
   entry,
-  onClose,
+  onClose: _onClose,
 }: {
   entry: HistoryEntry;
   onClose: () => void;

@@ -1,6 +1,6 @@
 # Incremental KV Cache 调查报告
 
-> 本文是 **段内增量 KV 的验证基线**。长录音 / VAD 分段的产品架构见 [`design-streaming-asr-vad.md`](./design-streaming-asr-vad.md)。
+> 本文是 **段内增量 KV 的验证基线**（已落地）。长录音 / VAD 分段的产品架构与阶段见 [`ROADMAP-streaming-asr-vad.md`](./ROADMAP-streaming-asr-vad.md)、[`design-streaming-asr-vad.md`](./design-streaming-asr-vad.md)；索引 [`README.md`](./README.md)。
 
 ## 目标
 

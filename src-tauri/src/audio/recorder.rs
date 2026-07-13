@@ -118,6 +118,25 @@ impl AudioRecorder {
         mix_buffers(&self.mic_samples, &self.system_samples, self.mode)
     }
 
+    /// Mixed sample count without cloning the buffer.
+    #[allow(dead_code)]
+    pub fn sample_len(&self) -> usize {
+        mix_len(&self.mic_samples, &self.system_samples, self.mode)
+    }
+
+    /// Copy samples from absolute index `from` to end (hot-path; avoids full-buffer clone).
+    /// Returns `(from_clamped, samples[from..])`.
+    pub fn get_samples_from(&self, from: usize) -> (usize, Vec<f32>) {
+        mix_buffers_from(&self.mic_samples, &self.system_samples, self.mode, from)
+    }
+
+    /// Drain samples strictly before `keep_from` (absolute). Returns drained prefix
+    /// for cold archive (final align / export). Hot buffers keep `[keep_from..]`
+    /// so the next segment's overlap remains available.
+    pub fn drain_before(&self, keep_from: usize) -> Vec<f32> {
+        drain_buffers_before(&self.mic_samples, &self.system_samples, self.mode, keep_from)
+    }
+
     /// Live meter 0–1 from recent samples (tail only — never clones the full buffer).
     pub fn recent_rms(&self, window: usize) -> f32 {
         let buf = mix_buffers_tail(&self.mic_samples, &self.system_samples, self.mode, window);
@@ -160,6 +179,117 @@ fn mix_buffers(
         AudioCaptureMode::External => mic,
         AudioCaptureMode::System => sys,
         AudioCaptureMode::Both => mix_aligned(&mic, &sys),
+    }
+}
+
+fn mix_len(
+    mic: &Arc<Mutex<Vec<f32>>>,
+    system: &Arc<Mutex<Vec<f32>>>,
+    mode: AudioCaptureMode,
+) -> usize {
+    match mode {
+        AudioCaptureMode::External => mic.lock().map(|s| s.len()).unwrap_or(0),
+        AudioCaptureMode::System => system.lock().map(|s| s.len()).unwrap_or(0),
+        AudioCaptureMode::Both => {
+            let m = mic.lock().map(|s| s.len()).unwrap_or(0);
+            let s = system.lock().map(|s| s.len()).unwrap_or(0);
+            m.max(s)
+        }
+    }
+}
+
+/// Copy mixed samples from `from` (clamped) to end.
+fn mix_buffers_from(
+    mic: &Arc<Mutex<Vec<f32>>>,
+    system: &Arc<Mutex<Vec<f32>>>,
+    mode: AudioCaptureMode,
+    from: usize,
+) -> (usize, Vec<f32>) {
+    match mode {
+        AudioCaptureMode::External => {
+            let Ok(buf) = mic.lock() else {
+                return (0, Vec::new());
+            };
+            let from = from.min(buf.len());
+            (from, buf[from..].to_vec())
+        }
+        AudioCaptureMode::System => {
+            let Ok(buf) = system.lock() else {
+                return (0, Vec::new());
+            };
+            let from = from.min(buf.len());
+            (from, buf[from..].to_vec())
+        }
+        AudioCaptureMode::Both => {
+            let Ok(mic) = mic.lock() else {
+                return (0, Vec::new());
+            };
+            let Ok(sys) = system.lock() else {
+                return (0, Vec::new());
+            };
+            let n = mic.len().max(sys.len());
+            let from = from.min(n);
+            if from >= n {
+                return (from, Vec::new());
+            }
+            let mut out = Vec::with_capacity(n - from);
+            for i in from..n {
+                let a = mic.get(i).copied().unwrap_or(0.0);
+                let b = sys.get(i).copied().unwrap_or(0.0);
+                out.push((a + b).clamp(-1.0, 1.0));
+            }
+            (from, out)
+        }
+    }
+}
+
+/// Drain and return mixed samples `[0..keep_from)`, leaving `[keep_from..]` in buffers.
+fn drain_buffers_before(
+    mic: &Arc<Mutex<Vec<f32>>>,
+    system: &Arc<Mutex<Vec<f32>>>,
+    mode: AudioCaptureMode,
+    keep_from: usize,
+) -> Vec<f32> {
+    if keep_from == 0 {
+        return Vec::new();
+    }
+    match mode {
+        AudioCaptureMode::External => {
+            let Ok(mut buf) = mic.lock() else {
+                return Vec::new();
+            };
+            let n = keep_from.min(buf.len());
+            buf.drain(..n).collect()
+        }
+        AudioCaptureMode::System => {
+            let Ok(mut buf) = system.lock() else {
+                return Vec::new();
+            };
+            let n = keep_from.min(buf.len());
+            buf.drain(..n).collect()
+        }
+        AudioCaptureMode::Both => {
+            let Ok(mut mic) = mic.lock() else {
+                return Vec::new();
+            };
+            let Ok(mut sys) = system.lock() else {
+                return Vec::new();
+            };
+            // Drain the shared prefix only — keep buffers length-aligned.
+            let n = keep_from.min(mic.len().min(sys.len()));
+            if n == 0 {
+                return Vec::new();
+            }
+            let mut drained = Vec::with_capacity(n);
+            for i in 0..n {
+                let a = mic[i];
+                let b = sys[i];
+                drained.push((a + b).clamp(-1.0, 1.0));
+            }
+            mic.drain(..n);
+            sys.drain(..n);
+            drained
+        }
     }
 }
 
