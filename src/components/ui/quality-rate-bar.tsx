@@ -1,4 +1,3 @@
-import { Button } from "@heroui/react";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -11,6 +10,17 @@ type Props = {
   className?: string;
   label?: string;
 };
+
+const OPTIONS: {
+  value: QualityRating;
+  label: string;
+  tone?: "bad" | "good";
+  icon?: "down" | "up";
+}[] = [
+  { value: "bad", label: "差", tone: "bad", icon: "down" },
+  { value: "ok", label: "一般" },
+  { value: "good", label: "好", tone: "good", icon: "up" },
+];
 
 export function QualityRateBar({
   rating,
@@ -26,37 +36,32 @@ export function QualityRateBar({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-1.5",
-        compact ? "pt-1.5" : "border-t border-border/60 pt-2",
+        "flex flex-wrap items-center gap-2",
+        compact ? "pt-1.5" : "border-t border-border/50 pt-2.5",
         className,
       )}
     >
-      {label ? (
-        <span className="mr-1 text-[10px] text-muted">{label}</span>
-      ) : null}
-      <Button
-        size="sm"
-        variant={rating === "bad" ? "primary" : "secondary"}
-        onPress={() => toggle("bad")}
-      >
-        <ThumbsDown size={12} />
-        差
-      </Button>
-      <Button
-        size="sm"
-        variant={rating === "ok" ? "primary" : "secondary"}
-        onPress={() => toggle("ok")}
-      >
-        一般
-      </Button>
-      <Button
-        size="sm"
-        variant={rating === "good" ? "primary" : "secondary"}
-        onPress={() => toggle("good")}
-      >
-        <ThumbsUp size={12} />
-        好
-      </Button>
+      {label ? <span className="type-micro tracking-[0.06em]!">{label}</span> : null}
+      <div className="rate-segment" role="group" aria-label={label || "评分"}>
+        {OPTIONS.map((opt) => {
+          const active = rating === opt.value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              className="rate-segment-btn"
+              data-active={active ? "true" : "false"}
+              data-tone={opt.tone}
+              aria-pressed={active}
+              onClick={() => toggle(opt.value)}
+            >
+              {opt.icon === "down" ? <ThumbsDown size={11} aria-hidden /> : null}
+              {opt.icon === "up" ? <ThumbsUp size={11} aria-hidden /> : null}
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

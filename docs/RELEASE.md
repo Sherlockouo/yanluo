@@ -40,7 +40,9 @@ Apple Speech is **macOS-only**. Linux/Windows default to ElevenLabs (Qwen local 
 ## One-time setup
 1. Enable GitHub Actions with `contents: write`.
 2. Optional Apple signing secrets for notarized macOS builds.
-3. Keep the repo public (or otherwise reachable) so in-app update checks can read Releases.
+3. Keep the repo **Public** so in-app update checks can read Releases without auth.
+   Private repos return **404** to unauthenticated API (browser login can still see them — that is why the Updates page can look “wrong”).
+   Dev-only: set `GITHUB_TOKEN` / `GH_TOKEN` before launching the app.
 
 ## Cut a release
 1. Follow **Version source of truth** above.

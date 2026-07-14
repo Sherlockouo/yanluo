@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
@@ -178,7 +178,7 @@ export function CollapseTrigger({
   );
 }
 
-/** Mutual-exclusive screen modes — opacity + y only. */
+/** Mutual-exclusive modes — enter-only. Never AnimatePresence sync (exit+enter stack = ghost). */
 export function ModeSwitch({
   modeKey,
   children,
@@ -190,19 +190,16 @@ export function ModeSwitch({
 }) {
   const fade = useFadeSlide();
   return (
-    <AnimatePresence mode="sync" initial={false}>
-      <motion.div
-        key={modeKey}
-        className={className}
-        initial={fade.initial}
-        animate={fade.animate}
-        exit={fade.exit}
-        transition={fade.transition}
-        style={{ willChange: "opacity, transform" }}
-      >
-        {children}
-      </motion.div>
-    </AnimatePresence>
+    <motion.div
+      key={modeKey}
+      className={className}
+      initial={fade.initial}
+      animate={fade.animate}
+      transition={fade.transition}
+      style={{ willChange: "opacity, transform" }}
+    >
+      {children}
+    </motion.div>
   );
 }
 
@@ -225,7 +222,6 @@ export function Reveal({
       className={className}
       initial={collapse.initial}
       animate={collapse.animate}
-      exit={collapse.exit}
       transition={{ ...collapse.transition, delay }}
       style={{ willChange: "opacity, transform" }}
     >
@@ -234,7 +230,7 @@ export function Reveal({
   );
 }
 
-/** Collapsible secondary block (learn / records / advanced). */
+/** Collapsible secondary block — enter-only; close unmounts immediately (no exit ghost). */
 export function SoftCollapse({
   open,
   children,
@@ -245,20 +241,16 @@ export function SoftCollapse({
   className?: string;
 }) {
   const collapse = useCollapse();
+  if (!open) return null;
   return (
-    <AnimatePresence initial={false}>
-      {open ? (
-        <motion.div
-          className={className}
-          initial={collapse.initial}
-          animate={collapse.animate}
-          exit={collapse.exit}
-          transition={collapse.transition}
-          style={{ willChange: "opacity, transform" }}
-        >
-          {children}
-        </motion.div>
-      ) : null}
-    </AnimatePresence>
+    <motion.div
+      className={className}
+      initial={collapse.initial}
+      animate={collapse.animate}
+      transition={collapse.transition}
+      style={{ willChange: "opacity, transform" }}
+    >
+      {children}
+    </motion.div>
   );
 }

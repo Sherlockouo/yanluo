@@ -159,7 +159,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void loadConfig();
-    void loadHistory();
+    // History can be multi‑MiB on disk (alignment). Defer past first paint.
+    let idleId: number | null = null;
+    let timeoutId: number | null = null;
+    if (typeof window.requestIdleCallback === "function") {
+      idleId = window.requestIdleCallback(
+        () => {
+          void loadHistory();
+        },
+        { timeout: 1200 },
+      );
+    } else {
+      timeoutId = window.setTimeout(() => {
+        void loadHistory();
+      }, 0);
+    }
 
     const unlisteners: UnlistenFn[] = [];
     let disposed = false;
@@ -344,6 +358,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     return () => {
       disposed = true;
+      if (idleId != null && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(idleId);
+      }
+      if (timeoutId != null) window.clearTimeout(timeoutId);
       unlisteners.forEach((unlisten) => unlisten());
     };
   }, [loadConfig, loadHistory, navigate]);

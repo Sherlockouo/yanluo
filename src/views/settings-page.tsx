@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
+import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import {
   Button,
   Input,
@@ -245,23 +245,20 @@ export function SettingsPage() {
         </div>
       </LayoutGroup>
 
-      <AnimatePresence mode="sync" initial={false}>
-        <motion.div
-          key={tab}
-          initial={fade.initial}
-          animate={fade.animate}
-          exit={fade.exit}
-          transition={fade.transition}
-          style={{ willChange: "opacity" }}
-        >
-          {tab === "general" ? <GeneralPanel /> : null}
-          {tab === "asr" ? <AsrProviderPanel /> : null}
-          {tab === "llm" ? <LlmProviderPanel /> : null}
-          {tab === "hotkeys" ? <HotkeysPanel /> : null}
-          {tab === "permissions" ? <PermissionsPanel /> : null}
-          {tab === "updates" ? <UpdatesPanel /> : null}
-        </motion.div>
-      </AnimatePresence>
+      <motion.div
+        key={tab}
+        initial={fade.initial}
+        animate={fade.animate}
+        transition={fade.transition}
+        style={{ willChange: "opacity" }}
+      >
+        {tab === "general" ? <GeneralPanel /> : null}
+        {tab === "asr" ? <AsrProviderPanel /> : null}
+        {tab === "llm" ? <LlmProviderPanel /> : null}
+        {tab === "hotkeys" ? <HotkeysPanel /> : null}
+        {tab === "permissions" ? <PermissionsPanel /> : null}
+        {tab === "updates" ? <UpdatesPanel /> : null}
+      </motion.div>
     </PageShell>
   );
 }

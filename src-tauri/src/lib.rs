@@ -86,6 +86,7 @@ pub fn main() {
             commands::begin_hotkey_capture,
             commands::cancel_hotkey_capture,
             commands::get_history,
+            commands::get_history_entry,
             commands::clear_history,
             commands::delete_history_entry,
             commands::rate_history_entry,

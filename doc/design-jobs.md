@@ -38,6 +38,7 @@
 
 - 只服务理解：换页、展开、状态切换。
 - 仅 `opacity` + `transform`；短（≤220ms）；禁止为炫技 stagger。
+- **Tab/Mode：enter-only**。禁止 `mode="sync"` 进出叠流（残影）。
 - 详见 [`architecture-local-first.md`](./architecture-local-first.md) 动效条款。
 
 ## 对本产品的硬规则

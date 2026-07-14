@@ -8,7 +8,7 @@ import {
   TextArea,
   TextField,
 } from "@heroui/react";
-import { Languages, RotateCcw, Save } from "lucide-react";
+import { ChevronDown, Languages, RotateCcw, Save } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   EmptyState,
@@ -24,6 +24,7 @@ import {
   translateTargetLabel,
 } from "@/lib/constants";
 import { useApp } from "@/app-context";
+import { cn } from "@/lib/cn";
 
 export function TranslatePage() {
   const { config, updateConfig, saveConfig, history } = useApp();
@@ -47,27 +48,84 @@ export function TranslatePage() {
     config.llm_api_base_url?.trim() && config.llm_model?.trim(),
   );
 
+  const setTargetLanguage = (code: string) => {
+    updateConfig("translate_target_language", code);
+    void saveConfig(
+      { ...config, translate_target_language: code },
+      { silent: true },
+    );
+  };
+
   return (
     <PageShell className="max-w-2xl">
       <PageHeader
         title="翻译"
         status={
-          <>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
             <Kbd>{config.hotkey_translate.label}</Kbd>
-            {" · "}
-            <span className="text-foreground">{targetLabel}</span>
-            {" · "}
-            {llmReady ? (
-              <span>{config.llm_model}</span>
-            ) : (
-              <Link
-                to="/settings?tab=llm"
-                className="text-accent hover:underline"
+            <span className="text-muted/40">·</span>
+            <Select
+              className="inline-flex w-auto"
+              aria-label="翻译到"
+              selectedKey={config.translate_target_language}
+              onSelectionChange={(key) => {
+                if (key == null) return;
+                setTargetLanguage(String(key));
+              }}
+            >
+              <Select.Trigger
+                className={cn(
+                  "h-7 gap-1 rounded-lg border border-border/80 bg-surface px-2.5",
+                  "shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)_inset]",
+                  "text-[12px] font-medium text-foreground",
+                  "transition-[border-color,background-color] duration-150",
+                  "hover:border-foreground/20 hover:bg-surface-secondary/60",
+                )}
               >
-                配置 LLM
-              </Link>
-            )}
-          </>
+                <Select.Value>
+                  {() => (
+                    <span className="inline-flex items-center gap-1.5">
+                      <span>{targetLabel}</span>
+                      {llmReady ? (
+                        <>
+                          <span className="text-muted/50">·</span>
+                          <span className="font-normal text-muted">
+                            {config.llm_model}
+                          </span>
+                        </>
+                      ) : null}
+                    </span>
+                  )}
+                </Select.Value>
+                <ChevronDown size={12} className="shrink-0 text-muted" />
+              </Select.Trigger>
+              <Select.Popover className="min-w-[10rem]">
+                <ListBox>
+                  {TRANSLATE_LANGUAGES.map(([value, label]) => (
+                    <ListBox.Item
+                      key={value}
+                      id={value}
+                      textValue={`${label} ${value}`}
+                    >
+                      <span>{label}</span>
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+            {!llmReady ? (
+              <>
+                <span className="text-muted/40">·</span>
+                <Link
+                  to="/settings?tab=llm"
+                  className="text-accent hover:underline"
+                >
+                  配置 LLM
+                </Link>
+              </>
+            ) : null}
+          </div>
         }
         action={
           <Button
@@ -81,39 +139,7 @@ export function TranslatePage() {
       />
 
       <SoftCollapse open={configOpen}>
-        <div className="mb-1 flex flex-col gap-5 rounded-2xl border border-border bg-surface p-4">
-          <Select
-            selectedKey={config.translate_target_language}
-            onSelectionChange={(key) => {
-              if (key == null) return;
-              updateConfig("translate_target_language", String(key));
-              void saveConfig(
-                { ...config, translate_target_language: String(key) },
-                { silent: true },
-              );
-            }}
-          >
-            <Label>翻译到</Label>
-            <Select.Trigger>
-              <Select.Value />
-              <Select.Indicator />
-            </Select.Trigger>
-            <Select.Popover>
-              <ListBox>
-                {TRANSLATE_LANGUAGES.map(([value, label]) => (
-                  <ListBox.Item
-                    key={value}
-                    id={value}
-                    textValue={`${label} ${value}`}
-                  >
-                    <span>{label}</span>
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                ))}
-              </ListBox>
-            </Select.Popover>
-          </Select>
-
+        <div className="surface-card mb-1 flex flex-col gap-5 p-4">
           <TextField
             fullWidth
             variant="secondary"
@@ -162,12 +188,14 @@ export function TranslatePage() {
         <div className="flex flex-col gap-3">
           {entries.map((entry, i) => (
             <Reveal key={entry.id} index={i}>
-              <article className="rounded-2xl border border-border bg-surface px-4 py-3.5">
-                <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 type-meta">
+              <article className="surface-card px-4 py-3.5">
+                <div className="mb-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 type-meta">
                   <span>
                     {new Date(entry.created_at).toLocaleString()}
                   </span>
+                  <span className="text-muted/40">·</span>
                   <span>{entry.duration_seconds.toFixed(1)}s</span>
+                  <span className="text-muted/40">·</span>
                   <span>
                     {translateTargetLabel(entry.translate_target_language) ||
                       targetLabel}

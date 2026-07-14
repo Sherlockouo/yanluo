@@ -85,6 +85,31 @@ pub(crate) fn load_history_from_disk() -> Vec<HistoryEntry> {
         .unwrap_or_default()
 }
 
+/// List/IPC payload — drop alignment + segments (can be MiB-scale per entry).
+pub(crate) fn history_entry_for_list(entry: &HistoryEntry) -> HistoryEntry {
+    HistoryEntry {
+        id: entry.id.clone(),
+        text: entry.text.clone(),
+        raw_text: entry.raw_text.clone(),
+        llm_text: entry.llm_text.clone(),
+        user_text: entry.user_text.clone(),
+        language: entry.language.clone(),
+        duration_seconds: entry.duration_seconds,
+        created_at: entry.created_at.clone(),
+        refined: entry.refined,
+        audio_path: entry.audio_path.clone(),
+        media_kind: entry.media_kind.clone(),
+        segments: Vec::new(),
+        alignment: None,
+        source: entry.source.clone(),
+        translate_target_language: entry.translate_target_language.clone(),
+        quality_rating: entry.quality_rating.clone(),
+        rated_at: entry.rated_at.clone(),
+        learn_status: entry.learn_status.clone(),
+        learn_terms: entry.learn_terms.clone(),
+    }
+}
+
 pub(crate) fn save_history_to_disk(history: &[HistoryEntry]) -> Result<(), String> {
     fs::create_dir_all(app_data_dir()).map_err(|e| e.to_string())?;
     let data = serde_json::to_string_pretty(history).map_err(|e| e.to_string())?;

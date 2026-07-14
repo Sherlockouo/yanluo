@@ -196,7 +196,7 @@ export function AsrPage() {
       />
 
       <SoftCollapse open={engineOpen}>
-        <div className="mb-1 flex flex-col gap-4 rounded-2xl border border-border bg-surface p-4">
+        <div className="surface-card mb-1 flex flex-col gap-4 p-4">
       {config.asr_provider === "elevenlabs" ? (
         <div className="flex flex-col gap-5">
           <TextField
@@ -632,13 +632,19 @@ export function AsrPage() {
             const showDiff = hasRefineDiff(entry.raw_text, entry.text);
             return (
               <Reveal key={entry.id} index={i}>
-                <article className="rounded-2xl border border-border bg-surface px-4 py-3.5">
-                  <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 type-meta">
+                <article className="surface-card px-4 py-3.5">
+                  <div className="mb-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 type-meta">
                     <span>
                       {new Date(entry.created_at).toLocaleString()}
                     </span>
+                    <span className="text-muted/40">·</span>
                     <span>{entry.duration_seconds.toFixed(1)}s</span>
-                    {entry.language ? <span>{entry.language}</span> : null}
+                    {entry.language ? (
+                      <>
+                        <span className="text-muted/40">·</span>
+                        <span>{entry.language}</span>
+                      </>
+                    ) : null}
                   </div>
                   {showDiff ? (
                     <RefineDiff

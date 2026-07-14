@@ -26,6 +26,7 @@ import {
   type QualityRating,
 } from "@/components/ui/quality-rate-bar";
 import { useApp } from "@/app-context";
+import { cn } from "@/lib/cn";
 import {
   DEFAULT_LLM_REFINE_PROMPT,
   LLM_PROVIDER_PRESETS,
@@ -292,8 +293,8 @@ export function LlmPage() {
       />
 
       <SoftCollapse open={configOpen}>
-        <div className="mb-1 flex flex-col gap-5 rounded-2xl border border-border bg-surface p-4">
-          <div className="rounded-2xl border border-border bg-surface-secondary/50 px-3 py-2">
+        <div className="surface-card mb-1 flex flex-col gap-5 p-4">
+          <div className="rounded-xl bg-surface-secondary/70 px-3 py-2 ring-1 ring-border/60">
             <Switch
               isSelected={config.llm_enabled}
               onChange={(value) => updateConfig("llm_enabled", value)}
@@ -417,8 +418,8 @@ export function LlmPage() {
 
       {pendingLearn && pendingLearn.terms.length > 0 ? (
         <Reveal>
-          <div className="rounded-2xl border border-accent/25 bg-accent/[0.06] px-3.5 py-3">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="surface-card border-accent/20 bg-accent/[0.05] px-4 py-3.5">
+            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
               <div className="type-ui">
                 待确认（{pendingLearn.terms.length}）
               </div>
@@ -464,7 +465,7 @@ export function LlmPage() {
         <EmptyState title="还没有学习 case" icon={<Sparkles size={18} />} />
       ) : (
         <>
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-end justify-between gap-3">
             <p className="type-meta">
               未标 {ratingStats.unlabeled} · 差 {ratingStats.bad} · 修正{" "}
               {userTripleCount} · 词库 {ratingStats.applied}
@@ -473,10 +474,11 @@ export function LlmPage() {
                 词库
               </Link>
             </p>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <Button
                 size="sm"
-                variant="secondary"
+                variant="primary"
+                className="btn-press"
                 isDisabled={!badOpenEntries.length || distilling}
                 isPending={distilling}
                 onPress={() => void runAiDistill()}
@@ -486,7 +488,7 @@ export function LlmPage() {
               </Button>
               <Button
                 size="sm"
-                variant="secondary"
+                variant="ghost"
                 isDisabled={!badOpenEntries.length}
                 onPress={() => void runLocalHarvest()}
               >
@@ -499,7 +501,7 @@ export function LlmPage() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2.5">
             {learnEntries.map((entry, i) => {
               const rated = ratingOf(entry);
               const status = entry.learn_status;
@@ -512,22 +514,34 @@ export function LlmPage() {
               const editing = editingId === entry.id;
               return (
                 <Reveal key={entry.id} index={i}>
-                  <article className="rounded-2xl border border-border bg-surface px-4 py-3.5">
-                    <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 type-meta">
+                  <article className="surface-card px-4 py-3.5">
+                    <div className="mb-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 type-meta">
                       <span>
                         {new Date(entry.created_at).toLocaleString()}
                       </span>
+                      <span className="text-muted/40">·</span>
                       <span>{entry.duration_seconds.toFixed(1)}s</span>
-                      {triple?.hasUser ? <span>有修正</span> : null}
+                      {triple?.hasUser ? (
+                        <>
+                          <span className="text-muted/40">·</span>
+                          <span className="text-accent">有修正</span>
+                        </>
+                      ) : null}
                       {status === "applied" ? (
-                        <span>已入词库</span>
+                        <>
+                          <span className="text-muted/40">·</span>
+                          <span>已入词库</span>
+                        </>
                       ) : status === "suggested" ? (
-                        <span>待确认</span>
+                        <>
+                          <span className="text-muted/40">·</span>
+                          <span>待确认</span>
+                        </>
                       ) : null}
                     </div>
 
                     {entry.raw_text && learnGold(entry) !== entry.raw_text ? (
-                      <div className="mb-2">
+                      <div className="mb-1">
                         <RefineDiff
                           before={entry.raw_text}
                           after={learnGold(entry)}
@@ -535,27 +549,32 @@ export function LlmPage() {
                         />
                       </div>
                     ) : (
-                      <p className="mb-2 type-body !text-[13px]">
+                      <p className="mb-1 type-body !text-[13.5px] !leading-relaxed">
                         {entry.raw_text}
                       </p>
                     )}
 
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-2.5">
                       <QualityRateBar
                         rating={rated}
+                        compact
+                        className="!border-0 !pt-0"
                         onRate={(next) => void setRating(entry.id, next)}
                       />
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onPress={() =>
+                      <button
+                        type="button"
+                        className={cn(
+                          "type-meta transition-colors hover:text-foreground",
+                          editing ? "text-accent" : "text-muted",
+                        )}
+                        onClick={() =>
                           setEditingId((id) =>
                             id === entry.id ? null : entry.id,
                           )
                         }
                       >
                         {editing ? "收起" : "修正"}
-                      </Button>
+                      </button>
                     </div>
 
                     <SoftCollapse open={editing}>

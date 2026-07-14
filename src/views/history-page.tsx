@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, toast } from "@heroui/react";
 import { Link } from "react-router-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { ChevronDown, Clipboard, Trash2 } from "lucide-react";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import {
   EmptyState,
   PageHeader,
@@ -162,20 +162,17 @@ export function HistoryPage() {
                     }
                     onDelete={() => void removeEntry(entry.id)}
                   />
-                  <AnimatePresence initial={false}>
-                    {open ? (
-                      <motion.div
-                        key="expanded"
-                        initial={collapse.initial}
-                        animate={collapse.animate}
-                        exit={collapse.exit}
-                        transition={collapse.transition}
-                        style={{ willChange: "opacity, transform" }}
-                      >
-                        <ExpandedViewer entry={entry} />
-                      </motion.div>
-                    ) : null}
-                  </AnimatePresence>
+                  {open ? (
+                    <motion.div
+                      key="expanded"
+                      initial={collapse.initial}
+                      animate={collapse.animate}
+                      transition={collapse.transition}
+                      style={{ willChange: "opacity, transform" }}
+                    >
+                      <ExpandedViewer entry={entry} />
+                    </motion.div>
+                  ) : null}
                 </div>
               </Reveal>
             );
@@ -293,38 +290,55 @@ function HistoryRow({
 }
 
 function ExpandedViewer({ entry }: { entry: HistoryEntry }) {
-  const mediaSrc = entry.audio_path ? convertFileSrc(entry.audio_path) : null;
-  const mediaKind = isVideoMediaKind(entry.media_kind, entry.audio_path)
+  const [full, setFull] = useState<HistoryEntry | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void invoke<HistoryEntry | null>("get_history_entry", { id: entry.id })
+      .then((next) => {
+        if (!cancelled) setFull(next);
+      })
+      .catch(() => {
+        if (!cancelled) setFull(entry);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch by id only
+  }, [entry.id]);
+
+  const view = full ?? entry;
+  const mediaSrc = view.audio_path ? convertFileSrc(view.audio_path) : null;
+  const mediaKind = isVideoMediaKind(view.media_kind, view.audio_path)
     ? "video"
     : "audio";
-  const showDiff = hasRefineDiff(entry.raw_text, entry.text);
-  const isTranslate = (entry.source ?? "fn") === "translate";
-  const isFn = (entry.source ?? "fn") === "fn";
+  const showDiff = hasRefineDiff(view.raw_text, view.text);
+  const isTranslate = (view.source ?? "fn") === "translate";
+  const isFn = (view.source ?? "fn") === "fn";
 
   return (
     <SectionCard className="!p-4">
       {isTranslate && showDiff ? (
         <div className="mb-4">
-          <SemanticPair before={entry.raw_text} after={entry.text} />
+          <SemanticPair before={view.raw_text} after={view.text} />
         </div>
       ) : showDiff ? (
         <div className="mb-4">
-          <RefineDiff before={entry.raw_text} after={entry.text} />
+          <RefineDiff before={view.raw_text} after={view.text} />
         </div>
       ) : null}
 
       {mediaSrc ? (
         <TranscriptViewer
-          text={entry.text}
+          text={view.text}
           mediaSrc={mediaSrc}
           mediaKind={mediaKind}
-          durationSeconds={entry.duration_seconds}
-          segments={entry.segments}
-          alignment={entry.alignment}
+          durationSeconds={view.duration_seconds}
+          segments={view.segments}
+          alignment={view.alignment}
         />
       ) : (
         <p className="whitespace-pre-wrap text-[15px] leading-[1.75] text-foreground">
-          {entry.text || "（空）"}
+          {view.text || "（空）"}
         </p>
       )}
 
@@ -343,7 +357,7 @@ function ExpandedViewer({ entry }: { entry: HistoryEntry }) {
           size="sm"
           variant="secondary"
           onPress={() => {
-            void navigator.clipboard.writeText(entry.text);
+            void navigator.clipboard.writeText(view.text);
             toast.success("已复制");
           }}
         >

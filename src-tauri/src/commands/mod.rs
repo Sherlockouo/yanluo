@@ -154,7 +154,21 @@ pub(crate) fn get_history(engine: State<'_, AsrEngine>) -> Result<Vec<HistoryEnt
         .inner()
         .history
         .lock()
-        .map(|history| history.clone())
+        .map(|history| history.iter().map(history_entry_for_list).collect())
+        .map_err(|e| e.to_string())
+}
+
+/// Full entry including alignment — only for detail viewers.
+#[tauri::command]
+pub(crate) fn get_history_entry(
+    id: String,
+    engine: State<'_, AsrEngine>,
+) -> Result<Option<HistoryEntry>, String> {
+    engine
+        .inner()
+        .history
+        .lock()
+        .map(|history| history.iter().find(|e| e.id == id).cloned())
         .map_err(|e| e.to_string())
 }
 

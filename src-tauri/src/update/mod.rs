@@ -163,6 +163,14 @@ fn pick_asset(assets: &[ReleaseAsset]) -> Option<ReleaseAsset> {
         .map(|(_, a)| a)
 }
 
+fn github_token() -> Option<String> {
+    std::env::var("GITHUB_TOKEN")
+        .or_else(|_| std::env::var("GH_TOKEN"))
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
 fn http_client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
@@ -175,21 +183,27 @@ fn http_client() -> Result<reqwest::blocking::Client, String> {
 fn fetch_releases(include_prerelease: bool) -> Result<Vec<ReleaseInfo>, String> {
     let client = http_client()?;
     let url = format!("https://api.github.com/repos/{REPO}/releases?per_page=20");
-    let res = client
+    let mut req = client
         .get(&url)
         .header("Accept", "application/vnd.github+json")
-        .send()
-        .map_err(|e| {
-            format!(
-                "无法连接 GitHub（网络超时或被拦截）。请检查网络后重试。详情: {e}"
-            )
-        })?;
+        .header("X-GitHub-Api-Version", "2022-11-28");
+    if let Some(token) = github_token() {
+        req = req.bearer_auth(token);
+    }
+    let res = req.send().map_err(|e| {
+        format!("无法连接 GitHub（网络超时或被拦截）。请检查网络后重试。详情: {e}")
+    })?;
     if !res.status().is_success() {
         let status = res.status();
         if status.as_u16() == 404 {
-            return Err(
-                "未找到 GitHub Release（仓库不存在、未公开，或尚未打 tag 发布）".into(),
-            );
+            return Err(format!(
+                "GitHub 仓库 {REPO} 无法访问（未登录 API 返回 404）。常见原因：仓库是私有的——浏览器登录后能看 Release，应用内默认无权限。请将仓库设为 Public，或在启动应用前设置环境变量 GITHUB_TOKEN / GH_TOKEN（classic PAT，repo 读权限）"
+            ));
+        }
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err(format!(
+                "GitHub API {status}：token 无效或权限不足（需要能读 {REPO} 的 Releases）"
+            ));
         }
         return Err(format!("GitHub API {status}"));
     }
@@ -197,6 +211,11 @@ fn fetch_releases(include_prerelease: bool) -> Result<Vec<ReleaseInfo>, String> 
         .json()
         .map_err(|e| format!("解析 GitHub 响应失败: {e}"))?;
     releases.retain(|r| !r.draft && (include_prerelease || !r.prerelease));
+    if releases.is_empty() {
+        return Err(format!(
+            "仓库 {REPO} 可访问，但没有已发布的 Release（仅 draft/prerelease 已过滤）"
+        ));
+    }
     Ok(releases)
 }
 

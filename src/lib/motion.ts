@@ -26,7 +26,8 @@ type MotionBundle = {
 
 /**
  * Page / screen enter. Never start at opacity 0 — blank frame reads as hitch.
- * Transform + opacity only (GPU).
+ * Transform + opacity only (GPU). Enter-only for mode/tab swaps — exit+enter
+ * in document flow (AnimatePresence sync) stacks both panels = ghosting.
  */
 function fadeSlide(reduce: boolean | null | undefined): MotionBundle {
   if (reduce) {
@@ -40,7 +41,7 @@ function fadeSlide(reduce: boolean | null | undefined): MotionBundle {
   return {
     initial: { opacity: 0.96, y: 8 },
     animate: { opacity: 1, y: 0 },
-    exit: { opacity: 0.96, y: -4 },
+    exit: { opacity: 0 },
     transition: { duration: duration.normal, ease: easeOut },
   };
 }
@@ -57,7 +58,7 @@ function fadeOnly(reduce: boolean | null | undefined): MotionBundle {
   return {
     initial: { opacity: 0.96 },
     animate: { opacity: 1 },
-    exit: { opacity: 0.96 },
+    exit: { opacity: 0 },
     transition: { duration: duration.fast, ease: easeOut },
   };
 }
@@ -82,7 +83,7 @@ function softCollapse(reduce: boolean | null | undefined): SoftCollapseMotion {
   return {
     initial: { opacity: 0.92, y: -6 },
     animate: { opacity: 1, y: 0 },
-    exit: { opacity: 0.9, y: -4 },
+    exit: { opacity: 0, y: -4 },
     transition: { duration: duration.fast, ease: easeOut },
   };
 }

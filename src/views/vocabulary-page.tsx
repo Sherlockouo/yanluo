@@ -33,7 +33,7 @@ export function VocabularyPage() {
       />
 
       <SoftCollapse open={addOpen}>
-        <div className="mb-1 flex items-end gap-2 rounded-2xl border border-border bg-surface p-4">
+        <div className="surface-card mb-1 flex items-end gap-2 p-4">
           <TextField
             fullWidth
             variant="secondary"

@@ -33,7 +33,8 @@ IndexedDB 不是必须——桌面端文件 + 内存 store 已是 local-first。
 
 4. **动画只合成属性**  
    仅 `transform` / `opacity`。禁止动画 `height`/`width`/`margin`/`top`。  
-   短时长：常交互 ≤180ms；偶发 ≤250ms。`AnimatePresence` **禁止**包 `<Outlet />`。
+   短时长：常交互 ≤180ms；偶发 ≤250ms。`AnimatePresence` **禁止**包 `<Outlet />`。  
+   **模式/Tab 切换：enter-only**（同 `PageShell`）。禁止 `AnimatePresence mode="sync"` 让旧面板留在文档流里和新面板叠放（残影/闪动）。
 
 5. **键盘优先**  
    Fn / ⇧Fn / Esc 是一等公民；UI 快捷入口服务热键，不取代热键。

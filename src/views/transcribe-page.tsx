@@ -196,13 +196,16 @@ export function TranscribePage() {
     ? "processing"
     : view;
 
-  const sessionEntries = useMemo(
-    () =>
-      history
-        .filter((e) => (e.source ?? "fn") === "transcribe")
-        .slice(0, 30),
-    [history],
-  );
+  // List after paint — history IPC / filter must not block tab enter.
+  const [listReady, setListReady] = useState(false);
+  useEffect(() => deferWork(() => setListReady(true), 0), []);
+
+  const sessionEntries = useMemo(() => {
+    if (!listReady) return [];
+    return history
+      .filter((e) => (e.source ?? "fn") === "transcribe")
+      .slice(0, 30);
+  }, [history, listReady]);
 
   const modelBlocked = config.asr_provider === "qwen" && !modelLoaded;
   const canStart = Boolean(selectedPath) && !modelBlocked && !processing;
@@ -945,11 +948,16 @@ function ResultPhase({
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [Viewer, setViewer] = useState<TranscriptViewerType | null>(null);
+  /** Full entry w/ alignment — fetched only when modal opens. */
+  const [detailEntry, setDetailEntry] = useState<HistoryEntry | null>(null);
   // First paint: few rows. Rest after idle — tab-click must stay light.
   const [visibleCount, setVisibleCount] = useState(8);
 
   useEffect(() => {
-    if (!activeEntry) setDetailOpen(false);
+    if (!activeEntry) {
+      setDetailOpen(false);
+      setDetailEntry(null);
+    }
   }, [activeEntry]);
 
   useEffect(() => {
@@ -967,10 +975,20 @@ function ResultPhase({
   const selectAndOpen = (id: string) => {
     if (activeEntry?.id !== id) onSelect(id);
     setDetailOpen(true);
-    void ensureViewer();
+    setDetailEntry(null);
+    void (async () => {
+      const [full] = await Promise.all([
+        invoke<HistoryEntry | null>("get_history_entry", { id }).catch(
+          () => null,
+        ),
+        ensureViewer(),
+      ]);
+      setDetailEntry(full ?? sessionEntries.find((e) => e.id === id) ?? null);
+    })();
   };
 
   const rows = sessionEntries.slice(0, visibleCount);
+  const viewerEntry = detailEntry;
 
   return (
     <>
@@ -998,33 +1016,36 @@ function ResultPhase({
         </div>
       </SectionCard>
 
-      {activeEntry && detailOpen && Viewer ? (
+      {viewerEntry && detailOpen && Viewer ? (
         <Modal.Backdrop
           isOpen={detailOpen}
-          onOpenChange={setDetailOpen}
+          onOpenChange={(open) => {
+            setDetailOpen(open);
+            if (!open) setDetailEntry(null);
+          }}
           variant="opaque"
         >
           <Modal.Container scroll="inside">
             <Modal.Dialog className="flex w-full max-w-6xl max-h-[calc(100dvh-1rem)] flex-col overflow-hidden sm:max-h-[calc(100dvh-5rem)]">
               <Viewer.Root
-                key={activeEntry.id}
-                text={activeEntry.text}
+                key={viewerEntry.id}
+                text={viewerEntry.text}
                 mediaSrc={
-                  activeEntry.audio_path
-                    ? convertFileSrc(activeEntry.audio_path)
+                  viewerEntry.audio_path
+                    ? convertFileSrc(viewerEntry.audio_path)
                     : null
                 }
                 mediaKind={
                   isVideoMediaKind(
-                    activeEntry.media_kind,
-                    activeEntry.audio_path,
+                    viewerEntry.media_kind,
+                    viewerEntry.audio_path,
                   )
                     ? "video"
                     : "audio"
                 }
-                durationSeconds={activeEntry.duration_seconds}
-                segments={activeEntry.segments}
-                alignment={activeEntry.alignment}
+                durationSeconds={viewerEntry.duration_seconds}
+                segments={viewerEntry.segments}
+                alignment={viewerEntry.alignment}
                 emptyLabel="（空结果）"
               >
                 <Modal.CloseTrigger />
@@ -1035,12 +1056,12 @@ function ResultPhase({
                         <Modal.Heading>转写详情</Modal.Heading>
                         <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted">
                           <span>
-                            {new Date(activeEntry.created_at).toLocaleString()}
+                            {new Date(viewerEntry.created_at).toLocaleString()}
                           </span>
-                          <span>{activeEntry.duration_seconds.toFixed(1)}s</span>
+                          <span>{viewerEntry.duration_seconds.toFixed(1)}s</span>
                           <Chip size="sm" variant="soft" color="default">
                             <Chip.Label>
-                              {activeEntry.language || languageLabel}
+                              {viewerEntry.language || languageLabel}
                             </Chip.Label>
                           </Chip>
                         </div>
@@ -1049,7 +1070,7 @@ function ResultPhase({
                         size="sm"
                         variant="secondary"
                         onPress={() => {
-                          void navigator.clipboard.writeText(activeEntry.text);
+                          void navigator.clipboard.writeText(viewerEntry.text);
                           toast.success("已复制");
                         }}
                       >
