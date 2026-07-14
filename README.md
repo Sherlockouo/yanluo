@@ -52,6 +52,12 @@ pnpm tauri:dev:local  # 启动桌面应用并启用本地 Qwen/MLX 后端
 
 `pnpm tauri:build:local` 产出带本地 Qwen/MLX 后端的 `.app` / `.dmg`，位于 `src-tauri/target/release/bundle/`。
 
+### 如何更新本地asr推理库
+
+```bash
+cd src-tauri && cargo update -p qwen3-asr-rs 2>&1
+```
+
 ## Build Troubleshooting
 
 下面是实际踩过的坑及解决方案，按遇到的可能性排序。
