@@ -1,32 +1,40 @@
 import type { ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
+import {
+  duration,
+  easeOut,
+  revealDelay,
+  useCollapse,
+  useFadeSlide,
+} from "@/lib/motion";
 
 export function PageHeader({
   title,
-  subtitle,
+  status,
   action,
 }: {
   title: string;
-  subtitle?: string;
+  /** One muted status line (hotkey / engine). Prefer over explanatory subtitle. */
+  status?: ReactNode;
   action?: ReactNode;
 }) {
   return (
     <header className="flex items-end gap-4">
       <div className="min-w-0 flex-1">
-        <h1 className="font-display text-[1.75rem] font-semibold tracking-tight text-foreground sm:text-3xl">
-          {title}
-        </h1>
-        {subtitle ? (
-          <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-muted">
-            {subtitle}
-          </p>
-        ) : null}
+        <h1 className="type-display">{title}</h1>
+        {status ? <div className="mt-2 type-meta max-w-xl">{status}</div> : null}
       </div>
       {action ? <div className="shrink-0 pb-0.5">{action}</div> : null}
     </header>
   );
 }
 
+/**
+ * Page enter lives HERE — not around <Outlet />.
+ * Enter-only: no AnimatePresence exit (Outlet is a singleton; exit hangs).
+ */
 export function PageShell({
   children,
   className,
@@ -34,15 +42,21 @@ export function PageShell({
   children: ReactNode;
   className?: string;
 }) {
+  const reduce = useReducedMotion();
+
   return (
-    <section
+    <motion.section
       className={cn(
-        "page-enter mx-auto flex w-full max-w-4xl flex-col gap-7 pb-12",
+        "mx-auto flex w-full max-w-4xl flex-col gap-7 pb-12",
         className,
       )}
+      initial={reduce ? false : { opacity: 0.96, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: duration.normal, ease: easeOut }}
+      style={{ willChange: "opacity, transform" }}
     >
       {children}
-    </section>
+    </motion.section>
   );
 }
 
@@ -55,21 +69,16 @@ export function SectionCard({
   children: ReactNode;
   className?: string;
   title?: string;
+  /** Prefer layout over description; avoid new explanatory copy. */
   description?: string;
 }) {
   return (
     <div className={cn("panel flex flex-col justify-center", className)}>
       {(title || description) && (
         <div className="mb-5">
-          {title ? (
-            <h2 className="text-[15px] font-semibold tracking-tight text-foreground">
-              {title}
-            </h2>
-          ) : null}
+          {title ? <h2 className="type-section">{title}</h2> : null}
           {description ? (
-            <p className="mt-1 text-[13px] leading-relaxed text-muted">
-              {description}
-            </p>
+            <p className="mt-1.5 type-meta">{description}</p>
           ) : null}
         </div>
       )}
@@ -98,11 +107,9 @@ export function EmptyState({
           </div>
         ) : null}
         <div>
-          <p className="text-sm font-medium text-foreground">{title}</p>
+          <p className="type-ui">{title}</p>
           {description ? (
-            <p className="mt-1 text-[13px] leading-relaxed text-muted">
-              {description}
-            </p>
+            <p className="mt-1 type-meta">{description}</p>
           ) : null}
         </div>
         {action}
@@ -126,14 +133,132 @@ export function StatTile({
     <div className="stat-tile">
       <div className="stat-tile-icon">{icon}</div>
       <div className="min-w-0">
-        <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">
-          {label}
-        </div>
-        <div className="mt-1 truncate text-lg font-semibold text-foreground">
-          {value}
-        </div>
-        <div className="truncate text-xs text-muted">{hint}</div>
+        <div className="type-micro">{label}</div>
+        <div className="mt-1 truncate type-section">{value}</div>
+        <div className="truncate type-meta">{hint}</div>
       </div>
     </div>
+  );
+}
+
+/** Shared collapse header — chevron + type-ui. */
+export function CollapseTrigger({
+  open,
+  onToggle,
+  children,
+  className,
+  trailing,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+  className?: string;
+  trailing?: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex w-full items-center gap-2 rounded-xl px-1 py-2 text-left transition hover:bg-default/60",
+        className,
+      )}
+      onClick={onToggle}
+      aria-expanded={open}
+    >
+      <span className="type-ui min-w-0 flex-1">{children}</span>
+      {trailing}
+      <motion.span
+        className="shrink-0 text-muted"
+        animate={{ rotate: open ? 180 : 0 }}
+        transition={{ duration: duration.fast, ease: easeOut }}
+      >
+        <ChevronDown size={16} aria-hidden />
+      </motion.span>
+    </button>
+  );
+}
+
+/** Mutual-exclusive screen modes — opacity + y only. */
+export function ModeSwitch({
+  modeKey,
+  children,
+  className,
+}: {
+  modeKey: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  const fade = useFadeSlide();
+  return (
+    <AnimatePresence mode="sync" initial={false}>
+      <motion.div
+        key={modeKey}
+        className={className}
+        initial={fade.initial}
+        animate={fade.animate}
+        exit={fade.exit}
+        transition={fade.transition}
+        style={{ willChange: "opacity, transform" }}
+      >
+        {children}
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+/** Soft enter for secondary panels / list rows (delay capped). */
+export function Reveal({
+  children,
+  className,
+  index = 0,
+}: {
+  children: ReactNode;
+  className?: string;
+  index?: number;
+}) {
+  const collapse = useCollapse();
+  const reduce = useReducedMotion();
+  const delay = reduce ? 0 : revealDelay(index);
+
+  return (
+    <motion.div
+      className={className}
+      initial={collapse.initial}
+      animate={collapse.animate}
+      exit={collapse.exit}
+      transition={{ ...collapse.transition, delay }}
+      style={{ willChange: "opacity, transform" }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/** Collapsible secondary block (learn / records / advanced). */
+export function SoftCollapse({
+  open,
+  children,
+  className,
+}: {
+  open: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  const collapse = useCollapse();
+  return (
+    <AnimatePresence initial={false}>
+      {open ? (
+        <motion.div
+          className={className}
+          initial={collapse.initial}
+          animate={collapse.animate}
+          exit={collapse.exit}
+          transition={collapse.transition}
+          style={{ willChange: "opacity, transform" }}
+        >
+          {children}
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }

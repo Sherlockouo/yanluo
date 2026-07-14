@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { AnimatePresence, LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import {
   Button,
   Input,
@@ -30,9 +31,11 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
 import { Link } from "react-router-dom";
 import {
+  CollapseTrigger,
   PageHeader,
   PageShell,
   SectionCard,
+  SoftCollapse,
 } from "@/components/shared/page-shell";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/app-context";
@@ -40,8 +43,8 @@ import {
   hotkeySegments,
   LLM_PROVIDER_PRESETS,
   LANGUAGES,
-  TRANSLATE_LANGUAGES,
 } from "@/lib/constants";
+import { navIndicatorTransition, useFade } from "@/lib/motion";
 import type { AsrProvider, HotkeyBinding, LlmProvider } from "@/types";
 import {
   APP_RELEASES_URL,
@@ -203,34 +206,62 @@ export function SettingsPage() {
     }
   };
 
+  const fade = useFade();
+  const reduce = useReducedMotion();
+
   return (
     <PageShell>
-      <PageHeader title="设置" />
+      <PageHeader title="设置" status="常规 · 快捷键 · 权限" />
 
-      <div className="settings-tabs max-w-2xl" role="tablist">
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            className={cn(
-              "settings-tab",
-              tab === item.id && "settings-tab-active",
-            )}
-            onClick={() => selectTab(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      <LayoutGroup id="settings-tabs">
+        <div className="settings-tabs max-w-2xl" role="tablist">
+          {TABS.map((item) => {
+            const active = tab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={cn(
+                  "settings-tab",
+                  active && "settings-tab-active",
+                )}
+                onClick={() => selectTab(item.id)}
+              >
+                {active && !reduce ? (
+                  <motion.span
+                    layoutId="settings-tab-active"
+                    className="settings-tab-indicator"
+                    transition={navIndicatorTransition}
+                  />
+                ) : active ? (
+                  <span className="settings-tab-indicator" />
+                ) : null}
+                <span className="relative z-10">{item.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </LayoutGroup>
 
-      {tab === "general" ? <GeneralPanel /> : null}
-      {tab === "asr" ? <AsrProviderPanel /> : null}
-      {tab === "llm" ? <LlmProviderPanel /> : null}
-      {tab === "hotkeys" ? <HotkeysPanel /> : null}
-      {tab === "permissions" ? <PermissionsPanel /> : null}
-      {tab === "updates" ? <UpdatesPanel /> : null}
+      <AnimatePresence mode="sync" initial={false}>
+        <motion.div
+          key={tab}
+          initial={fade.initial}
+          animate={fade.animate}
+          exit={fade.exit}
+          transition={fade.transition}
+          style={{ willChange: "opacity" }}
+        >
+          {tab === "general" ? <GeneralPanel /> : null}
+          {tab === "asr" ? <AsrProviderPanel /> : null}
+          {tab === "llm" ? <LlmProviderPanel /> : null}
+          {tab === "hotkeys" ? <HotkeysPanel /> : null}
+          {tab === "permissions" ? <PermissionsPanel /> : null}
+          {tab === "updates" ? <UpdatesPanel /> : null}
+        </motion.div>
+      </AnimatePresence>
     </PageShell>
   );
 }
@@ -295,26 +326,12 @@ function AsrProviderPanel() {
           </Select.Popover>
         </Select>
 
-        <p className="text-[12px] leading-relaxed text-muted">
-          型号、下载与 VAD 等在{" "}
+        <p className="text-[12px] text-muted">
           <Link to="/asr" className="text-accent hover:underline">
             ASR 页
-          </Link>{" "}
-          配置。
+          </Link>
+          {" · 型号与 VAD"}
         </p>
-
-        {config.asr_provider === "apple" ? (
-          <p className="text-[13px] text-muted">
-            需授权麦克风与语音识别，见{" "}
-            <Link
-              to="/settings?tab=permissions"
-              className="text-accent hover:underline"
-            >
-              设置 → 权限
-            </Link>
-            。
-          </p>
-        ) : null}
 
         {config.asr_provider === "elevenlabs" ? (
           <div className="flex flex-col gap-4">
@@ -327,15 +344,6 @@ function AsrProviderPanel() {
             >
               <Label>API Key</Label>
               <Input />
-            </TextField>
-            <TextField
-              fullWidth
-              variant="secondary"
-              value={config.elevenlabs_model}
-              onChange={(value) => updateConfig("elevenlabs_model", value)}
-            >
-              <Label>默认 Model</Label>
-              <Input placeholder="scribe_v2" />
             </TextField>
           </div>
         ) : null}
@@ -429,12 +437,11 @@ function LlmProviderPanel() {
         <Input placeholder="可留空（Ollama 等本地服务）" />
       </TextField>
 
-      <p className="text-[12px] leading-relaxed text-muted">
-        模型与 Prompt 在{" "}
+      <p className="text-[12px] text-muted">
         <Link to="/llm" className="text-accent hover:underline">
           LLM 页
-        </Link>{" "}
-        编辑。
+        </Link>
+        {" · 模型与 Prompt"}
       </p>
 
       <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
@@ -448,49 +455,35 @@ function LlmProviderPanel() {
 function GeneralPanel() {
   const { config, updateConfig, saveConfig } = useApp();
 
-
   return (
-    <>
+    <SectionCard className="max-w-2xl flex flex-col gap-6">
+      <Select
+        className="w-full"
+        selectedKey={config.language}
+        onSelectionChange={(key) => {
+          if (key == null) return;
+          updateConfig("language", String(key));
+        }}
+      >
+        <Label>识别语言</Label>
+        <Select.Trigger>
+          <Select.Value />
+          <Select.Indicator />
+        </Select.Trigger>
+        <Select.Popover>
+          <ListBox>
+            {LANGUAGES.map(([value, label]) => (
+              <ListBox.Item key={value} id={value} textValue={label}>
+                {label}
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+            ))}
+          </ListBox>
+        </Select.Popover>
+      </Select>
 
-      <SectionCard className="max-w-2xl flex flex-col gap-5" title="全局语言">
-        <Select
-          className="w-full"
-          selectedKey={config.language}
-          onSelectionChange={(key) => {
-            if (key == null) return;
-            updateConfig("language", String(key));
-          }}
-        >
-          <Label>识别语言</Label>
-          <Select.Trigger>
-            <Select.Value />
-            <Select.Indicator />
-          </Select.Trigger>
-          <Select.Popover>
-            <ListBox>
-              {LANGUAGES.map(([value, label]) => (
-                <ListBox.Item key={value} id={value} textValue={label}>
-                  {label}
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-              ))}
-            </ListBox>
-          </Select.Popover>
-        </Select>
-        <p className="text-[12px] leading-relaxed text-muted">
-          主要说中文时选「简体中文」更稳；「自动」会按系统语言偏置，并推迟锁定英文，减轻开头被听成英文。
-        </p>
-        <Button
-          fullWidth
-          variant="primary"
-          onPress={() => void saveConfig()}
-        >
-          <Save size={16} />
-          保存语言
-        </Button>
-      </SectionCard>
-
-      <SectionCard className="max-w-2xl flex flex-col gap-5" title="录音源">
+      <div className="flex flex-col gap-2">
+        <div className="text-[13px] font-medium text-foreground">录音源</div>
         <div className="grid gap-2">
           {(
             [
@@ -518,21 +511,18 @@ function GeneralPanel() {
             );
           })}
         </div>
-        <Button
-          fullWidth
-          variant="primary"
-          onPress={() => void saveConfig()}
-        >
-          <Save size={16} />
-          保存录音源
-        </Button>
-      </SectionCard>
-    </>
+      </div>
+
+      <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
+        <Save size={16} />
+        保存
+      </Button>
+    </SectionCard>
   );
 }
 
 function HotkeysPanel() {
-  const { config, updateConfig, saveConfig } = useApp();
+  const { config, updateConfig } = useApp();
   const [listening, setListening] = useState<
     null | "transcribe" | "translate" | "cancel"
   >(null);
@@ -663,45 +653,7 @@ function HotkeysPanel() {
         </div>
       </SectionCard>
 
-      <SectionCard className="max-w-2xl flex flex-col gap-5" title="翻译目标语言">
-        <Select
-          className="w-full"
-          selectedKey={config.translate_target_language}
-          onSelectionChange={(key) => {
-            if (key == null) return;
-            const next = {
-              ...config,
-              translate_target_language: String(key),
-            };
-            updateConfig("translate_target_language", String(key));
-            void saveConfig(next, { silent: true });
-          }}
-        >
-          <Label>目标语言</Label>
-          <Select.Trigger>
-            <Select.Value />
-            <Select.Indicator />
-          </Select.Trigger>
-          <Select.Popover>
-            <ListBox>
-              {TRANSLATE_LANGUAGES.map(([value, label]) => (
-                <ListBox.Item key={value} id={value} textValue={`${label} ${value}`}>
-                  <span>{label}</span>
-                  <ListBox.ItemIndicator />
-                </ListBox.Item>
-              ))}
-            </ListBox>
-          </Select.Popover>
-        </Select>
-        <Button
-          fullWidth
-          variant="primary"
-          onPress={() => void saveConfig()}
-        >
-          <Save size={16} />
-          保存
-        </Button>
-      </SectionCard>
+  
     </>
   );
 }
@@ -710,6 +662,7 @@ function PermissionsPanel() {
   const [perms, setPerms] = useState<PermissionStatus | null>(null);
   const [busy, setBusy] = useState<PermKind | null>(null);
   const [hint, setHint] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const lastOpenAt = useRef<Record<string, number>>({});
 
   const refresh = useCallback(async () => {
@@ -768,26 +721,25 @@ function PermissionsPanel() {
 
   const isMac = (perms?.platform ?? "macos") === "macos";
   const exePath = perms?.executable_path;
+  const firstUngranted = PERMS.find((item) => !(perms?.[item.kind] ?? false))
+    ?.kind;
 
   if (!isMac) {
     return (
       <SectionCard title="系统权限" className="max-w-2xl">
-        <p className="text-[13px] text-muted">当前平台无需 macOS 隐私权限。</p>
+        <p className="type-meta">当前平台无需 macOS 隐私权限。</p>
       </SectionCard>
     );
   }
 
   return (
-    <>
-      <SectionCard
-        title="系统权限"
-        description="点「去授权」即可。系统弹窗能完成的不会再强开设置。"
-        className="max-w-2xl"
-      >
+    <div className="flex max-w-2xl flex-col gap-4">
+      <SectionCard title="系统权限">
         <div>
           {PERMS.map((item) => {
             const granted = perms?.[item.kind] ?? false;
             const Icon = item.icon;
+            const isPrimaryCta = !granted && item.kind === firstUngranted;
             return (
               <div key={item.kind} className="perm-row">
                 <div
@@ -801,12 +753,10 @@ function PermissionsPanel() {
                   <Icon size={16} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium text-foreground">
-                    {item.title}
-                  </div>
-                  <div className="mt-0.5 text-[12px] text-muted">{item.blurb}</div>
+                  <div className="type-ui">{item.title}</div>
+                  <div className="mt-0.5 type-meta">{item.blurb}</div>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <div className="flex shrink-0 items-center gap-2">
                   <span
                     className={cn(
                       "perm-status",
@@ -823,26 +773,12 @@ function PermissionsPanel() {
                   {!granted ? (
                     <Button
                       size="sm"
-                      variant="primary"
+                      variant={isPrimaryCta ? "primary" : "secondary"}
+                      className={isPrimaryCta ? "btn-press" : undefined}
                       isDisabled={busy !== null}
                       onPress={() => void authorize(item.kind)}
                     >
                       去授权
-                    </Button>
-                  ) : null}
-                  {!granted ? (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      isDisabled={busy !== null}
-                      onPress={() =>
-                        void openSettingsOnce(item.kind).then(() =>
-                          window.setTimeout(() => void refresh(), 800),
-                        )
-                      }
-                    >
-                      <ExternalLink size={14} />
-                      系统设置
                     </Button>
                   ) : null}
                 </div>
@@ -850,36 +786,46 @@ function PermissionsPanel() {
             );
           })}
         </div>
+        {hint ? (
+          <p className="mt-3 whitespace-pre-wrap type-meta">{hint}</p>
+        ) : null}
       </SectionCard>
 
-      <SectionCard className="max-w-2xl" title="说明">
-        <ul className="flex flex-col gap-2 text-[13px] leading-relaxed text-muted">
-          <li>
-            · 正式签名安装包：麦克风 / 语音识别 / 屏幕录制通常随 Bundle ID
-            保留，重装不必再点允许。
-          </li>
-          <li>
-            · 辅助功能、输入监视由 macOS 按应用路径管理，重装或换路径后需重新打开开关（系统限制，应用无法代记）。
-          </li>
-          <li>
-            · <code className="text-foreground">tauri dev</code>{" "}
-            列表名多为{" "}
-            <code className="text-foreground">asr-workshop</code>
-            ；麦克风等需在打包 .app 中请求。
-          </li>
-        </ul>
-        {exePath ? (
-          <p className="mt-3 break-all rounded-xl border border-border bg-default/40 px-3 py-2 font-mono text-[11px] text-foreground">
-            {exePath}
-          </p>
-        ) : null}
-        {hint ? (
-          <p className="mt-3 whitespace-pre-wrap text-[12px] leading-relaxed text-muted">
-            {hint}
-          </p>
-        ) : null}
-      </SectionCard>
-    </>
+      <div className="rounded-2xl border border-border bg-surface px-3 py-1">
+        <CollapseTrigger
+          open={helpOpen}
+          onToggle={() => setHelpOpen((v) => !v)}
+        >
+          说明
+        </CollapseTrigger>
+        <SoftCollapse open={helpOpen}>
+          <div className="border-t border-border px-1 pb-3 pt-2">
+            <ul className="flex flex-col gap-2 type-meta">
+              <li>· 签名安装包权限随 Bundle ID 保留</li>
+              <li>· 辅助功能 / 输入监视按可执行路径</li>
+            </ul>
+            {exePath ? (
+              <p className="mt-3 break-all rounded-xl border border-border bg-default/40 px-3 py-2 font-mono type-micro !normal-case !tracking-normal text-foreground">
+                {exePath}
+              </p>
+            ) : null}
+            <Button
+              size="sm"
+              variant="secondary"
+              className="mt-3"
+              onPress={() =>
+                void openSettingsOnce("accessibility").then(() =>
+                  window.setTimeout(() => void refresh(), 800),
+                )
+              }
+            >
+              <ExternalLink size={14} />
+              打开系统设置
+            </Button>
+          </div>
+        </SoftCollapse>
+      </div>
+    </div>
   );
 }
 

@@ -81,7 +81,12 @@ export type CharacterAlignment = {
 export type HistoryEntry = {
   id: string;
   text: string;
+  /** ASR raw. */
   raw_text: string;
+  /** After LLM refine; null if LLM skipped. */
+  llm_text?: string | null;
+  /** User gold correction; null until edited. */
+  user_text?: string | null;
   language: string;
   duration_seconds: number;
   created_at: string;
@@ -94,6 +99,14 @@ export type HistoryEntry = {
   source?: string;
   /** Translate target language id (e.g. en-US). Set for translate sessions. */
   translate_target_language?: string | null;
+  /** ASR quality feedback: bad | ok | good. For AI learn/distill. */
+  quality_rating?: "bad" | "ok" | "good" | null;
+  /** RFC3339 when quality_rating was set. */
+  rated_at?: string | null;
+  /** Learn loop: suggested | distilled | applied | skipped. */
+  learn_status?: "suggested" | "distilled" | "applied" | "skipped" | null;
+  /** Terms applied to vocab from this entry. */
+  learn_terms?: string[];
 };
 
 export type FloatingPayload = {
@@ -123,6 +136,8 @@ export type AudioLevelPayload = {
 export type TranscriptionResult = {
   text: string;
   raw_text: string;
+  /** After LLM refine when applicable. */
+  llm_text?: string | null;
   language: string;
   duration_seconds: number;
   refined: boolean;

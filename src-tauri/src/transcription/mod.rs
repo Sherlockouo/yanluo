@@ -17,6 +17,17 @@ use crate::paste::*;
 mod translate_stream;
 pub(crate) use translate_stream::*;
 
+/// Shared blocking HTTP client for LLM calls. Always use a timeout — bare
+/// `Client::new()` can hang forever (Ollama cold load / bad URL) and freeze
+/// any Tauri command that runs on the async runtime without `spawn_blocking`.
+fn llm_http_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(90))
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("LLM HTTP client: {e}"))
+}
+
 pub(crate) fn refine_transcript(config: &AppConfig, input: &str) -> Result<String, String> {
     if !config.llm_enabled {
         return Err("LLM 纠错未启用（LLM 页打开「启用纠错」并保存）".into());
@@ -64,19 +75,44 @@ pub(crate) fn refine_transcript(config: &AppConfig, input: &str) -> Result<Strin
         String::new()
     } else {
         format!(
-            "\n用户词库（必须优先保留这些写法；若出现谐音/近音误识别请改回词库写法）: {}",
+            "\n词库（优先按此写法改回）: {}",
             config.vocabulary.join(", ")
         )
     };
-    const DEFAULT_REFINE: &str = "你是语音识别文本的保守纠错器。只修复明显语音识别错误，尤其是中英文混合场景：中文谐音把英文术语听成汉字（配森->Python、杰森->JSON、麦赛口->MySQL、瑞艾克特->React）。保留中英混杂，不要把英文术语强行译成中文，也不要把中文改成英文。绝对不要润色、补充、总结或删除看起来正确的内容。如果输入看起来正确，必须原样返回。只输出最终文本，不要解释。";
+    // Tuned for small local chat models (esp. qwen3:1.7b): short rules + few-shot.
+    const DEFAULT_REFINE: &str = "\
+任务：修正语音识别(ASR)文本里的明显错误。\n\
+\n\
+规则：\n\
+1. 只改识别错：谐音、同音、英文术语被听成汉字。\n\
+2. 中英混写保持原样；英文术语不要译成中文；正确中文不要改成英文。\n\
+3. 不润色、不扩写、不删正确内容、不总结。\n\
+4. 看不出错误 → 原样输出输入。\n\
+5. 只输出纠错后全文；不要解释、不要引号、不要 <think>。\n\
+\n\
+示例：\n\
+输入：我用配森写了个杰森接口\n\
+输出：我用Python写了个JSON接口\n\
+输入：打开麦赛口数据库\n\
+输出：打开MySQL数据库\n\
+输入：今天开会讨论进度\n\
+输出：今天开会讨论进度";
     let base_prompt = if config.llm_refine_prompt.trim().is_empty() {
         DEFAULT_REFINE
     } else {
         config.llm_refine_prompt.trim()
     };
     let system = format!("{base_prompt}{glossary}");
+    let model_name = config.llm_model.trim();
+    let is_qwen3 = model_name.to_ascii_lowercase().contains("qwen3");
+    // Qwen3 thinking mode pollutes refine output on 1.7b; force no-think.
+    let user_content = if is_qwen3 {
+        format!("纠错下面 ASR 文本：\n---\n{input}\n---\n/no_think")
+    } else {
+        format!("纠错下面 ASR 文本：\n---\n{input}\n---")
+    };
     let request = Request {
-        model: config.llm_model.trim(),
+        model: model_name,
         temperature: 0.0,
         messages: vec![
             Message {
@@ -85,7 +121,7 @@ pub(crate) fn refine_transcript(config: &AppConfig, input: &str) -> Result<Strin
             },
             Message {
                 role: "user",
-                content: input.to_string(),
+                content: user_content,
             },
         ],
     };
@@ -98,7 +134,7 @@ pub(crate) fn refine_transcript(config: &AppConfig, input: &str) -> Result<Strin
         input.chars().count()
     );
     let response = {
-        let client = reqwest::blocking::Client::new();
+        let client = llm_http_client()?;
         let mut req = client.post(&url).json(&request);
         let key = config.llm_api_key.trim();
         if !key.is_empty() {
@@ -106,7 +142,11 @@ pub(crate) fn refine_transcript(config: &AppConfig, input: &str) -> Result<Strin
         }
         req.send().map_err(|e| {
             eprintln!("[llm] refine network error: {e}");
-            e.to_string()
+            if e.is_timeout() {
+                "LLM 请求超时（90s）。检查 Ollama 是否在跑、模型是否已拉取。".into()
+            } else {
+                e.to_string()
+            }
         })?
     };
     let status = response.status();
@@ -125,11 +165,268 @@ pub(crate) fn refine_transcript(config: &AppConfig, input: &str) -> Result<Strin
         .map(|choice| choice.message.content.trim().to_string())
         .filter(|text| !text.is_empty())
         .unwrap_or_else(|| input.to_string());
+    let out = strip_refine_artifacts(&out);
+    let out = if out.is_empty() {
+        input.to_string()
+    } else {
+        out
+    };
     eprintln!(
         "[llm] refine ok: out_chars={} changed={}",
         out.chars().count(),
         out != input
     );
+    Ok(out)
+}
+
+/// Drop Qwen3 think blocks / few-shot label leakage from refine output.
+fn strip_refine_artifacts(text: &str) -> String {
+    let mut s = text.trim().to_string();
+    // <think>...</think> (incl. unclosed)
+    if let Some(start) = s.find("<think>") {
+        if let Some(end) = s.find("</think>") {
+            let after = end + "</think>".len();
+            s = format!("{}{}", &s[..start], &s[after..]);
+        } else {
+            s = s[start + "<think>".len()..].to_string();
+        }
+        s = s.trim().to_string();
+    }
+    for prefix in ["输出：", "输出:", "Output:", "output:"] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            s = rest.trim().to_string();
+            break;
+        }
+    }
+    // Strip wrapping quotes if the whole reply is quoted once.
+    if let Some(inner) = s.strip_prefix('"').and_then(|x| x.strip_suffix('"')) {
+        s = inner.trim().to_string();
+    } else if let Some(inner) = s.strip_prefix('「').and_then(|x| x.strip_suffix('」')) {
+        s = inner.trim().to_string();
+    }
+    s
+}
+
+/// Reject sentence-level / oversized distill lines (align with frontend isTermSized).
+pub(crate) fn accept_distill_term(t: &str) -> bool {
+    let t = t.trim();
+    if t.is_empty() {
+        return false;
+    }
+    let terminators = |s: &str| s.matches(['。', '.', '!', '?', '？']).count();
+    let side_ok = |s: &str| {
+        let n = s.chars().count();
+        n >= 1 && n <= 24 && terminators(s) < 2
+    };
+    if let Some((a, b)) = t.split_once('=') {
+        let a = a.trim();
+        let b = b.trim();
+        return !a.is_empty() && !b.is_empty() && a != b && side_ok(a) && side_ok(b);
+    }
+    side_ok(t) && terminators(t) < 2
+}
+
+/// One ASR → LLM → user learn case (user may be empty → gold = llm).
+#[derive(Clone, Debug)]
+pub(crate) struct LearnCase {
+    pub(crate) asr: String,
+    pub(crate) llm: String,
+    pub(crate) user: String,
+}
+
+/// Distill vocabulary lines from labeled learn cases via LLM.
+/// Returns candidate terms: `wrong=right` or plain hotwords (one per line from model).
+pub(crate) fn distill_learn_from_cases(
+    config: &AppConfig,
+    cases: &[LearnCase],
+) -> Result<Vec<String>, String> {
+    if cases.is_empty() {
+        return Err("没有可学习 case（需用户修正或差评纠错）".into());
+    }
+    if !config.llm_enabled {
+        return Err("LLM 纠错未启用（LLM 页打开「启用纠错」并保存）".into());
+    }
+    if config.llm_api_base_url.trim().is_empty() {
+        return Err("未配置 API Base URL".into());
+    }
+    if config.llm_model.trim().is_empty() {
+        return Err("未配置 Model".into());
+    }
+
+    #[derive(Serialize)]
+    struct Message<'a> {
+        role: &'a str,
+        content: String,
+    }
+    #[derive(Serialize)]
+    struct Request<'a> {
+        model: &'a str,
+        temperature: f32,
+        messages: Vec<Message<'a>>,
+    }
+    #[derive(Deserialize)]
+    struct Response {
+        choices: Vec<Choice>,
+    }
+    #[derive(Deserialize)]
+    struct Choice {
+        message: ResponseMessage,
+    }
+    #[derive(Deserialize)]
+    struct ResponseMessage {
+        content: String,
+    }
+
+    let existing = if config.vocabulary.is_empty() {
+        "(空)".to_string()
+    } else {
+        config.vocabulary.join(", ")
+    };
+
+    let mut body = String::from(
+        "学习 case（ASR → LLM refine → 用户修正；用户修正优先为正确答案）：\n\n",
+    );
+    for (i, c) in cases.iter().take(25).enumerate() {
+        let gold = if !c.user.trim().is_empty() {
+            c.user.trim()
+        } else {
+            c.llm.trim()
+        };
+        body.push_str(&format!(
+            "### {}\nASR: {}\nLLM: {}\n用户: {}\n正确(gold): {}\n\n",
+            i + 1,
+            c.asr.trim(),
+            if c.llm.trim().is_empty() {
+                "(无)"
+            } else {
+                c.llm.trim()
+            },
+            if c.user.trim().is_empty() {
+                "(无)"
+            } else {
+                c.user.trim()
+            },
+            gold,
+        ));
+    }
+    body.push_str(&format!("已有词库（勿重复）：{existing}\n"));
+
+    let system = "你是语音识别纠错学习助手。根据 ASR/LLM/用户 三元组提炼词库短词条。\n\
+优先用「用户」相对 ASR/LLM 的差异；无用户时用 LLM 相对 ASR。\n\
+硬性规则：\n\
+- 只输出词条行，不要编号、解释、markdown、空行说明\n\
+- 每行仅一种：错词=正确（例：配森=Python）或单个热词（例：MySQL）\n\
+- 优先谐音错词：CJK ASR → 正确英文/专有名词\n\
+- 禁止整句、禁止长短语、禁止标点堆砌\n\
+- 单侧长度建议 ≤24 字/词；最多 20 行\n\
+- 已有词库里的不要再输出\n\
+- 无从提炼则输出空";
+
+    let request = Request {
+        model: config.llm_model.trim(),
+        temperature: 0.2,
+        messages: vec![
+            Message {
+                role: "system",
+                content: system.into(),
+            },
+            Message {
+                role: "user",
+                content: body,
+            },
+        ],
+    };
+    let base = config.llm_api_base_url.trim().trim_end_matches('/');
+    let url = format!("{base}/chat/completions");
+    eprintln!(
+        "[llm] distill → POST {} model={} cases={}",
+        url,
+        config.llm_model.trim(),
+        cases.len().min(25)
+    );
+    let response = {
+        let client = llm_http_client()?;
+        let mut req = client.post(&url).json(&request);
+        let key = config.llm_api_key.trim();
+        if !key.is_empty() {
+            req = req.bearer_auth(key);
+        }
+        req.send().map_err(|e| {
+            eprintln!("[llm] distill network error: {e}");
+            if e.is_timeout() {
+                "LLM 请求超时（90s）。检查 Ollama 是否在跑、模型是否已拉取。".into()
+            } else {
+                e.to_string()
+            }
+        })?
+    };
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().unwrap_or_default();
+        eprintln!("[llm] distill HTTP {status}: {body}");
+        return Err(format!("LLM HTTP {status}: {body}"));
+    }
+    let parsed: Response = response.json().map_err(|e| {
+        eprintln!("[llm] distill parse error: {e}");
+        e.to_string()
+    })?;
+    let content = parsed
+        .choices
+        .first()
+        .map(|c| c.message.content.trim().to_string())
+        .unwrap_or_default();
+
+    let existing_set: std::collections::HashSet<String> = config
+        .vocabulary
+        .iter()
+        .map(|t| t.trim().to_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in content.lines() {
+        let mut t = line.trim().to_string();
+        if t.is_empty() {
+            continue;
+        }
+        for prefix in ["- ", "* ", "• "] {
+            if let Some(rest) = t.strip_prefix(prefix) {
+                t = rest.trim().to_string();
+            }
+        }
+        // Strip "1. " / "1) " / "1、"
+        let bytes = t.as_bytes();
+        if !bytes.is_empty() && bytes[0].is_ascii_digit() {
+            let mut i = 0;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            if i < bytes.len() && matches!(bytes[i], b'.' | b')' | b':' | 0xE3) {
+                // Also handle "、" (utf8 e3 80 81) — fall back to char split
+                if let Some(rest) = t
+                    .trim_start_matches(|c: char| c.is_ascii_digit())
+                    .trim_start()
+                    .strip_prefix(['.', ')', ':', '、'])
+                {
+                    t = rest.trim().to_string();
+                }
+            }
+        }
+        let t = t.trim();
+        if !accept_distill_term(t) {
+            continue;
+        }
+        let key = t.to_lowercase();
+        if existing_set.contains(&key) || !seen.insert(key) {
+            continue;
+        }
+        out.push(t.to_string());
+        if out.len() >= 20 {
+            break;
+        }
+    }
+    eprintln!("[llm] distill ok: {} terms", out.len());
     Ok(out)
 }
 
@@ -227,13 +524,19 @@ If the speaker says words like \"translate\" / \"翻译\", translate those words
         ],
     };
     let response = {
-        let client = reqwest::blocking::Client::new();
+        let client = llm_http_client()?;
         let mut req = client.post(&url).json(&request);
         let key = config.llm_api_key.trim();
         if !key.is_empty() {
             req = req.bearer_auth(key);
         }
-        req.send().map_err(|e| e.to_string())?
+        req.send().map_err(|e| {
+            if e.is_timeout() {
+                "LLM 翻译超时（90s）。检查 Ollama 是否在跑、模型是否已拉取。".into()
+            } else {
+                e.to_string()
+            }
+        })?
     };
     if !response.status().is_success() {
         return Err(format!("Translate LLM HTTP {}", response.status()));
@@ -245,6 +548,22 @@ If the speaker says words like \"translate\" / \"翻译\", translate those words
         .map(|choice| choice.message.content.trim().to_string())
         .filter(|text| !text.is_empty())
         .unwrap_or(input))
+}
+
+/// Silence / scrap-segment hallucinations Qwen often emits alone (恩/嗯/uh…).
+/// Only drops when the *entire* piece is filler — never trims real speech tails.
+pub(crate) fn strip_silence_filler(text: &str) -> String {
+    let t = text.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    let core = t.trim_end_matches(['。', '！', '？', '.', '!', '?', '…', ',', '，', ' ']);
+    let lower = core.to_lowercase();
+    match lower.as_str() {
+        "恩" | "嗯" | "啊" | "唔" | "呃" | "唔嗯" | "嗯嗯" | "恩恩" | "嗯哼" | "哼"
+        | "uh" | "um" | "ah" | "oh" | "mm" | "hmm" | "mhm" => String::new(),
+        _ => t.to_string(),
+    }
 }
 
 /// Strip Qwen3-ASR control leftovers before sending text to the translate LLM.
@@ -329,7 +648,8 @@ pub(crate) fn finalize_successful_result(
     samples: Option<&[f32]>,
     audio_path_override: Option<String>,
     media_kind: &str,
-) -> bool {
+) -> Option<bool> {
+    let gen = AsrEngine::finalize_gen(app);
     let source = AsrEngine::session_mode(app);
     let is_transcribe = source == "transcribe";
     let is_translate = source == "translate";
@@ -353,72 +673,46 @@ pub(crate) fn finalize_successful_result(
         }
     }
 
-    if is_translate {
-        // Stream is HUD preview only. Final paste/history always re-translates the
-        // full transcript so partial segments cannot drift or paraphrase badly.
-        let preview = peek_translate_out(app);
-        emit_floating_status(app, true, "refining", &preview, 0.0);
-
-        wait_translate_inflight(app, Duration::from_millis(2500));
-        let (_src_done, out_done) = take_translate_stream(app);
-        if !out_done.is_empty() {
-            emit_floating_status(app, true, "refining", &out_done, 0.0);
-        }
-
-        // Drop ASR control markup before history + LLM (tags confuse models).
-        let source_text = sanitize_asr_for_translate(&result.text);
-        result.text = source_text.clone();
-        result.raw_text = source_text.clone();
-        eprintln!(
-            "[llm] translate finalize full chars={} (stream_preview_chars={})",
-            source_text.chars().count(),
-            out_done.chars().count()
-        );
-        match translate_transcript(&config, &source_text) {
-            Ok(text) => {
-                result.refined = true;
-                result.text = text;
-            }
-            Err(e) => {
-                eprintln!("[llm] translate failed: {e}");
-                if !out_done.is_empty() {
-                    // Degraded: keep streamed preview rather than leaving raw ASR.
-                    result.refined = true;
-                    result.text = out_done;
-                    let _ = app.emit(
-                        "partial-error",
-                        format!("整段翻译失败，已使用流式预览: {e}"),
-                    );
-                } else {
-                    let _ = app.emit("partial-error", format!("翻译失败: {e}"));
-                }
-            }
-        }
-    } else if !is_transcribe
-        && config.llm_enabled
-        && !config.llm_api_base_url.is_empty()
-        && !config.llm_model.is_empty()
-    {
-        // File-tab transcription keeps ASR (+ vocab) only — no LLM refine.
-        // Keep raw text on HUD while refining — empty string would flash blank.
-        emit_floating_status(app, true, "refining", &result.text, 0.0);
-        match refine_transcript(&config, &result.text) {
-            Ok(refined) => {
-                let refined = apply_vocabulary(&refined, &config.vocabulary);
-                result.refined = result.refined || refined != result.text;
-                result.text = refined;
-            }
-            Err(e) => {
-                eprintln!("[llm] refine failed: {e}");
-                let _ = app.emit("partial-error", format!("LLM 纠错失败: {e}"));
-            }
-        }
-    } else if !is_transcribe && config.llm_enabled {
-        eprintln!("[llm] refine skipped: enabled but incomplete config (url/model)");
+    if AsrEngine::finalize_aborted(app, gen) {
+        eprintln!("[asr] finalize aborted before paste (gen={gen})");
+        return None;
     }
 
-    // Push refined (or final) text to HUD immediately so the capsule updates
-    // before paste / history work. Callers may defer hide via finish_floating_hud.
+    if is_translate {
+        // Fn/⇧Fn release = accept what's on HUD now. Take stream preview;
+        // bump epoch so late in-flight segment translates are dropped.
+        // No full-document translate_transcript — that was the slow "subsequent op".
+        let preview = peek_translate_out(app);
+        emit_floating_status(app, true, "processing", &preview, 0.0);
+        let (_src_done, out_done) = take_translate_stream(app);
+        let source_text = sanitize_asr_for_translate(&result.text);
+        result.raw_text = source_text.clone();
+        if !out_done.is_empty() {
+            result.refined = true;
+            result.llm_text = Some(out_done.clone());
+            result.text = out_done;
+            eprintln!(
+                "[llm] translate accept stream preview chars={} (asr_chars={})",
+                result.text.chars().count(),
+                source_text.chars().count()
+            );
+        } else {
+            // No streamed preview yet — paste sanitized ASR, no LLM round-trip.
+            result.text = source_text;
+            eprintln!(
+                "[llm] translate accept ASR fallback chars={} (no stream preview)",
+                result.text.chars().count()
+            );
+        }
+    }
+    // Fn mode: paste current ASR (+ vocab). No LLM refine — release = accept.
+
+    if AsrEngine::finalize_aborted(app, gen) {
+        eprintln!("[asr] finalize aborted after prepare (gen={gen})");
+        return None;
+    }
+
+    // Push text to HUD immediately so the capsule updates before paste / history.
     if is_transcribe {
         emit_floating_status(app, false, "processing", &result.text, 0.0);
     } else {
@@ -439,6 +733,13 @@ pub(crate) fn finalize_successful_result(
                 );
             }
         }
+    }
+
+    if AsrEngine::finalize_aborted(app, gen) {
+        // Already pasted — keep text; skip history rewrite / result emit.
+        eprintln!("[asr] finalize aborted after paste (gen={gen}) — keeping pasted text");
+        emit_floating_status(app, false, "idle", "", 0.0);
+        return None;
     }
 
     let audio_path = if is_transcribe {
@@ -466,7 +767,7 @@ pub(crate) fn finalize_successful_result(
         None
     };
 
-    // If LLM/vocab changed text after alignment, drop stale timings.
+    // If vocab changed text after alignment, drop stale timings.
     // Transcribe tab keeps 逐字稿 (word/char highlight) — never strip timings.
     if !is_transcribe
         && result.refined
@@ -479,18 +780,23 @@ pub(crate) fn finalize_successful_result(
 
     append_history(app, result, &source, audio_path, media_kind);
 
+    if AsrEngine::finalize_aborted(app, gen) {
+        eprintln!("[asr] finalize aborted after history (gen={gen})");
+        emit_floating_status(app, false, "idle", "", 0.0);
+        return None;
+    }
+
     // Fn/translate: hold green success on the capsule, then hide.
-    // Returns true when the caller must NOT emit idle immediately.
+    // Some(true) = caller must NOT emit idle immediately.
     if !is_transcribe {
         if !result.text.trim().is_empty() {
-            // Short enough to read the green flash; HUD stays green until idle.
             schedule_floating_idle(app, 700);
         } else {
             emit_floating_status(app, false, "idle", "", 0.0);
         }
-        return true;
+        return Some(true);
     }
-    false
+    Some(false)
 }
 
 /// Hide the HUD after `delay_ms`, unless a new recording/refine session started.
@@ -579,6 +885,7 @@ pub(crate) fn transcribe_with_elevenlabs(config: &AppConfig, samples: &[f32]) ->
     Ok(TranscriptionResult {
         text: text.clone(),
         raw_text: text,
+        llm_text: None,
         language: parsed
             .language_code
             .unwrap_or_else(|| config.language.clone()),
@@ -619,6 +926,7 @@ pub(crate) fn transcribe_with_apple_speech(config: &AppConfig, samples: &[f32]) 
     Ok(TranscriptionResult {
                         text: text.clone(),
                         raw_text: text,
+                        llm_text: None,
                         language: config.language.clone(),
                         duration_seconds: samples.len() as f64 / 16_000.0,
                         refined: false,
@@ -804,14 +1112,23 @@ pub(crate) fn transcribe_file_samples(
     let chunk_len = (FILE_CHUNK_SEC * 16_000.0) as usize;
     let overlap = (FILE_CHUNK_OVERLAP_SEC * 16_000.0) as usize;
     let step = chunk_len.saturating_sub(overlap).max(1);
+    let mut qwen_lang_owned: Option<String> = qwen_lang.map(|s| s.to_string());
+    let mut align_lang_owned = align_lang.to_string();
 
     // Short / medium: single pass (max_new_tokens now scales with duration).
     if samples.len() <= chunk_len {
-        return match inference.transcribe_samples(samples, qwen_lang) {
+        return match inference.transcribe_samples(samples, qwen_lang_owned.as_deref()) {
             Ok(r) => {
+                let detected_align = align_lang_from_text(fallback_language, &r.text);
+                if align_lang_owned.eq_ignore_ascii_case("Chinese")
+                    && detected_align.eq_ignore_ascii_case("English")
+                {
+                    align_lang_owned = detected_align;
+                }
                 let mut result = TranscriptionResult {
                     text: r.text.clone(),
                     raw_text: r.text,
+                    llm_text: None,
                     language: r.language,
                     duration_seconds: r.duration_seconds,
                     refined: false,
@@ -819,12 +1136,13 @@ pub(crate) fn transcribe_file_samples(
                     segments: Vec::new(),
                     alignment: None,
                 };
-                maybe_align_chunk(aligner, samples, &mut result, align_lang, 0.0);
+                maybe_align_chunk(aligner, samples, &mut result, &align_lang_owned, 0.0);
                 result
             }
             Err(e) => TranscriptionResult {
                 text: String::new(),
                 raw_text: String::new(),
+                llm_text: None,
                 language: fallback_language.to_string(),
                 duration_seconds: duration,
                 refined: false,
@@ -852,20 +1170,41 @@ pub(crate) fn transcribe_file_samples(
         let offset = start as f64 / 16_000.0;
         chunk_i += 1;
         eprintln!(
-            "[mlx-worker] file chunk #{chunk_i}: {:.1}s–{:.1}s",
+            "[mlx-worker] file chunk #{chunk_i}: {:.1}s–{:.1}s lang={:?}",
             offset,
-            end as f64 / 16_000.0
+            end as f64 / 16_000.0,
+            qwen_lang_owned
         );
 
-        match inference.transcribe_samples(chunk, qwen_lang) {
+        match inference.transcribe_samples(chunk, qwen_lang_owned.as_deref()) {
             Ok(r) => {
                 if !r.language.is_empty() {
-                    language = r.language;
+                    language = r.language.clone();
+                    // Lock subsequent chunks to detected language so English
+                    // stays spaced (auto+zh-OS otherwise drifts to Chinese style).
+                    if qwen_lang_owned.is_none() {
+                        let lower = r.language.to_ascii_lowercase();
+                        if lower.contains("english") {
+                            qwen_lang_owned = Some("english".into());
+                            align_lang_owned = "English".into();
+                        } else if lower.contains("chinese") {
+                            qwen_lang_owned = Some("chinese".into());
+                            align_lang_owned = "Chinese".into();
+                        }
+                    }
+                } else {
+                    let detected = align_lang_from_text(fallback_language, &r.text);
+                    if detected.eq_ignore_ascii_case("English") {
+                        align_lang_owned = detected;
+                        if qwen_lang_owned.is_none() {
+                            qwen_lang_owned = Some("english".into());
+                        }
+                    }
                 }
                 let text = r.text.trim().to_string();
                 if !text.is_empty() {
                     if let Some(align) = aligner.as_mut() {
-                        match align.align_samples(chunk, &text, align_lang) {
+                        match align.align_samples(chunk, &text, &align_lang_owned) {
                             Ok(aligned) => {
                                 for item in aligned.items {
                                     all_segments.push(TranscriptSegment {
@@ -887,12 +1226,9 @@ pub(crate) fn transcribe_file_samples(
             }
             Err(e) => {
                 let mut partial = TranscriptionResult {
-                    text: texts.join(if align_lang.eq_ignore_ascii_case("English") {
-                        " "
-                    } else {
-                        ""
-                    }),
+                    text: texts.join(join_sep_for_align_lang(&align_lang_owned)),
                     raw_text: String::new(),
+                    llm_text: None,
                     language,
                     duration_seconds: duration,
                     refined: false,
@@ -912,15 +1248,12 @@ pub(crate) fn transcribe_file_samples(
         start += step;
     }
 
-    let join_sep = if align_lang.eq_ignore_ascii_case("English") {
-        " "
-    } else {
-        ""
-    };
+    let join_sep = join_sep_for_align_lang(&align_lang_owned);
     let text = texts.join(join_sep);
     let mut result = TranscriptionResult {
         text: text.clone(),
         raw_text: text,
+        llm_text: None,
         language,
         duration_seconds: duration,
         refined: false,
@@ -988,6 +1321,39 @@ pub(crate) fn language_for_align(language: &str) -> String {
     }
 }
 
+/// Pick ForcedAligner / chunk-join language from transcript script when UI is `auto`.
+pub(crate) fn align_lang_from_text(configured: &str, text: &str) -> String {
+    let configured = configured.trim();
+    if !configured.is_empty() && !configured.eq_ignore_ascii_case("auto") {
+        return language_for_align(configured);
+    }
+    let mut latin = 0usize;
+    let mut cjk = 0usize;
+    for ch in text.chars() {
+        if ch.is_ascii_alphabetic() {
+            latin += 1;
+        } else {
+            let code = ch as u32;
+            if (0x4E00..=0x9FFF).contains(&code) {
+                cjk += 1;
+            }
+        }
+    }
+    if latin > cjk.saturating_mul(2) {
+        "English".into()
+    } else {
+        "Chinese".into()
+    }
+}
+
+fn join_sep_for_align_lang(align_lang: &str) -> &'static str {
+    if align_lang.eq_ignore_ascii_case("English") {
+        " "
+    } else {
+        ""
+    }
+}
+
 pub(crate) fn normalize_language_for_elevenlabs(language: &str) -> String {
     match language {
         "auto" | "" => "zh".into(),
@@ -1016,9 +1382,9 @@ pub(crate) fn language_for_qwen(language: &str) -> Option<String> {
 }
 
 /// When UI language is `auto`, bias from the OS primary locale.
-/// Short first chunks often emit `language English` for Chinese speech; a soft
-/// prior avoids that without requiring the user to pick 简体中文.
+/// Soft prior only — do NOT hard-lock streaming with this (see mlx_worker).
 #[cfg(feature = "qwen-local")]
+#[allow(dead_code)]
 pub(crate) fn resolve_qwen_language(configured: Option<&str>) -> Option<String> {
     if let Some(lang) = configured.and_then(language_for_qwen) {
         return Some(lang);
@@ -1027,6 +1393,7 @@ pub(crate) fn resolve_qwen_language(configured: Option<&str>) -> Option<String> 
 }
 
 #[cfg(feature = "qwen-local")]
+#[allow(dead_code)]
 fn os_asr_language_hint() -> Option<&'static str> {
     #[cfg(target_os = "macos")]
     {
@@ -1192,14 +1559,18 @@ pub(crate) fn apply_vocabulary(text: &str, vocabulary: &[String]) -> String {
 // ---------------------------------------------------------------------------
 
 #[cfg(feature = "qwen-local")]
-pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<AtomicBool>) {
+pub(crate) fn mlx_worker(
+    rx: Receiver<WorkerCommand>,
+    app: AppHandle,
+    model_loaded: Arc<AtomicBool>,
+    recording: Arc<AtomicBool>,
+    cancel_requested: Arc<AtomicBool>,
+) {
     qwen3_asr_rs::backend::mlx::stream::init_mlx(true);
     eprintln!("[mlx-worker] MLX initialized, waiting for commands...");
 
     let mut inference: Option<qwen3_asr_rs::inference::AsrInference> = None;
     let mut aligner: Option<qwen3_asr_rs::align::AlignInference> = None;
-    let recording = app.state::<AsrEngine>().inner().recording.clone();
-    let cancel_requested = app.state::<AsrEngine>().inner().cancel_requested.clone();
 
     while let Ok(cmd) = rx.recv() {
         match cmd {
@@ -1302,9 +1673,16 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                 );
 
                 let configured_lang = language.as_deref();
-                let mut sticky_qwen_lang = resolve_qwen_language(configured_lang);
+                // Only hard-lock when user picks a language. `auto` must stay
+                // unlocked so sticky_language_decision can switch to English —
+                // OS zh hint as hard lock made English come out spaceless.
                 let user_forced_lang = configured_lang.and_then(language_for_qwen).is_some();
-                let mut lang_locked = sticky_qwen_lang.is_some();
+                let mut sticky_qwen_lang = if user_forced_lang {
+                    configured_lang.and_then(language_for_qwen)
+                } else {
+                    None
+                };
+                let mut lang_locked = user_forced_lang;
                 eprintln!(
                     "[mlx-worker] asr language: config={} → qwen={:?} (locked={})",
                     configured_lang.unwrap_or("auto"),
@@ -1317,10 +1695,12 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                      context: &str,
                      lang: Option<&str>|
                      -> Option<qwen3_asr_rs::inference::StreamingState> {
-                        let ctx = if context.trim().is_empty() || max_context_tokens == 0 {
+                        // Finished sentences as decode prefix → immediate EOS on next seg.
+                        let hint = cross_seg_decode_prefix(context, max_context_tokens.saturating_mul(2));
+                        let ctx = if hint.is_empty() || max_context_tokens == 0 {
                             None
                         } else {
-                            Some(context)
+                            Some(hint.as_str())
                         };
                         match inf.init_streaming_with_context(
                             lang,
@@ -1332,7 +1712,11 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                                 if ctx.is_some() || lang.is_some() {
                                     eprintln!(
                                         "[mlx-worker] init_streaming lang={lang:?} context_chars={}",
-                                        context.chars().count()
+                                        hint.chars().count()
+                                    );
+                                } else if !context.trim().is_empty() && max_context_tokens > 0 {
+                                    eprintln!(
+                                        "[mlx-worker] init_streaming lang={lang:?} context skipped (finished sentence)"
                                     );
                                 }
                                 Some(s)
@@ -1374,6 +1758,9 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                 let mut segment_index = 0usize;
                 let mut partial_count = 0usize;
                 let mut last_language = String::new();
+                // Consecutive warm empties → drop cross-seg context and re-init once.
+                let mut empty_active_streak = 0usize;
+                let mut context_rescue_used = false;
                 // Cold archive of drained PCM (for final align / duration).
                 let mut archived_pcm: Vec<f32> = Vec::new();
 
@@ -1406,18 +1793,55 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                             return true;
                         }
                         let seg = &samples[start..end];
+                        let seg_secs = seg.len() as f64 / 16000.0;
                         eprintln!(
                             "[mlx-worker] commit segment ({reason}): {:.1}s–{:.1}s ({:.1}s)",
                             start as f64 / 16000.0,
                             end as f64 / 16000.0,
-                            seg.len() as f64 / 16000.0
+                            seg_secs
                         );
+                        // Tiny post-silence / stop scraps → Qwen hallucinates fillers (恩/嗯).
+                        const MIN_COMMIT_SECS: f64 = 0.35;
+                        if seg_secs < MIN_COMMIT_SECS {
+                            eprintln!(
+                                "[mlx-worker] commit skipped: segment too short ({seg_secs:.2}s < {MIN_COMMIT_SECS})"
+                            );
+                            if !active_text.trim().is_empty() {
+                                append_segment_text(
+                                    committed_text,
+                                    &strip_silence_filler(active_text),
+                                );
+                            }
+                            active_text.clear();
+                            return true;
+                        }
                         match inf.streaming_transcribe(seg, stream_state) {
                             Ok(r) => {
                                 if !r.language.is_empty() {
                                     *last_language = r.language;
                                 }
-                                append_segment_text(committed_text, &r.text);
+                                // Final decode empty but we still have a live hypothesis —
+                                // keep it rather than dropping a whole spoken segment.
+                                if r.text.trim().is_empty() && !active_text.trim().is_empty() {
+                                    eprintln!(
+                                        "[mlx-worker] commit empty decode; keeping active_len={}",
+                                        active_text.len()
+                                    );
+                                    append_segment_text(
+                                        committed_text,
+                                        &strip_silence_filler(active_text),
+                                    );
+                                } else {
+                                    let cleaned = strip_silence_filler(&r.text);
+                                    if cleaned.is_empty() && !active_text.trim().is_empty() {
+                                        append_segment_text(
+                                            committed_text,
+                                            &strip_silence_filler(active_text),
+                                        );
+                                    } else {
+                                        append_segment_text(committed_text, &cleaned);
+                                    }
+                                }
                                 active_text.clear();
                                 true
                             }
@@ -1426,7 +1850,10 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                                 let _ = app.emit("partial-error", &format!("segment commit: {e}"));
                                 // Keep last active hypothesis if final failed.
                                 if !active_text.is_empty() {
-                                    append_segment_text(committed_text, active_text);
+                                    append_segment_text(
+                                        committed_text,
+                                        &strip_silence_filler(active_text),
+                                    );
                                     active_text.clear();
                                 }
                                 false
@@ -1475,6 +1902,8 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                                     seg_start = Some(start_sample);
                                     last_partial_abs = start_sample;
                                     active_text.clear();
+                                    empty_active_streak = 0;
+                                    context_rescue_used = false;
                                     eprintln!(
                                         "[mlx-worker] segment #{} open @ {:.1}s",
                                         segment_index,
@@ -1664,7 +2093,18 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                             }
 
                             if recording.load(Ordering::Acquire) {
-                                active_text = r.text;
+                                let cleaned = strip_silence_filler(&r.text);
+                                if !cleaned.is_empty() {
+                                    active_text = cleaned;
+                                    empty_active_streak = 0;
+                                } else {
+                                    // Empty or filler-only (嗯/恩) — never park that on HUD.
+                                    if strip_silence_filler(&active_text).is_empty() {
+                                        active_text.clear();
+                                    }
+                                    empty_active_streak =
+                                        empty_active_streak.saturating_add(1);
+                                }
                                 let warm = streaming_hypothesis_warm(
                                     stream_state.chunk_id,
                                     stream_state.unfixed_chunk_num,
@@ -1691,6 +2131,54 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                                         last_language,
                                         stream_state.chunk_id
                                     );
+                                }
+
+                                // Context-poison rescue: warm empties with growing audio →
+                                // re-init without cross-seg prefix and re-decode once.
+                                if warm
+                                    && !context_rescue_used
+                                    && empty_active_streak >= 3
+                                    && seg_secs >= 3.0
+                                    && active_text.trim().is_empty()
+                                {
+                                    context_rescue_used = true;
+                                    empty_active_streak = 0;
+                                    eprintln!(
+                                        "[mlx-worker] empty-active rescue: re-init without context (seg#{segment_index} {seg_secs:.1}s)"
+                                    );
+                                    if let Some(s) = open_stream(
+                                        inf,
+                                        "",
+                                        sticky_qwen_lang.as_deref(),
+                                    ) {
+                                        stream_state = s;
+                                        match inf.streaming_transcribe_partial(
+                                            seg_pcm,
+                                            &mut stream_state,
+                                        ) {
+                                            Ok(r2) => {
+                                                if !r2.language.is_empty() {
+                                                    last_language = r2.language.clone();
+                                                }
+                                                let cleaned2 = strip_silence_filler(&r2.text);
+                                                if !cleaned2.is_empty() {
+                                                    active_text = cleaned2;
+                                                    empty_active_streak = 0;
+                                                    emit_partial(
+                                                        &app,
+                                                        &committed_text,
+                                                        &active_text,
+                                                        segment_index,
+                                                    );
+                                                }
+                                            }
+                                            Err(e) => {
+                                                eprintln!(
+                                                    "[mlx-worker] empty-active rescue decode failed: {e}"
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1757,6 +2245,7 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                                 &TranscriptionResult {
                                     text: String::new(),
                                     raw_text: String::new(),
+                                    llm_text: None,
                                     language: String::new(),
                                     duration_seconds: 0.0,
                                     refined: false,
@@ -1783,6 +2272,13 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                     continue;
                 }
 
+                let finalize_gen = AsrEngine::finalize_gen(&app);
+                if AsrEngine::finalize_aborted(&app, finalize_gen) {
+                    eprintln!("[mlx-worker] finalize gen stale before commit — suppress");
+                    emit_floating_status(&app, false, "idle", "", 0.0);
+                    continue;
+                }
+
                 let duration = samples.len() as f64 / 16000.0;
                 eprintln!(
                     "[mlx-worker] final: {:.1}s audio (archive+hot), {} segments committed",
@@ -1806,13 +2302,14 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                         );
                     }
                 } else if !active_text.is_empty() {
-                    append_segment_text(&mut committed_text, &active_text);
+                    append_segment_text(&mut committed_text, &strip_silence_filler(&active_text));
                     active_text.clear();
                 }
 
                 let mut result = TranscriptionResult {
                     text: committed_text.clone(),
                     raw_text: committed_text.clone(),
+                    llm_text: None,
                     language: last_language.clone(),
                     duration_seconds: duration,
                     refined: false,
@@ -1849,18 +2346,31 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                 }
 
                 if result.error.is_none() {
-                    let hud_done = finalize_successful_result(
+                    if AsrEngine::finalize_aborted(&app, finalize_gen) {
+                        eprintln!("[mlx-worker] aborted before finalize — suppress result");
+                        emit_floating_status(&app, false, "idle", "", 0.0);
+                        continue;
+                    }
+                    match finalize_successful_result(
                         &app,
                         &mut result,
                         Some(&samples),
                         None,
                         "audio",
-                    );
-                    if !hud_done {
-                        emit_floating_status(&app, false, "idle", "", 0.0);
+                    ) {
+                        None => {
+                            eprintln!("[mlx-worker] finalize aborted — suppress transcription-result");
+                            continue;
+                        }
+                        Some(false) => emit_floating_status(&app, false, "idle", "", 0.0),
+                        Some(true) => {}
                     }
                 } else {
                     emit_floating_status(&app, false, "idle", "", 0.0);
+                }
+
+                if AsrEngine::finalize_aborted(&app, finalize_gen) {
+                    continue;
                 }
 
                 eprintln!(
@@ -1872,9 +2382,10 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                 let _ = app.emit("transcription-result", &result);
             }
 
-            WorkerCommand::TranscribeFile { path } => {
+            WorkerCommand::TranscribeFile { path, media_kind: kind_override } => {
                 AsrEngine::set_session_mode(&app, "transcribe");
-                let (saved, media_kind) = match persist_media_for_playback(&path) {
+                let (saved, media_kind) =
+                    match persist_media_for_playback(&path, kind_override.as_deref()) {
                     Ok(v) => v,
                     Err(e) => {
                         let _ = app.emit(
@@ -1882,6 +2393,7 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                             &TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
+                        llm_text: None,
                         language: String::new(),
                         duration_seconds: 0.0,
                         refined: false,
@@ -1901,6 +2413,7 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                             &TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
+                        llm_text: None,
                         language: String::new(),
                         duration_seconds: 0.0,
                         refined: false,
@@ -1938,6 +2451,7 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                     None => TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
+                        llm_text: None,
                         language: String::new(),
                         duration_seconds: duration,
                         refined: false,
@@ -1964,7 +2478,13 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
 }
 
 #[cfg(not(feature = "qwen-local"))]
-pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_loaded: Arc<AtomicBool>) {
+pub(crate) fn mlx_worker(
+    rx: Receiver<WorkerCommand>,
+    app: AppHandle,
+    model_loaded: Arc<AtomicBool>,
+    _recording: Arc<AtomicBool>,
+    _cancel_requested: Arc<AtomicBool>,
+) {
     eprintln!("[mlx-worker] qwen-local feature disabled; MLX backend not compiled");
     while let Ok(cmd) = rx.recv() {
         match cmd {
@@ -1981,6 +2501,7 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                     &TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
+                        llm_text: None,
                         language: String::new(),
                         duration_seconds: 0.0,
                         refined: false,
@@ -1996,6 +2517,7 @@ pub(crate) fn mlx_worker(rx: Receiver<WorkerCommand>, app: AppHandle, model_load
                     &TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
+                        llm_text: None,
                         language: String::new(),
                         duration_seconds: 0.0,
                         refined: false,
@@ -2041,6 +2563,9 @@ impl PartialResult {
 pub(crate) struct TranscriptionResult {
     pub(crate) text: String,
     pub(crate) raw_text: String,
+    /// After LLM refine (+ post-vocab). None if LLM did not run.
+    #[serde(default)]
+    pub(crate) llm_text: Option<String>,
     pub(crate) language: String,
     pub(crate) duration_seconds: f64,
     pub(crate) refined: bool,
@@ -2055,7 +2580,7 @@ pub(crate) struct TranscriptionResult {
 
 #[cfg(test)]
 mod sanitize_asr_tests {
-    use super::sanitize_asr_for_translate;
+    use super::{sanitize_asr_for_translate, strip_silence_filler};
 
     #[test]
     fn strips_mid_string_tags_and_keeps_all_speech() {
@@ -2077,6 +2602,52 @@ Just vaguely in general, we feature the Apple II. language English";
             sanitize_asr_for_translate("Hello, world."),
             "Hello, world."
         );
+    }
+
+    #[test]
+    fn silence_filler_dropped() {
+        assert!(strip_silence_filler("恩").is_empty());
+        assert!(strip_silence_filler("嗯。").is_empty());
+        assert!(strip_silence_filler("  uh  ").is_empty());
+        assert_eq!(strip_silence_filler("你好吗"), "你好吗");
+        assert_eq!(strip_silence_filler("恩然后呢"), "恩然后呢");
+    }
+}
+
+#[cfg(test)]
+mod refine_artifact_tests {
+    use super::strip_refine_artifacts;
+
+    #[test]
+    fn strips_think_and_output_label() {
+        let raw = "<think>hmm</think>\n输出：我用Python写代码";
+        assert_eq!(strip_refine_artifacts(raw), "我用Python写代码");
+    }
+
+    #[test]
+    fn strips_quotes() {
+        assert_eq!(strip_refine_artifacts("\"hello\""), "hello");
+    }
+}
+
+#[cfg(test)]
+mod distill_term_tests {
+    use super::accept_distill_term;
+
+    #[test]
+    fn accepts_homophone_pair() {
+        assert!(accept_distill_term("配森=Python"));
+        assert!(accept_distill_term("MySQL"));
+    }
+
+    #[test]
+    fn rejects_sentence_pairs() {
+        assert!(!accept_distill_term(
+            "今天天气不错。真的。=今天天气很好。是的。"
+        ));
+        assert!(!accept_distill_term(
+            "这是一段非常非常非常非常非常非常非常非常非常非常长的识别错误句子=短"
+        ));
     }
 }
 

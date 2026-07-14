@@ -173,6 +173,147 @@ pub(crate) fn delete_history_entry(id: String, engine: State<'_, AsrEngine>) -> 
     delete_history_entry_by_id(&mut history, &id)
 }
 
+/// Rate ASR quality on a history entry: "bad" | "ok" | "good" (empty clears).
+#[tauri::command]
+pub(crate) fn rate_history_entry(
+    id: String,
+    rating: String,
+    engine: State<'_, AsrEngine>,
+) -> Result<bool, String> {
+    let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
+    rate_history_entry_by_id(&mut history, &id, &rating)
+}
+
+/// Save user gold correction for learn/few-shot.
+#[tauri::command]
+pub(crate) fn set_history_user_text(
+    id: String,
+    user_text: String,
+    engine: State<'_, AsrEngine>,
+) -> Result<bool, String> {
+    let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
+    set_history_user_text_by_id(&mut history, &id, &user_text)
+}
+
+/// Mark learn_status: "suggested" | "distilled" | "applied" | "skipped" (empty clears).
+#[tauri::command]
+pub(crate) fn mark_history_learn_status(
+    id: String,
+    status: String,
+    engine: State<'_, AsrEngine>,
+) -> Result<bool, String> {
+    let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
+    mark_history_learn_status_by_id(&mut history, &id, &status)
+}
+
+/// Mark learn_status on many history entries.
+#[tauri::command]
+pub(crate) fn mark_history_learn_status_batch(
+    ids: Vec<String>,
+    status: String,
+    engine: State<'_, AsrEngine>,
+) -> Result<usize, String> {
+    let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
+    mark_history_learn_status_many(&mut history, &ids, &status)
+}
+
+/// Merge terms into vocabulary and mark entries learn_status=applied.
+#[tauri::command]
+pub(crate) fn apply_learned_terms(
+    app: AppHandle,
+    ids: Vec<String>,
+    terms: Vec<String>,
+    engine: State<'_, AsrEngine>,
+) -> Result<Vec<String>, String> {
+    let vocabulary = {
+        let mut config = engine.inner().config.lock().map_err(|e| e.to_string())?;
+        let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
+        apply_learned_terms_to_state(&mut config, &mut history, &ids, &terms)?
+    };
+    let config = engine
+        .inner()
+        .config
+        .lock()
+        .map(|c| c.clone())
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("config-updated", &config);
+    Ok(vocabulary)
+}
+
+fn eligible_for_distill(e: &HistoryEntry) -> bool {
+    if (e.source.as_str() == "translate") {
+        return false;
+    }
+    let asr = e.raw_text.trim();
+    if asr.is_empty() {
+        return false;
+    }
+    let gold = learn_gold_text(e).trim();
+    if gold.is_empty() || gold == asr {
+        // Need a correction signal: user adjust and/or llm diff + bad rating
+        return false;
+    }
+    // Prefer user-adjusted; otherwise require bad rating + refined.
+    let has_user = e
+        .user_text
+        .as_deref()
+        .map(|t| !t.trim().is_empty() && t.trim() != asr)
+        .unwrap_or(false);
+    if !has_user {
+        if !e.refined || e.quality_rating.as_deref() != Some("bad") {
+            return false;
+        }
+    }
+    match e.learn_status.as_deref() {
+        Some("applied") | Some("skipped") => false,
+        _ => true,
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct DistillLearnResult {
+    pub(crate) terms: Vec<String>,
+    pub(crate) source_ids: Vec<String>,
+}
+
+/// AI distill vocabulary from history entries rated `bad` (not yet applied/distilled).
+#[tauri::command]
+pub(crate) async fn distill_learn_from_ratings(
+    engine: State<'_, AsrEngine>,
+) -> Result<DistillLearnResult, String> {
+    let config = engine
+        .inner()
+        .config
+        .lock()
+        .map(|c| c.clone())
+        .map_err(|e| e.to_string())?;
+    let history = engine
+        .inner()
+        .history
+        .lock()
+        .map(|h| h.clone())
+        .map_err(|e| e.to_string())?;
+
+    let eligible: Vec<&HistoryEntry> = history.iter().filter(|e| eligible_for_distill(e)).collect();
+    let source_ids: Vec<String> = eligible.iter().map(|e| e.id.clone()).collect();
+    let cases: Vec<LearnCase> = eligible
+        .iter()
+        .map(|e| LearnCase {
+            asr: e.raw_text.clone(),
+            llm: e.llm_text.clone().unwrap_or_default(),
+            user: e.user_text.clone().unwrap_or_default(),
+        })
+        .collect();
+
+    let terms = tauri::async_runtime::spawn_blocking(move || {
+        distill_learn_from_cases(&config, &cases)
+    })
+    .await
+    .map_err(|e| format!("学习提炼任务失败: {e}"))??;
+
+    Ok(DistillLearnResult { terms, source_ids })
+}
+
 /// Keep the newest `keep` entries; drop the rest. `keep=0` clears all.
 #[tauri::command]
 pub(crate) fn prune_history(keep: usize, engine: State<'_, AsrEngine>) -> Result<usize, String> {
@@ -209,7 +350,10 @@ pub(crate) fn prune_history_older_than(days: u64, engine: State<'_, AsrEngine>) 
 }
 
 #[tauri::command]
-pub(crate) fn test_llm_refinement(text: String, engine: State<'_, AsrEngine>) -> Result<String, String> {
+pub(crate) async fn test_llm_refinement(
+    text: String,
+    engine: State<'_, AsrEngine>,
+) -> Result<String, String> {
     let config = engine
         .inner()
         .config
@@ -235,7 +379,10 @@ pub(crate) fn test_llm_refinement(text: String, engine: State<'_, AsrEngine>) ->
             "(set)"
         }
     );
-    refine_transcript(&config, &text)
+    // reqwest::blocking must not run on the Tokio/async command thread — freezes UI.
+    tauri::async_runtime::spawn_blocking(move || refine_transcript(&config, &text))
+        .await
+        .map_err(|e| format!("LLM 测试任务失败: {e}"))?
 }
 
 #[tauri::command]
@@ -298,6 +445,7 @@ pub(crate) fn start_recording(
     };
     AsrEngine::set_session_mode(&app, session);
     reset_translate_stream(&app);
+    let _ = AsrEngine::bump_finalize_gen(&app);
 
     // Show HUD *before* ScreenCaptureKit start — that path can take seconds and
     // used to leave the UI frozen with no capsule until capture finished/failed.
@@ -374,7 +522,8 @@ pub(crate) fn start_recording(
     Ok(())
 }
 
-/// Abort an in-progress Fn recording without transcription / paste / history.
+/// Abort in-progress recording or mid-pipeline finalize (paste/history follow-ups).
+/// Already-pasted text (if any) is kept; late transcription-result is suppressed.
 #[tauri::command]
 pub(crate) fn cancel_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Result<(), String> {
     let was_recording = engine.inner().recording.load(Ordering::Acquire);
@@ -384,17 +533,31 @@ pub(crate) fn cancel_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> 
         .lock()
         .map(|g| g.is_some())
         .unwrap_or(false);
-    if !was_recording && !has_recorder {
-        emit_floating_status(&app, false, "idle", "", 0.0);
-        return Ok(());
-    }
+    let hud_busy = floating_status_slot(&app)
+        .lock()
+        .map(|s| {
+            s.visible
+                && matches!(
+                    s.state.as_str(),
+                    "recording" | "processing" | "refining"
+                )
+        })
+        .unwrap_or(false);
 
+    // Invalidate any in-flight finalize / stream translate apply.
+    let _ = AsrEngine::bump_finalize_gen(&app);
     engine
         .inner()
         .cancel_requested
         .store(true, Ordering::Release);
     engine.inner().recording.store(false, Ordering::Release);
     reset_translate_stream(&app);
+
+    if !was_recording && !has_recorder && !hud_busy {
+        emit_floating_status(&app, false, "idle", "", 0.0);
+        let _ = app.emit("recording-cancelled", ());
+        return Ok(());
+    }
 
     // For Apple/ElevenLabs the recorder is owned here; drop samples.
     // For Qwen the mlx worker owns the stop path and will see cancel_requested.
@@ -410,7 +573,10 @@ pub(crate) fn cancel_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> 
 
     emit_floating_status(&app, false, "idle", "", 0.0);
     let _ = app.emit("recording-cancelled", ());
-    eprintln!("[asr] recording cancelled");
+    eprintln!(
+        "[asr] cancelled (recording={} recorder={} hud_busy={})",
+        was_recording, has_recorder, hud_busy
+    );
     Ok(())
 }
 
@@ -424,6 +590,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
         .map_err(|e| e.to_string())?;
     let session = AsrEngine::session_mode(&app);
     let show_hud = session == "fn" || session == "translate";
+    let finalize_gen = AsrEngine::finalize_gen(&app);
 
     // Signal the worker's streaming loop to stop.
     // The worker will then do the final transcription automatically.
@@ -433,37 +600,32 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
         .store(false, Ordering::Release);
     engine.inner().recording.store(false, Ordering::Release);
 
-    // Final round: keep streamed translation on HUD and show loading (refining).
+    // Fn release = accept current. No refining HUD — paste committed / stream preview.
     let hud_text = if session == "translate" {
         peek_translate_out(&app)
     } else {
         String::new()
     };
-    let hud_state = if session == "translate"
-        || (session == "fn"
-            && config.llm_enabled
-            && !config.llm_api_base_url.trim().is_empty()
-            && !config.llm_model.trim().is_empty())
-    {
-        "refining"
-    } else {
-        "processing"
-    };
-    emit_floating_status(&app, show_hud, hud_state, &hud_text, 0.0);
+    emit_floating_status(&app, show_hud, "processing", &hud_text, 0.0);
 
     if matches!(config.asr_provider, AsrProvider::Qwen) {
-        eprintln!("[asr] stop signaled, worker will finish current partial then do final");
+        eprintln!("[asr] stop signaled, worker will finish current partial then paste");
         return Ok(());
     }
 
     let samples = AsrEngine::take_recorder_and_stop(&app)
         .ok_or_else(|| "Recorder not found".to_string())?;
     std::thread::spawn(move || {
+        if AsrEngine::finalize_aborted(&app, finalize_gen) {
+            eprintln!("[asr] stop aborted before provider ASR");
+            return;
+        }
         let mut result = match config.asr_provider {
             AsrProvider::Elevenlabs => transcribe_with_elevenlabs(&config, &samples)
                 .unwrap_or_else(|error| TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
+                        llm_text: None,
                         language: config.language.clone(),
                         duration_seconds: samples.len() as f64 / 16_000.0,
                         refined: false,
@@ -475,6 +637,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
                 |error| TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
+                        llm_text: None,
                         language: config.language.clone(),
                         duration_seconds: samples.len() as f64 / 16_000.0,
                         refined: false,
@@ -485,14 +648,25 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
             ),
             AsrProvider::Qwen => unreachable!(),
         };
+        if AsrEngine::finalize_aborted(&app, finalize_gen) {
+            eprintln!("[asr] stop aborted after provider ASR — suppress result");
+            emit_floating_status(&app, false, "idle", "", 0.0);
+            return;
+        }
         if result.error.is_none() {
-            let hud_done =
-                finalize_successful_result(&app, &mut result, Some(&samples), None, "audio");
-            if !hud_done {
-                emit_floating_status(&app, false, "idle", "", 0.0);
+            match finalize_successful_result(&app, &mut result, Some(&samples), None, "audio") {
+                None => {
+                    // Aborted mid-pipeline; recording-cancelled already (or) HUD idle.
+                    return;
+                }
+                Some(false) => emit_floating_status(&app, false, "idle", "", 0.0),
+                Some(true) => {}
             }
         } else {
             emit_floating_status(&app, false, "idle", "", 0.0);
+        }
+        if AsrEngine::finalize_aborted(&app, finalize_gen) {
+            return;
         }
         let _ = app.emit("transcription-result", &result);
     });
@@ -500,7 +674,12 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
 }
 
 #[tauri::command]
-pub(crate) fn transcribe_file(path: String, app: AppHandle, engine: State<'_, AsrEngine>) -> Result<(), String> {
+pub(crate) fn transcribe_file(
+    path: String,
+    media_kind: Option<String>,
+    app: AppHandle,
+    engine: State<'_, AsrEngine>,
+) -> Result<(), String> {
     let config = engine
         .inner()
         .config
@@ -522,12 +701,15 @@ pub(crate) fn transcribe_file(path: String, app: AppHandle, engine: State<'_, As
         if !engine.inner().model_loaded.load(Ordering::Acquire) {
             return Err("Model not loaded".into());
         }
-        engine.send_worker(WorkerCommand::TranscribeFile { path: src })?;
+        engine.send_worker(WorkerCommand::TranscribeFile {
+            path: src,
+            media_kind,
+        })?;
         return Ok(());
     }
 
     std::thread::spawn(move || {
-        let (saved, media_kind) = match persist_media_for_playback(&src) {
+        let (saved, media_kind) = match persist_media_for_playback(&src, media_kind.as_deref()) {
             Ok(v) => v,
             Err(e) => {
                 let _ = app.emit(
@@ -535,6 +717,7 @@ pub(crate) fn transcribe_file(path: String, app: AppHandle, engine: State<'_, As
                     &TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
+                        llm_text: None,
                         language: config.language.clone(),
                         duration_seconds: 0.0,
                         refined: false,
@@ -555,6 +738,7 @@ pub(crate) fn transcribe_file(path: String, app: AppHandle, engine: State<'_, As
                     &TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
+                        llm_text: None,
                         language: config.language.clone(),
                         duration_seconds: 0.0,
                         refined: false,
@@ -572,6 +756,7 @@ pub(crate) fn transcribe_file(path: String, app: AppHandle, engine: State<'_, As
                 .unwrap_or_else(|error| TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
+                        llm_text: None,
                         language: config.language.clone(),
                         duration_seconds: samples.len() as f64 / 16_000.0,
                         refined: false,
@@ -583,6 +768,7 @@ pub(crate) fn transcribe_file(path: String, app: AppHandle, engine: State<'_, As
                 |error| TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
+                        llm_text: None,
                         language: config.language.clone(),
                         duration_seconds: samples.len() as f64 / 16_000.0,
                         refined: false,

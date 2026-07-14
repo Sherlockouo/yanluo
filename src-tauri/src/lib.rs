@@ -3,6 +3,7 @@
 mod audio;
 mod commands;
 mod config;
+mod download;
 mod history;
 mod hotkey;
 mod hud;
@@ -87,9 +88,15 @@ pub fn main() {
             commands::get_history,
             commands::clear_history,
             commands::delete_history_entry,
+            commands::rate_history_entry,
+            commands::set_history_user_text,
+            commands::mark_history_learn_status,
+            commands::mark_history_learn_status_batch,
+            commands::apply_learned_terms,
             commands::prune_history,
             commands::prune_history_older_than,
             commands::test_llm_refinement,
+            commands::distill_learn_from_ratings,
             commands::load_model,
             hud::get_floating_status,
             hud::recenter_floating_hud,
@@ -106,6 +113,10 @@ pub fn main() {
             commands::stop_recording,
             commands::cancel_recording,
             commands::transcribe_file,
+            download::get_ytdlp_status,
+            download::download_url_media,
+            download::cancel_url_download,
+            download::cleanup_download_job,
             update::check_for_update,
             update::download_and_install_update,
             update::open_update_download_dir,

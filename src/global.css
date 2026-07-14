@@ -17,6 +17,14 @@
 
   --color-panel: rgba(28, 28, 30, 0.72);
   --color-accent-fg: #f5f5f7;
+
+  /* Type ladder — Jobs: clear hierarchy, not denser soup */
+  --text-display: 1.875rem;
+  --text-section: 1.0625rem;
+  --text-body: 0.9375rem;
+  --text-ui: 0.875rem;
+  --text-meta: 0.75rem;
+  --text-micro: 0.6875rem;
 }
 
 /*
@@ -98,6 +106,78 @@
   --segment: #ffffff;
   --segment-foreground: #1d1d1f;
   --scrollbar: rgba(0, 0, 0, 0.28);
+}
+
+/* —— Type ladder —— */
+.type-display {
+  font-family: var(--font-display);
+  font-size: var(--text-display);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  color: var(--foreground);
+}
+
+.type-section {
+  font-family: var(--font-display);
+  font-size: var(--text-section);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  color: var(--foreground);
+}
+
+.type-body {
+  font-size: var(--text-body);
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--foreground);
+}
+
+.type-ui {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--foreground);
+}
+
+.type-meta {
+  font-size: var(--text-meta);
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.type-micro {
+  font-size: var(--text-micro);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+/* Primary CTA press — compositor only */
+.btn-press {
+  transition:
+    transform 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 120ms ease;
+}
+.btn-press:hover {
+  transform: scale(1.01);
+}
+.btn-press:active {
+  transform: scale(0.98);
+  opacity: 0.92;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-press,
+  .btn-press:hover,
+  .btn-press:active {
+    transform: none;
+    transition: none;
+  }
 }
 
 .dark,
@@ -762,7 +842,18 @@ html.light[data-floating="1"] .hud-spinner {
   padding: 1.75rem 1.75rem 2rem;
 }
 
+.nav-group-label {
+  padding: 0.35rem 0.8rem 0.2rem;
+  font-size: var(--text-micro);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  opacity: 0.75;
+}
+
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -773,25 +864,41 @@ html.light[data-floating="1"] .hud-spinner {
   color: var(--muted);
   background: transparent;
   transition:
-    background 160ms ease,
     border-color 160ms ease,
-    color 160ms ease,
-    transform 160ms ease;
+    color 160ms ease;
   cursor: pointer;
 }
 
 .nav-item:hover {
   color: var(--foreground);
-  background: color-mix(in oklab, var(--foreground) 5%, transparent);
   border-color: color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+
+.nav-item:hover:not(.nav-item-active)::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+  pointer-events: none;
 }
 
 .nav-item-active {
   color: var(--foreground);
-  background: color-mix(in oklab, var(--foreground) 8%, transparent);
   border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
+.nav-item-indicator {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
   box-shadow: inset 0 0 0 1px
     color-mix(in oklab, var(--foreground) 4%, transparent);
+  pointer-events: none;
+  transform: translateZ(0);
 }
 
 .panel {
@@ -815,15 +922,47 @@ html.light[data-floating="1"] .hud-spinner {
   }
 }
 
+/* Primary CTA full-width; secondary actions sit above as muted row — never 50/50 peers. */
 .form-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+  display: flex;
+  flex-direction: column;
   gap: 0.75rem;
   padding-top: 0.25rem;
 }
 
-.form-actions > * {
+.form-actions-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.form-actions-primary {
   width: 100%;
+}
+
+.form-actions-primary.button,
+.form-actions-primary [data-slot="button"],
+button.form-actions-primary,
+.form-actions > .form-actions-primary {
+  transition:
+    transform 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 120ms ease;
+}
+
+.form-actions-primary:hover {
+  transform: scale(1.01);
+}
+
+.form-actions-primary:active {
+  transform: scale(0.98);
+  opacity: 0.92;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .form-actions-primary:hover,
+  .form-actions-primary:active {
+    transform: none;
+  }
 }
 
 .stat-tile {
@@ -897,6 +1036,7 @@ html.light[data-floating="1"] .hud-spinner {
 }
 
 .settings-tabs {
+  position: relative;
   display: flex;
   gap: 0.25rem;
   padding: 0.25rem;
@@ -906,18 +1046,18 @@ html.light[data-floating="1"] .hud-spinner {
 }
 
 .settings-tab {
+  position: relative;
+  z-index: 1;
   flex: 1;
   border: 0;
   border-radius: 999px;
   padding: 0.55rem 0.75rem;
   background: transparent;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--text-ui);
   font-weight: 550;
   cursor: pointer;
-  transition:
-    background 160ms ease,
-    color 160ms ease;
+  transition: color 160ms ease;
 }
 
 .settings-tab:hover {
@@ -925,9 +1065,18 @@ html.light[data-floating="1"] .hud-spinner {
 }
 
 .settings-tab-active {
-  background: var(--default);
   color: var(--foreground);
+}
+
+.settings-tab-indicator {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: var(--default);
   box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 6%, transparent) inset;
+  pointer-events: none;
+  transform: translateZ(0);
 }
 
 .release-entry + .release-entry {
@@ -984,10 +1133,23 @@ html.light[data-floating="1"] .hud-spinner {
 
   .app-sidebar nav {
     flex-direction: row;
+    flex-wrap: wrap;
     overflow-x: auto;
+    gap: 0.25rem;
   }
 
-  .nav-item span span:last-child {
+  .app-sidebar nav > div {
+    display: flex;
+    flex-direction: row;
+    flex-shrink: 0;
+    gap: 0.25rem;
+  }
+
+  .nav-group-label {
+    display: none;
+  }
+
+  .nav-item span:last-of-type {
     display: none;
   }
 }
@@ -1017,8 +1179,8 @@ html.light[data-floating="1"] .hud-spinner {
 /* Quiet page enter — Jobs: motion with purpose, not noise */
 @keyframes page-enter {
   from {
-    opacity: 0;
-    transform: translateY(6px);
+    opacity: 0.92;
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
@@ -1027,31 +1189,11 @@ html.light[data-floating="1"] .hud-spinner {
 }
 
 .page-enter {
-  animation: page-enter 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-@keyframes processing-pulse {
-  0%,
-  100% {
-    transform: scale(1);
-    opacity: 1;
-  }
-  50% {
-    transform: scale(1.04);
-    opacity: 0.78;
-  }
-}
-
-.processing-pulse {
-  animation: processing-pulse 1.6s ease-in-out infinite;
+  animation: page-enter 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .page-enter {
-    animation: none;
-  }
-
-  .processing-pulse {
     animation: none;
   }
 }

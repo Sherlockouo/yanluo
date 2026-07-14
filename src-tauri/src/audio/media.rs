@@ -35,25 +35,64 @@ pub(crate) fn samples_to_wav_bytes(samples: &[f32]) -> Result<Vec<u8>, String> {
 
 pub(crate) const MEDIA_DECODE_HINT: &str = "无法解码媒体。支持常见音频（WAV/MP3/M4A/FLAC/OGG/Opus 等）与视频（MP4/MOV/MKV/WebM 等）；也可先转为 16kHz WAV。视频与部分格式需本机安装 ffmpeg。";
 
+fn ffmpeg_works(bin: &str) -> bool {
+    Command::new(bin)
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Absolute path to ffmpeg when possible (Tauri GUI apps often lack Homebrew in PATH).
 pub(crate) fn ffmpeg_bin() -> Option<&'static str> {
+    // Prefer absolute paths: `Command::new("ffmpeg")` may succeed in shell
+    // but `Path::new("ffmpeg").parent()` is useless for yt-dlp `--ffmpeg-location`.
     const CANDIDATES: &[&str] = &[
-        "ffmpeg",
         "/opt/homebrew/bin/ffmpeg",
         "/usr/local/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
+        "ffmpeg",
     ];
     for candidate in CANDIDATES {
-        let ok = Command::new(candidate)
-            .arg("-version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if ok {
+        if ffmpeg_works(candidate) {
             return Some(*candidate);
         }
     }
     None
+}
+
+/// Directory containing ffmpeg + ffprobe for yt-dlp `--ffmpeg-location`.
+pub(crate) fn ffmpeg_location_dir() -> Option<PathBuf> {
+    let ff = ffmpeg_bin()?;
+    let path = if Path::new(ff).is_absolute() {
+        PathBuf::from(ff)
+    } else {
+        // Resolve via `which` so we never pass a bare name to yt-dlp.
+        let out = Command::new("which")
+            .arg("ffmpeg")
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if s.is_empty() {
+            return None;
+        }
+        PathBuf::from(s)
+    };
+    let dir = path.parent()?.to_path_buf();
+    let probe = dir.join("ffprobe");
+    if !probe.is_file() && !ffmpeg_works(probe.to_str()?) {
+        // Still return dir — some installs name-only work via PATH inside that dir.
+        eprintln!(
+            "[ffmpeg] ffprobe missing next to {} — yt-dlp may fail postprocess",
+            path.display()
+        );
+    }
+    Some(dir)
 }
 
 pub(crate) fn convert_media_to_wav_16k(src: &Path, dest: &Path) -> Result<(), String> {
@@ -126,19 +165,28 @@ pub(crate) fn is_video_extension(ext: &str) -> bool {
 
 /// Copy source into recordings for playback. Videos keep their original
 /// container so the UI can play `<video>`; ASR still decodes via afconvert/ffmpeg.
-pub(crate) fn persist_media_for_playback(src: &Path) -> Result<(PathBuf, String), String> {
+/// `kind_override`: when `Some("audio"|"video")`, prefer that over extension guess.
+pub(crate) fn persist_media_for_playback(
+    src: &Path,
+    kind_override: Option<&str>,
+) -> Result<(PathBuf, String), String> {
     let ext = src
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let kind = if is_video_extension(&ext) {
-        "video"
-    } else {
-        "audio"
+    let kind = match kind_override.map(|s| s.trim().to_ascii_lowercase()) {
+        Some(ref k) if k == "audio" || k == "video" => k.clone(),
+        _ => {
+            if is_video_extension(&ext) {
+                "video".into()
+            } else {
+                "audio".into()
+            }
+        }
     };
     let path = copy_into_recordings(src)?;
-    Ok((path, kind.into()))
+    Ok((path, kind))
 }
 
 /// Expand word/char segments into ElevenLabs CharacterAlignmentResponseModel.

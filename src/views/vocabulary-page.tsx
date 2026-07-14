@@ -1,29 +1,39 @@
+import { useState } from "react";
 import { Button, Chip, Input, Label, TextField } from "@heroui/react";
-import { Plus, Save, X } from "lucide-react";
+import { BookOpen, Plus, X } from "lucide-react";
 import {
   EmptyState,
   PageHeader,
   PageShell,
-  SectionCard,
+  Reveal,
+  SoftCollapse,
 } from "@/components/shared/page-shell";
 import { useApp } from "@/app-context";
 
 export function VocabularyPage() {
-  const {
-    config,
-    newTerm,
-    setNewTerm,
-    addTerm,
-    saveVocabulary,
-    saveConfig,
-  } = useApp();
+  const { config, newTerm, setNewTerm, addTerm, saveVocabulary } = useApp();
+  const [addOpen, setAddOpen] = useState(config.vocabulary.length === 0);
+  const terms = config.vocabulary;
 
   return (
-    <PageShell>
-      <PageHeader title="词库" />
+    <PageShell className="max-w-2xl">
+      <PageHeader
+        title="词库"
+        status={terms.length ? `${terms.length} 条` : undefined}
+        action={
+          <Button
+            size="sm"
+            variant={addOpen ? "primary" : "secondary"}
+            onPress={() => setAddOpen((v) => !v)}
+          >
+            <Plus size={14} />
+            添加
+          </Button>
+        }
+      />
 
-      <SectionCard className="max-w-2xl flex flex-col gap-5">
-        <div className="flex items-end gap-2">
+      <SoftCollapse open={addOpen}>
+        <div className="mb-1 flex items-end gap-2 rounded-2xl border border-border bg-surface p-4">
           <TextField
             fullWidth
             variant="secondary"
@@ -38,25 +48,28 @@ export function VocabularyPage() {
               }}
             />
           </TextField>
-          <Button variant="primary" onPress={addTerm}>
+          <Button
+            variant="primary"
+            className="btn-press shrink-0"
+            onPress={addTerm}
+          >
             <Plus size={16} />
             添加
           </Button>
         </div>
+      </SoftCollapse>
 
-        <div className="flex min-h-[160px] flex-wrap content-start gap-2 rounded-2xl border border-border bg-surface-secondary/40 p-4">
-          {config.vocabulary.length === 0 ? (
-            <EmptyState title="还没有词条" />
-          ) : (
-            config.vocabulary.map((term) => (
+      {terms.length === 0 ? (
+        <EmptyState title="还没有词条" icon={<BookOpen size={18} />} />
+      ) : (
+        <div className="flex min-h-[200px] flex-wrap content-start gap-2">
+          {terms.map((term, i) => (
+            <Reveal key={term} index={i}>
               <button
-                key={term}
                 type="button"
                 className="group"
                 onClick={() =>
-                  void saveVocabulary(
-                    config.vocabulary.filter((t) => t !== term),
-                  )
+                  void saveVocabulary(terms.filter((t) => t !== term))
                 }
                 title="删除"
               >
@@ -65,21 +78,16 @@ export function VocabularyPage() {
                   variant="soft"
                   className="transition group-hover:bg-danger/15 group-hover:text-danger"
                 >
-                  <Chip.Label className="inline-flex items-center gap-1.5">
+                  <Chip.Label className="inline-flex items-center gap-1.5 type-ui !font-normal">
                     {term}
                     <X size={11} className="opacity-50" />
                   </Chip.Label>
                 </Chip>
               </button>
-            ))
-          )}
+            </Reveal>
+          ))}
         </div>
-
-        <Button fullWidth variant="secondary" onPress={() => void saveConfig()}>
-          <Save size={16} />
-          保存
-        </Button>
-      </SectionCard>
+      )}
     </PageShell>
   );
 }

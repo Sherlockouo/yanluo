@@ -280,6 +280,7 @@ pub(crate) fn append_translation(dst: &mut String, piece: &str) {
 }
 
 /// Wait briefly for an in-flight stable translate before finalize consumes the stream.
+#[allow(dead_code)]
 pub(crate) fn wait_translate_inflight(app: &AppHandle, timeout: Duration) {
     let start = Instant::now();
     while start.elapsed() < timeout {

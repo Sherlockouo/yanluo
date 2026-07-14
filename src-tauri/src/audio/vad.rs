@@ -533,12 +533,22 @@ pub(crate) fn append_segment_text(committed: &mut String, piece: &str) {
         return;
     }
 
-    // After overlap strip, keep any leading space from piece (English); skip
-    // extra glue so CJK joins tight. No-overlap keeps punctuation-aware glue.
-    if overlap < 2
+    // After overlap strip: English alnum abutting needs a space; CJK stays tight.
+    let left_ascii = committed
+        .chars()
+        .rev()
+        .find(|c| !c.is_whitespace())
+        .map(|c| c.is_ascii_alphanumeric() || c == '\'')
+        .unwrap_or(false);
+    let right_ascii = piece
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_alphanumeric() || matches!(c, '\'' | '"' | '('))
+        .unwrap_or(false);
+    let needs_space = (overlap < 2 || (left_ascii && right_ascii))
         && !committed.ends_with([' ', '\n', '。', '！', '？', '.', '!', '?'])
-        && !piece.starts_with(['。', '！', '？', '.', ',', '!', '?'])
-    {
+        && !piece.starts_with([' ', '。', '！', '？', '.', ',', '!', '?']);
+    if needs_space {
         committed.push(' ');
     }
     committed.push_str(piece);
@@ -554,6 +564,34 @@ pub(crate) fn display_text(committed: &str, active: &str) -> String {
         return c.to_string();
     }
     format!("{c} {a}")
+}
+
+/// Cross-segment decode prefix for the next streaming segment.
+///
+/// Context is injected in the same slot as in-segment rollback text ("already
+/// said about *this* audio"). A finished sentence there makes Qwen predict
+/// EOS immediately → empty active forever while VAD keeps the segment open.
+///
+/// Rules:
+/// - empty / sentence-final punct → no prefix
+/// - otherwise trailing `max_chars` (rough token budget stand-in)
+pub(crate) fn cross_seg_decode_prefix(committed: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let t = committed.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    const FINAL: &[char] = &['。', '！', '？', '.', '!', '?', '…', '；', ';'];
+    if t.chars().last().is_some_and(|c| FINAL.contains(&c)) {
+        return String::new();
+    }
+    let chars: Vec<char> = t.chars().collect();
+    if chars.len() <= max_chars {
+        return t.to_string();
+    }
+    chars[chars.len() - max_chars..].iter().collect()
 }
 
 #[cfg(test)]
@@ -713,5 +751,23 @@ mod tests {
         let mut s = String::from("你好。");
         append_segment_text(&mut s, "你好世界");
         assert_eq!(s, "你好。世界");
+    }
+
+    #[test]
+    fn cross_seg_skips_finished_sentence() {
+        assert!(cross_seg_decode_prefix("能听到吗？", 64).is_empty());
+        assert!(cross_seg_decode_prefix("Hello world.", 64).is_empty());
+        assert!(cross_seg_decode_prefix("完了。", 64).is_empty());
+    }
+
+    #[test]
+    fn cross_seg_keeps_open_clause() {
+        assert_eq!(cross_seg_decode_prefix("他说", 64), "他说");
+        assert_eq!(cross_seg_decode_prefix("一二三四五六七八", 4), "五六七八");
+    }
+
+    #[test]
+    fn cross_seg_disabled_when_max_zero() {
+        assert!(cross_seg_decode_prefix("他说", 0).is_empty());
     }
 }

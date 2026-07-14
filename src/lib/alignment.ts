@@ -38,6 +38,18 @@ export type TranscriptParagraph = {
 const SENTENCE_END = /[。！？!?；;…]$/;
 const SOFT_BREAK = /[，,、：:]$/;
 
+/** Latin word gap: keep glued punctuation (`Hello,` `world!`) and apostrophes (`It's`). */
+export function needsLatinWordSpace(prev: string, next: string): boolean {
+  if (!prev || !next) return false;
+  // Never pad before a closing/trailing punct-only unit.
+  if (/^[,.!?;:…，。！？、；：）】》」』'"’”)\]]+$/.test(next)) return false;
+  // Never pad after an opening punct-only unit.
+  if (/^[(（【《「『"“‘[]+$/.test(prev)) return false;
+  const prevLatin = /[A-Za-z0-9]/.test(prev);
+  const nextLatin = /^[('"“‘]*[A-Za-z0-9]/.test(next);
+  return prevLatin && nextLatin;
+}
+
 /**
  * Group timed words into paragraphs for reading.
  * Breaks on silence gaps, sentence punctuation, or soft length limits.
@@ -66,7 +78,13 @@ export function groupWordsIntoParagraphs(
       startTime: buf[0].startTime,
       endTime: buf[buf.length - 1].endTime,
       words: buf,
-      text: buf.map((w) => w.text).join(""),
+      text: buf
+        .map((w, i) => {
+          if (i === 0) return w.text;
+          const prev = buf[i - 1];
+          return needsLatinWordSpace(prev.text, w.text) ? ` ${w.text}` : w.text;
+        })
+        .join(""),
     });
     buf = [];
     charCount = 0;
@@ -97,24 +115,50 @@ export function groupWordsIntoParagraphs(
 
 /** Split plain (untimed) transcript into readable paragraphs. */
 export function splitPlainTextParagraphs(text: string): string[] {
-  const cleaned = text.replace(/\s+/g, "").trim();
+  const trimmed = text.replace(/\r\n/g, "\n").trim();
+  if (!trimmed) return [];
+
+  const latin = (trimmed.match(/[A-Za-z]/g) ?? []).length;
+  const cjk = Array.from(trimmed).filter((ch) => {
+    const code = ch.codePointAt(0) ?? 0;
+    return code >= 0x4e00 && code <= 0x9fff;
+  }).length;
+  const preferLatin = latin > cjk * 2;
+
+  // CJK-only layout historically stripped spaces; keep spaces for English.
+  const cleaned = preferLatin
+    ? trimmed.replace(/[ \t]+\n/g, "\n").replace(/[ \t]{2,}/g, " ")
+    : trimmed.replace(/\s+/g, "").trim();
   if (!cleaned) return [];
 
   const parts = cleaned
-    .split(/(?<=[。！？!?；;…])/)
+    .split(preferLatin ? /(?<=[.!?…])\s+/ : /(?<=[。！？!?；;…])/)
     .map((s) => s.trim())
     .filter(Boolean);
 
   if (parts.length <= 1) {
-    // No punctuation — soft-wrap every ~40 chars at a comma if possible.
+    if (preferLatin) {
+      // Soft-wrap long English blobs without sentence punct.
+      const soft: string[] = [];
+      let buf = "";
+      for (const word of cleaned.split(/\s+/)) {
+        if (!word) continue;
+        const next = buf ? `${buf} ${word}` : word;
+        if (next.length >= 72 && buf) {
+          soft.push(buf);
+          buf = word;
+        } else {
+          buf = next;
+        }
+      }
+      if (buf) soft.push(buf);
+      return soft.length ? soft : [cleaned];
+    }
     const soft: string[] = [];
     let buf = "";
     for (const ch of Array.from(cleaned)) {
       buf += ch;
-      if (
-        buf.length >= 40 &&
-        /[，,、：:]/.test(ch)
-      ) {
+      if (buf.length >= 40 && /[，,、：:]/.test(ch)) {
         soft.push(buf);
         buf = "";
       } else if (buf.length >= 56) {
@@ -126,11 +170,10 @@ export function splitPlainTextParagraphs(text: string): string[] {
     return soft.length ? soft : [cleaned];
   }
 
-  // Merge very short fragments into the previous sentence.
   const merged: string[] = [];
   for (const part of parts) {
-    if (merged.length && part.length < 8) {
-      merged[merged.length - 1] += part;
+    if (merged.length && part.length < (preferLatin ? 12 : 8)) {
+      merged[merged.length - 1] += preferLatin ? ` ${part}` : part;
     } else {
       merged.push(part);
     }
@@ -182,8 +225,7 @@ export function segmentsToCharacterAlignment(
       const needsSpace =
         !/\s$/.test(seg.text) &&
         !/^\s/.test(next.text) &&
-        /[A-Za-z0-9]/.test(seg.text) &&
-        /[A-Za-z0-9]/.test(next.text);
+        needsLatinWordSpace(seg.text, next.text);
       if (needsSpace) {
         characters.push(" ");
         characterStartTimesSeconds.push(seg.end);
@@ -274,7 +316,12 @@ export function composeSegmentsFromAlignment(
       continue;
     }
 
-    if (isStandaloneChar(char) || /[，。！？、；：""''（）【】《》…—·]/.test(char)) {
+    // CJK / fullwidth punct as own highlight units. ASCII apostrophe stays inside words
+    // (`It's`); curly quotes still standalone.
+    if (
+      isStandaloneChar(char) ||
+      /[，。！？、；：""\u201c\u201d\u2018\u2019（）【】《》…—·]/.test(char)
+    ) {
       pushStandalone(char, start, end);
       continue;
     }
@@ -312,6 +359,7 @@ export function resolveAlignment(entry: {
 
 export function isVideoMediaKind(kind?: string | null, path?: string | null): boolean {
   if (kind === "video") return true;
+  if (kind === "audio") return false;
   if (!path) return false;
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   return ["mp4", "m4v", "mov", "mkv", "webm", "avi", "mpeg", "mpg", "3gp", "3g2"].includes(

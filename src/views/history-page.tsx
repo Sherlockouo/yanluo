@@ -1,18 +1,14 @@
 import { useState } from "react";
-import { Button, Chip, toast } from "@heroui/react";
-import {
-  CheckCircle2,
-  ChevronDown,
-  Clipboard,
-  Languages,
-  Sparkles,
-  Trash2,
-} from "lucide-react";
+import { Button, toast } from "@heroui/react";
+import { Link } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
+import { ChevronDown, Clipboard, Trash2 } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   EmptyState,
   PageHeader,
   PageShell,
+  Reveal,
   SectionCard,
 } from "@/components/shared/page-shell";
 import { TranscriptViewer } from "@/components/ui/transcript-viewer";
@@ -24,15 +20,15 @@ import {
 import { isVideoMediaKind } from "@/lib/alignment";
 import { cn } from "@/lib/cn";
 import { translateTargetLabel } from "@/lib/constants";
+import { useCollapse } from "@/lib/motion";
 import type { HistoryEntry } from "@/types";
 import { useApp } from "@/app-context";
 
-function historyLanguageChip(entry: HistoryEntry): string {
-  const isTranslate = (entry.source ?? "fn") === "translate";
-  if (isTranslate) {
-    return translateTargetLabel(entry.translate_target_language) || "译";
-  }
-  return entry.language || "auto";
+function historySourceLabel(entry: HistoryEntry): string {
+  const src = entry.source ?? "fn";
+  if (src === "translate") return "翻译";
+  if (src === "transcribe") return "转写";
+  return "Fn";
 }
 
 export function HistoryPage() {
@@ -45,6 +41,7 @@ export function HistoryPage() {
   } = useApp();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState(false);
+  const collapse = useCollapse();
 
   const runCleanup = async (label: string, action: () => Promise<void>) => {
     await action();
@@ -68,7 +65,7 @@ export function HistoryPage() {
     <PageShell>
       <PageHeader
         title="历史"
-        subtitle={history.length ? `${history.length} 条` : undefined}
+        status={history.length ? `${history.length} 条` : undefined}
         action={
           history.length > 0 ? (
             <div className="relative">
@@ -150,25 +147,37 @@ export function HistoryPage() {
         </SectionCard>
       ) : (
         <div className="flex flex-col gap-2">
-          {history.map((entry) => {
+          {history.map((entry, i) => {
             const open = expandedId === entry.id;
             return (
-              <div key={entry.id} className="flex flex-col gap-2">
-                <HistoryRow
-                  entry={entry}
-                  open={open}
-                  onToggle={() =>
-                    setExpandedId((id) => (id === entry.id ? null : entry.id))
-                  }
-                  onDelete={() => void removeEntry(entry.id)}
-                />
-                {open ? (
-                  <ExpandedViewer
+              <Reveal key={entry.id} index={i}>
+                <div className="flex flex-col gap-2">
+                  <HistoryRow
                     entry={entry}
-                    onClose={() => setExpandedId(null)}
+                    open={open}
+                    onToggle={() =>
+                      setExpandedId((id) =>
+                        id === entry.id ? null : entry.id,
+                      )
+                    }
+                    onDelete={() => void removeEntry(entry.id)}
                   />
-                ) : null}
-              </div>
+                  <AnimatePresence initial={false}>
+                    {open ? (
+                      <motion.div
+                        key="expanded"
+                        initial={collapse.initial}
+                        animate={collapse.animate}
+                        exit={collapse.exit}
+                        transition={collapse.transition}
+                        style={{ willChange: "opacity, transform" }}
+                      >
+                        <ExpandedViewer entry={entry} />
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
+                </div>
+              </Reveal>
             );
           })}
         </div>
@@ -211,11 +220,15 @@ function HistoryRow({
   onToggle: () => void;
   onDelete: () => void;
 }) {
-  const isVideo = isVideoMediaKind(entry.media_kind, entry.audio_path);
   const isTranslate = (entry.source ?? "fn") === "translate";
   const showDiff = !isTranslate && hasRefineDiff(entry.raw_text, entry.text);
   const showTranslatePair =
     isTranslate && Boolean(entry.raw_text?.trim() && entry.text?.trim());
+  const lang =
+    isTranslate
+      ? translateTargetLabel(entry.translate_target_language) || "译"
+      : entry.language || "auto";
+
   return (
     <div
       className={cn(
@@ -231,33 +244,11 @@ function HistoryRow({
         className="flex min-w-0 flex-1 items-start gap-3 text-left"
       >
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 type-meta">
             <span>{new Date(entry.created_at).toLocaleString()}</span>
             <span>{entry.duration_seconds.toFixed(1)}s</span>
-            <span>
-              {isTranslate
-                ? "翻译"
-                : (entry.source ?? "fn") === "transcribe"
-                  ? "转写"
-                  : "Fn"}
-            </span>
-            {isVideo ? <span>视频</span> : null}
-            <Chip
-              size="sm"
-              variant="soft"
-              color={entry.refined || isTranslate ? "accent" : "default"}
-            >
-              <Chip.Label className="inline-flex items-center gap-1">
-                {isTranslate ? (
-                  <Languages size={10} />
-                ) : entry.refined || showDiff ? (
-                  <Sparkles size={10} />
-                ) : (
-                  <CheckCircle2 size={10} />
-                )}
-                {historyLanguageChip(entry)}
-              </Chip.Label>
-            </Chip>
+            <span>{historySourceLabel(entry)}</span>
+            <span>{lang}</span>
           </div>
           {showTranslatePair ? (
             <div className="mt-1.5 line-clamp-4">
@@ -272,7 +263,7 @@ function HistoryRow({
               <RefineDiff before={entry.raw_text} after={entry.text} compact />
             </div>
           ) : (
-            <p className="mt-1.5 line-clamp-2 text-[14px] leading-snug text-foreground">
+            <p className="mt-1.5 line-clamp-2 type-body leading-snug">
               {entry.text || "（空）"}
             </p>
           )}
@@ -301,32 +292,27 @@ function HistoryRow({
   );
 }
 
-function ExpandedViewer({
-  entry,
-  onClose: _onClose,
-}: {
-  entry: HistoryEntry;
-  onClose: () => void;
-}) {
+function ExpandedViewer({ entry }: { entry: HistoryEntry }) {
   const mediaSrc = entry.audio_path ? convertFileSrc(entry.audio_path) : null;
   const mediaKind = isVideoMediaKind(entry.media_kind, entry.audio_path)
     ? "video"
     : "audio";
   const showDiff = hasRefineDiff(entry.raw_text, entry.text);
   const isTranslate = (entry.source ?? "fn") === "translate";
+  const isFn = (entry.source ?? "fn") === "fn";
 
   return (
     <SectionCard className="!p-4">
-      
       {isTranslate && showDiff ? (
-        <div className="mb-4 rounded-2xl border border-border bg-surface-secondary/40 px-3.5 py-3">
+        <div className="mb-4">
           <SemanticPair before={entry.raw_text} after={entry.text} />
         </div>
       ) : showDiff ? (
-        <div className="mb-4 rounded-2xl border border-border bg-surface-secondary/40 px-3.5 py-3">
+        <div className="mb-4">
           <RefineDiff before={entry.raw_text} after={entry.text} />
         </div>
       ) : null}
+
       {mediaSrc ? (
         <TranscriptViewer
           text={entry.text}
@@ -341,7 +327,18 @@ function ExpandedViewer({
           {entry.text || "（空）"}
         </p>
       )}
-      <div className="mb-3 flex items-center justify-end gap-2">
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        {isFn ? (
+          <Link
+            to="/llm"
+            className="text-[12px] text-muted hover:text-accent hover:underline"
+          >
+            在 LLM 页学习
+          </Link>
+        ) : (
+          <span />
+        )}
         <Button
           size="sm"
           variant="secondary"

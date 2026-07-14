@@ -1,12 +1,22 @@
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use crate::audio::*;
 use crate::config::*;
 use crate::history::*;
 use crate::transcription::*;
+
+fn panic_payload_str(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".into()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Send-safe wrapper for cpal::Stream (which is !Send on macOS).
@@ -41,6 +51,7 @@ pub(crate) enum WorkerCommand {
     },
     TranscribeFile {
         path: PathBuf,
+        media_kind: Option<String>,
     },
 }
 
@@ -55,6 +66,8 @@ pub struct AsrEngine {
     pub(crate) recording: Arc<AtomicBool>,
     /// Set by cancel_recording; mlx worker skips final transcription when true.
     pub(crate) cancel_requested: Arc<AtomicBool>,
+    /// Bumped on start/cancel. Finalize captures gen; stale gen = aborted mid-pipeline.
+    pub(crate) finalize_gen: Arc<AtomicU64>,
     pub(crate) model_loaded: Arc<AtomicBool>,
     /// Channel to the MLX worker thread.
     pub(crate) worker_tx: Mutex<Sender<WorkerCommand>>,
@@ -71,12 +84,33 @@ impl AsrEngine {
         let (tx, rx) = mpsc::channel::<WorkerCommand>();
 
         let model_loaded = Arc::new(AtomicBool::new(false));
-        let model_loaded_clone = model_loaded.clone();
+        let recording = Arc::new(AtomicBool::new(false));
+        let cancel_requested = Arc::new(AtomicBool::new(false));
+        let finalize_gen = Arc::new(AtomicU64::new(0));
+        // Pass flag Arcs into the worker — do NOT app.state::<AsrEngine>() at
+        // worker start. That races manage(): MLX init can finish before
+        // AsrEngine::new returns → panic "state() called before manage()".
+        let model_loaded_w = model_loaded.clone();
+        let recording_w = recording.clone();
+        let cancel_w = cancel_requested.clone();
         let app_for_worker = app.clone();
         std::thread::Builder::new()
             .name("mlx-worker".into())
             .spawn(move || {
-                mlx_worker(rx, app_for_worker, model_loaded_clone);
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    mlx_worker(
+                        rx,
+                        app_for_worker.clone(),
+                        model_loaded_w,
+                        recording_w,
+                        cancel_w,
+                    );
+                }));
+                if let Err(payload) = result {
+                    let msg = panic_payload_str(&payload);
+                    eprintln!("[mlx-worker] PANIC: {msg}");
+                    let _ = app_for_worker.emit("mlx-worker-dead", &msg);
+                }
             })
             .expect("failed to spawn MLX worker thread");
 
@@ -86,8 +120,9 @@ impl AsrEngine {
         Self {
             model_dir: Mutex::new(config.asr_model_dir.clone()),
             recorder: Mutex::new(None),
-            recording: Arc::new(AtomicBool::new(false)),
-            cancel_requested: Arc::new(AtomicBool::new(false)),
+            recording,
+            cancel_requested,
+            finalize_gen,
             model_loaded,
             worker_tx: Mutex::new(tx),
             config: Mutex::new(config),
@@ -112,12 +147,35 @@ impl AsrEngine {
         }
     }
 
+    /// Capture finalize generation for this stop→paste pipeline.
+    pub(crate) fn finalize_gen(app: &AppHandle) -> u64 {
+        app.state::<AsrEngine>()
+            .inner()
+            .finalize_gen
+            .load(Ordering::Acquire)
+    }
+
+    /// Invalidate in-flight finalize / LLM follow-ups (Esc abort).
+    pub(crate) fn bump_finalize_gen(app: &AppHandle) -> u64 {
+        app.state::<AsrEngine>()
+            .inner()
+            .finalize_gen
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1)
+    }
+
+    pub(crate) fn finalize_aborted(app: &AppHandle, gen: u64) -> bool {
+        Self::finalize_gen(app) != gen
+    }
+
     pub(crate) fn send_worker(&self, cmd: WorkerCommand) -> Result<(), String> {
         self.worker_tx
             .lock()
             .map_err(|e| e.to_string())?
             .send(cmd)
-            .map_err(|e| e.to_string())
+            .map_err(|_| {
+                "MLX worker 已退出（可能已崩溃）。请重启应用后再试。".to_string()
+            })
     }
 
     /// Grab a snapshot of all accumulated audio samples (16kHz mono f32).

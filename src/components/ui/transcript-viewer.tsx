@@ -28,6 +28,7 @@ import {
   composeSegmentsFromAlignment,
   formatClock,
   groupWordsIntoParagraphs,
+  needsLatinWordSpace,
   resolveAlignment,
   splitPlainTextParagraphs,
   type TranscriptParagraph,
@@ -58,11 +59,9 @@ type TranscriptCtx = {
   mediaRef: React.MutableRefObject<HTMLMediaElement | null>;
   scrollRef: React.MutableRefObject<HTMLDivElement | null>;
   activeParaRef: React.MutableRefObject<HTMLElement | null>;
-  currentTime: number;
   duration: number;
   isPlaying: boolean;
   setIsScrubbing: (v: boolean) => void;
-  progress: number;
   mode: ViewMode;
   setMode: (m: ViewMode) => void;
   isLong: boolean;
@@ -87,7 +86,14 @@ type TranscriptCtx = {
   };
 };
 
+/** Clock/scrubber only — updates ~10 Hz; must not fan out into word tree. */
+type ClockCtx = {
+  currentTime: number;
+  progress: number;
+};
+
 const TranscriptContext = createContext<TranscriptCtx | null>(null);
+const ClockContext = createContext<ClockCtx>({ currentTime: 0, progress: 0 });
 
 function useTranscript() {
   const ctx = useContext(TranscriptContext);
@@ -97,6 +103,10 @@ function useTranscript() {
     );
   }
   return ctx;
+}
+
+function useClock() {
+  return useContext(ClockContext);
 }
 
 function TranscriptRoot({
@@ -116,8 +126,16 @@ function TranscriptRoot({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const activeParaRef = useRef<HTMLElement | null>(null);
   const userScrollUntil = useRef(0);
+  /** Raw media time — updated every frame without React. */
+  const timeRef = useRef(0);
+  const wordIdxRef = useRef(-1);
+  const paraIdxRef = useRef(-1);
+  const lastUiFlushRef = useRef(0);
 
   const [currentTime, setCurrentTime] = useState(0);
+  const [currentWordIndex, setCurrentWordIndex] = useState(-1);
+  const [currentParaIndex, setCurrentParaIndex] = useState(-1);
+  const [atEnd, setAtEnd] = useState(false);
   const [duration, setDuration] = useState(Math.max(durationSeconds, 0));
   const [isPlaying, setIsPlaying] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -156,14 +174,73 @@ function TranscriptRoot({
   }, [isLong, src, text]);
 
   useEffect(() => {
+    timeRef.current = 0;
+    wordIdxRef.current = -1;
+    paraIdxRef.current = -1;
+    lastUiFlushRef.current = 0;
     setCurrentTime(0);
+    setCurrentWordIndex(-1);
+    setCurrentParaIndex(-1);
+    setAtEnd(false);
     setIsPlaying(false);
   }, [src, text]);
+
+  const syncPlaybackMarkers = useCallback(
+    (t: number, forceUi = false) => {
+      timeRef.current = t;
+      const words = composed.words;
+      const dur = duration;
+      const end = dur > 0 && t >= dur - 0.05;
+
+      let idx = -1;
+      if (words.length) {
+        // Words are time-ordered — walk until past playhead.
+        for (let i = 0; i < words.length; i++) {
+          if (t + 1e-3 >= words[i].startTime) idx = i;
+          else break;
+        }
+        if (end) idx = words.length - 1;
+      }
+
+      let paraIdx = -1;
+      if (idx >= 0) {
+        for (let p = 0; p < paragraphs.length; p++) {
+          const first = paragraphs[p].words[0]?.wordIndex ?? -1;
+          const last =
+            paragraphs[p].words[paragraphs[p].words.length - 1]?.wordIndex ??
+            -1;
+          if (idx >= first && idx <= last) {
+            paraIdx = p;
+            break;
+          }
+        }
+      }
+
+      if (idx !== wordIdxRef.current) {
+        wordIdxRef.current = idx;
+        setCurrentWordIndex(idx);
+      }
+      if (paraIdx !== paraIdxRef.current) {
+        paraIdxRef.current = paraIdx;
+        setCurrentParaIndex(paraIdx);
+      }
+      setAtEnd((prev) => (prev === end ? prev : end));
+
+      // Scrubber/clock: ~10 Hz, not 60 fps full-tree reconcile.
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (forceUi || now - lastUiFlushRef.current >= 100) {
+        lastUiFlushRef.current = now;
+        setCurrentTime(t);
+      }
+    },
+    [composed.words, duration, paragraphs],
+  );
 
   useEffect(() => {
     const tick = () => {
       const el = mediaRef.current;
-      if (el && !isScrubbing) setCurrentTime(el.currentTime);
+      if (el && !isScrubbing) syncPlaybackMarkers(el.currentTime);
       rafRef.current = requestAnimationFrame(tick);
     };
     if (isPlaying) rafRef.current = requestAnimationFrame(tick);
@@ -171,7 +248,7 @@ function TranscriptRoot({
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [isPlaying, isScrubbing]);
+  }, [isPlaying, isScrubbing, syncPlaybackMarkers]);
 
   const seekTo = useCallback(
     (time: number) => {
@@ -179,9 +256,9 @@ function TranscriptRoot({
       if (!el) return;
       const next = Math.min(Math.max(time, 0), el.duration || duration || 0);
       el.currentTime = next;
-      setCurrentTime(next);
+      syncPlaybackMarkers(next, true);
     },
-    [duration],
+    [duration, syncPlaybackMarkers],
   );
 
   const togglePlay = useCallback(() => {
@@ -209,38 +286,6 @@ function TranscriptRoot({
     [seekTo],
   );
 
-  const { currentWordIndex, currentParaIndex, atEnd } = useMemo(() => {
-    const words = composed.words;
-    if (!words.length) {
-      return { currentWordIndex: -1, currentParaIndex: -1, atEnd: false };
-    }
-    const end = duration > 0 && currentTime >= duration - 0.05;
-    let idx = -1;
-    for (let i = 0; i < words.length; i++) {
-      if (currentTime + 1e-3 >= words[i].startTime) idx = i;
-      else break;
-    }
-    if (end) idx = words.length - 1;
-
-    let paraIdx = -1;
-    if (idx >= 0) {
-      for (let p = 0; p < paragraphs.length; p++) {
-        const first = paragraphs[p].words[0]?.wordIndex ?? -1;
-        const last =
-          paragraphs[p].words[paragraphs[p].words.length - 1]?.wordIndex ?? -1;
-        if (idx >= first && idx <= last) {
-          paraIdx = p;
-          break;
-        }
-      }
-    }
-    return {
-      currentWordIndex: idx,
-      currentParaIndex: paraIdx,
-      atEnd: end,
-    };
-  }, [composed.words, currentTime, duration, paragraphs]);
-
   const statusForWord = useCallback(
     (word: TranscriptWord): WordStatus => {
       if (atEnd) return "spoken";
@@ -262,7 +307,8 @@ function TranscriptRoot({
     const nodeRect = node.getBoundingClientRect();
     const nodeTop = nodeRect.top - scrollerRect.top + scroller.scrollTop;
     const target = Math.max(0, nodeTop - scroller.clientHeight * 0.28);
-    scroller.scrollTo({ top: target, behavior: "smooth" });
+    // Instant follow — smooth queues layout thrash while playhead advances.
+    scroller.scrollTo({ top: target, behavior: "auto" });
   }, [currentParaIndex, mode, isPlaying]);
 
   const onUserScroll = useCallback(() => {
@@ -271,7 +317,8 @@ function TranscriptRoot({
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
   const hasTimed = paragraphs.length > 0;
-  const isPlayingOrScrubbed = isPlaying || currentTime > 0;
+  const isPlayingOrScrubbed =
+    isPlaying || currentWordIndex >= 0 || currentParaIndex >= 0;
 
   const mediaHandlers = useMemo(
     () => ({
@@ -279,7 +326,7 @@ function TranscriptRoot({
       onPause: () => setIsPlaying(false),
       onEnded: () => {
         setIsPlaying(false);
-        setCurrentTime(duration);
+        syncPlaybackMarkers(duration, true);
       },
       onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => {
         const d = e.currentTarget.duration;
@@ -290,7 +337,7 @@ function TranscriptRoot({
         if (Number.isFinite(d) && d > 0) setDuration(d);
       },
     }),
-    [duration],
+    [duration, syncPlaybackMarkers],
   );
 
   const value = useMemo<TranscriptCtx>(
@@ -300,11 +347,9 @@ function TranscriptRoot({
       mediaRef,
       scrollRef,
       activeParaRef,
-      currentTime,
       duration,
       isPlaying,
       setIsScrubbing,
-      progress,
       mode,
       setMode,
       isLong,
@@ -325,10 +370,8 @@ function TranscriptRoot({
     [
       src,
       isVideo,
-      currentTime,
       duration,
       isPlaying,
-      progress,
       mode,
       isLong,
       hasTimed,
@@ -347,9 +390,14 @@ function TranscriptRoot({
     ],
   );
 
+  const clock = useMemo<ClockCtx>(
+    () => ({ currentTime, progress }),
+    [currentTime, progress],
+  );
+
   return (
     <TranscriptContext.Provider value={value}>
-      {children}
+      <ClockContext.Provider value={clock}>{children}</ClockContext.Provider>
     </TranscriptContext.Provider>
   );
 }
@@ -439,12 +487,11 @@ function TranscriptControls({ className }: { className?: string }) {
     src,
     isPlaying,
     togglePlay,
-    progress,
     duration,
-    currentTime,
     seekTo,
     setIsScrubbing,
   } = useTranscript();
+  const { currentTime, progress } = useClock();
 
   if (!src) return null;
 
@@ -453,7 +500,7 @@ function TranscriptControls({ className }: { className?: string }) {
     initial={{ opacity: 0}}
     animate={{ opacity: 1}}
     exit={{ opacity: 0}}
-    transition={{ duration: 0.8}}
+    transition={{ duration: 0.18}}
     >
       <div className="flex items-center gap-3">
         <Button
@@ -624,50 +671,56 @@ function TranscriptContent({
                   }
                   data-active={isActive || undefined}
                   className={cn(
-                    "group relative rounded-2xl transition-all duration-300",
+                    "group relative rounded-xl transition-[opacity,background-color,box-shadow] duration-200",
                     mode === "focus" &&
                       isActive &&
-                      "bg-accent/[0.06] px-4 py-3",
-                    mode === "read" && "px-1",
-                    dim && isPast && "opacity-[0.34]",
-                    dim && isFuture && "opacity-[0.22]",
+                      "bg-accent/[0.07] px-4 py-3.5 ring-1 ring-accent/15",
+                    mode === "read" && isActive && "border-l-2 border-accent/50 pl-3",
+                    mode === "read" && !isActive && "pl-3.5",
+                    dim && isPast && "opacity-[0.38]",
+                    dim && isFuture && "opacity-[0.26]",
                   )}
                 >
                   <button
                     type="button"
-                    className="mb-1.5 block text-[10px] tabular-nums tracking-wide text-muted/80 transition hover:text-accent"
+                    className="mb-1.5 block font-mono text-[10px] tabular-nums tracking-wider text-muted/70 transition hover:text-accent"
                     onClick={() => seekToParagraph(para)}
                   >
                     {formatClock(para.startTime)}
                   </button>
                   <p
                     className={cn(
-                      "text-pretty break-words transition-all duration-300",
+                      "text-pretty break-words",
                       mode === "focus" && isActive
                         ? "text-[17px] leading-[1.85] sm:text-[18px]"
                         : "text-[15px] leading-[1.75] sm:text-base",
                       "text-foreground",
                     )}
                   >
-                    {para.words.map((word) => {
+                    {para.words.map((word, wi) => {
                       const status = statusForWord(word);
+                      const prev = wi > 0 ? para.words[wi - 1] : null;
+                      const needSpace =
+                        prev != null && needsLatinWordSpace(prev.text, word.text);
                       return (
-                        <button
-                          key={`w-${word.segmentIndex}`}
-                          type="button"
-                          data-status={status}
-                          title={`${formatClock(word.startTime)}`}
-                          className={cn(
-                            "inline rounded-[3px] px-[0.5px] transition-colors duration-100",
-                            status === "spoken" && "text-muted",
-                            status === "current" &&
-                              "bg-accent/30 font-semibold text-accent",
-                            status === "unspoken" && "text-inherit",
-                          )}
-                          onClick={() => seekToWord(word)}
-                        >
-                          {word.text}
-                        </button>
+                        <span key={`w-${word.segmentIndex}`}>
+                          {needSpace ? " " : null}
+                          <button
+                            type="button"
+                            data-status={status}
+                            title={`${formatClock(word.startTime)}`}
+                            className={cn(
+                              "inline rounded-sm px-px transition-colors duration-100",
+                              status === "spoken" && "text-muted",
+                              status === "current" &&
+                                "bg-accent/25 font-medium text-accent",
+                              status === "unspoken" && "text-inherit",
+                            )}
+                            onClick={() => seekToWord(word)}
+                          >
+                            {word.text}
+                          </button>
+                        </span>
                       );
                     })}
                   </p>

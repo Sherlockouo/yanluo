@@ -25,9 +25,24 @@ export const defaultHotkeyCancel: HotkeyBinding = {
   label: "Esc",
 };
 
-/** Built-in refine system prompt (glossary appended by backend). */
-export const DEFAULT_LLM_REFINE_PROMPT =
-  "你是语音识别文本的保守纠错器。只修复明显语音识别错误，尤其是中英文混合场景：中文谐音把英文术语听成汉字（配森->Python、杰森->JSON、麦赛口->MySQL、瑞艾克特->React）。保留中英混杂，不要把英文术语强行译成中文，也不要把中文改成英文。绝对不要润色、补充、总结或删除看起来正确的内容。如果输入看起来正确，必须原样返回。只输出最终文本，不要解释。";
+/** Built-in refine prompt — tuned for small local chat models (esp. qwen3:1.7b). */
+export const DEFAULT_LLM_REFINE_PROMPT = `\
+任务：修正语音识别(ASR)文本里的明显错误。
+
+规则：
+1. 只改识别错：谐音、同音、英文术语被听成汉字。
+2. 中英混写保持原样；英文术语不要译成中文；正确中文不要改成英文。
+3. 不润色、不扩写、不删正确内容、不总结。
+4. 看不出错误 → 原样输出输入。
+5. 只输出纠错后全文；不要解释、不要引号、不要 <think>。
+
+示例：
+输入：我用配森写了个杰森接口
+输出：我用Python写了个JSON接口
+输入：打开麦赛口数据库
+输出：打开MySQL数据库
+输入：今天开会讨论进度
+输出：今天开会讨论进度`;
 
 /** Built-in translate system prompt; `{target}` → language name. */
 export const DEFAULT_LLM_TRANSLATE_PROMPT =
@@ -77,7 +92,7 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     id: "ollama",
     label: "Ollama",
     baseUrl: "http://127.0.0.1:11434/v1",
-    models: ["llama3.2", "qwen2.5", "mistral"],
+    models: ["qwen3:1.7b", "qwen3:4b", "qwen2.5", "llama3.2"],
   },
   {
     id: "custom",
@@ -182,14 +197,37 @@ export function hudTargetShort(code?: string | null): string {
   }
 }
 
-export const NAV: { id: Page; label: string }[] = [
-  { id: "overview", label: "主页" },
-  { id: "transcribe", label: "转写" },
-  { id: "translate", label: "翻译" },
-  { id: "asr", label: "ASR" },
-  { id: "llm", label: "LLM" },
-  { id: "vocabulary", label: "词库" },
-  { id: "history", label: "历史" },
+export type NavItem = { id: Page; label: string };
+
+export type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+/** Sidebar groups — settings stays in footer, not here. */
+export const NAV_GROUPS: NavGroup[] = [
+  {
+    label: "工作",
+    items: [
+      { id: "overview", label: "主页" },
+      { id: "transcribe", label: "转写" },
+      { id: "history", label: "历史" },
+    ],
+  },
+  {
+    label: "能力",
+    items: [
+      { id: "asr", label: "ASR" },
+      { id: "translate", label: "翻译" },
+      { id: "llm", label: "LLM" },
+      { id: "vocabulary", label: "词库" },
+    ],
+  },
+];
+
+/** Flat list (groups + settings) for any consumer that needs all pages. */
+export const NAV: NavItem[] = [
+  ...NAV_GROUPS.flatMap((g) => g.items),
   { id: "settings", label: "设置" },
 ];
 

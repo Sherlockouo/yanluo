@@ -21,6 +21,14 @@ import type {
   TranscriptionResult,
 } from "@/types";
 import { defaultConfig } from "@/lib/constants";
+import {
+  harvestFromTriples,
+} from "@/lib/learn-cases";
+import type { LearnCandidate } from "@/lib/learn-from-refine";
+import {
+  mergePendingLearn,
+  type PendingLearn,
+} from "@/lib/pending-learn";
 
 export type ThemeMode = "dark" | "light";
 
@@ -32,6 +40,7 @@ type AppContextValue = {
   modelLoading: boolean;
   newTerm: string;
   theme: ThemeMode;
+  pendingLearn: PendingLearn | null;
   setNewTerm: (value: string) => void;
   setTheme: (theme: ThemeMode | ((prev: ThemeMode) => ThemeMode)) => void;
   updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void;
@@ -44,8 +53,23 @@ type AppContextValue = {
   saveVocabulary: (vocabulary: string[]) => Promise<void>;
   clearHistory: () => Promise<void>;
   deleteHistory: (id: string) => Promise<void>;
+  rateHistory: (id: string, rating: "" | "bad" | "ok" | "good") => Promise<void>;
+  setHistoryUserText: (id: string, userText: string) => Promise<void>;
   pruneHistory: (keep: number) => Promise<void>;
   pruneHistoryOlderThan: (days: number) => Promise<void>;
+  distillLearnFromRatings: () => Promise<{ terms: string[]; source_ids: string[] }>;
+  markHistoryLearnStatus: (
+    ids: string[],
+    status: "" | "suggested" | "distilled" | "applied" | "skipped",
+  ) => Promise<void>;
+  applyLearnedTerms: (ids: string[], terms: string[]) => Promise<string[]>;
+  offerLearnFromEntries: (
+    entries: HistoryEntry[],
+    terms?: LearnCandidate[],
+  ) => Promise<number>;
+  abortPendingLearn: () => Promise<void>;
+  clearPendingLearn: () => void;
+  removePendingLearnTerm: (term: string) => Promise<void>;
   markSession: (mode: "fn" | "translate" | "transcribe") => void;
 };
 
@@ -74,6 +98,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [modelLoaded, setModelLoaded] = useState(false);
   const [modelLoading, setModelLoading] = useState(false);
   const [newTerm, setNewTerm] = useState("");
+  const [pendingLearn, setPendingLearn] = useState<PendingLearn | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => {
     const saved = localStorage.getItem("asr-theme");
     return saved === "light" ? "light" : "dark";
@@ -92,6 +117,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  // After reload: rebuild pending chips from suggested bad cases.
+  useEffect(() => {
+    if (pendingLearn?.terms.length) return;
+    const suggested = history.filter(
+      (e) =>
+        e.learn_status === "suggested" &&
+        (e.source ?? "fn") !== "translate" &&
+        (e.quality_rating === "bad" || Boolean(e.user_text?.trim())),
+    );
+    if (!suggested.length) return;
+    const cands = harvestFromTriples(suggested, config.vocabulary);
+    if (!cands.length) return;
+    setPendingLearn({
+      terms: cands,
+      sourceIds: suggested.map((e) => e.id),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history.length]);
 
   const loadConfig = useCallback(async () => {
     const next = await invoke<AppConfig>("get_app_config").catch(
@@ -147,18 +191,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       listen<TranscriptionResult>("transcription-result", (event) => {
         const result = event.payload;
         setState("idle");
+        stateRef.current = "idle";
         if (result.error) {
           toast.danger(result.error);
           return;
         }
-        if (sessionModeRef.current === "transcribe") {
+        const mode = sessionModeRef.current;
+        if (mode === "translate") {
+          toast.success(result.refined ? "已翻译并粘贴" : "已粘贴");
+        } else if (mode === "transcribe") {
           toast.success(
             result.refined ? "转写完成（已优化）" : "转写完成，已保存音频与文本",
           );
-        } else if (sessionModeRef.current === "translate") {
-          toast.success(result.refined ? "已翻译并粘贴" : "已粘贴");
         } else {
-          toast.success(result.refined ? "已优化并粘贴" : "已写入剪切板并粘贴");
+          toast.success("已写入剪切板并粘贴");
         }
         sessionModeRef.current = "fn";
         void loadHistory();
@@ -172,6 +218,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setModelLoaded(false);
         setModelLoading(false);
         toast.danger(event.payload);
+      }),
+      listen<string>("mlx-worker-dead", (event) => {
+        setModelLoaded(false);
+        setModelLoading(false);
+        setState("idle");
+        stateRef.current = "idle";
+        toast.danger(
+          `ASR 引擎崩溃：${event.payload || "unknown"}。请重启应用。`,
+        );
       }),
       listen<AppConfig>("config-updated", (event) => {
         setConfig({
@@ -202,18 +257,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : "transcribe";
         const shift = intention === "translate";
         // Toggle: hotkey press starts when idle, stops when recording.
+        // Stop = accept current (no refine / full re-translate).
         if (stateRef.current === "recording") {
-          const translating = sessionModeRef.current === "translate";
-          const shouldRefine =
-            translating ||
-            Boolean(
-              current.llm_enabled &&
-                current.llm_api_base_url?.trim() &&
-                current.llm_model?.trim(),
-            );
-          const next: RecState = shouldRefine ? "refining" : "processing";
-          setState(next);
-          stateRef.current = next;
+          setState("processing");
+          stateRef.current = "processing";
           try {
             await invoke("stop_recording");
           } catch (error) {
@@ -263,11 +310,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ) {
           return;
         }
+        const midPipeline =
+          stateRef.current === "processing" || stateRef.current === "refining";
         try {
           await invoke("cancel_recording");
           setState("idle");
           stateRef.current = "idle";
-          toast.info("已取消录音");
+          toast.info(midPipeline ? "已中止后续处理" : "已取消录音");
         } catch (error) {
           toast.danger(`取消失败: ${error}`);
         }
@@ -386,6 +435,156 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [loadHistory],
   );
 
+  const rateHistory = useCallback(
+    async (id: string, rating: "" | "bad" | "ok" | "good") => {
+      await invoke("rate_history_entry", { id, rating });
+      const ratedAt = rating === "" ? null : new Date().toISOString();
+      setHistory((prev) =>
+        prev.map((e) =>
+          e.id === id
+            ? {
+                ...e,
+                quality_rating: rating === "" ? null : rating,
+                rated_at: ratedAt,
+              }
+            : e,
+        ),
+      );
+    },
+    [],
+  );
+
+  const setHistoryUserText = useCallback(async (id: string, userText: string) => {
+    await invoke("set_history_user_text", { id, userText });
+    setHistory((prev) =>
+      prev.map((e) =>
+        e.id === id
+          ? {
+              ...e,
+              user_text: userText.trim(),
+              text: userText.trim(),
+              learn_status:
+                e.learn_status === "applied" || e.learn_status === "skipped"
+                  ? e.learn_status
+                  : "suggested",
+              quality_rating: e.quality_rating ?? "bad",
+              rated_at: e.rated_at ?? new Date().toISOString(),
+            }
+          : e,
+      ),
+    );
+  }, []);
+
+  const distillLearnFromRatings = useCallback(async () => {
+    return invoke<{ terms: string[]; source_ids: string[] }>(
+      "distill_learn_from_ratings",
+    );
+  }, []);
+
+  const markHistoryLearnStatus = useCallback(
+    async (
+      ids: string[],
+      status: "" | "suggested" | "distilled" | "applied" | "skipped",
+    ) => {
+      if (ids.length === 0) return;
+      if (ids.length === 1) {
+        await invoke("mark_history_learn_status", { id: ids[0], status });
+      } else {
+        await invoke("mark_history_learn_status_batch", { ids, status });
+      }
+      setHistory((prev) =>
+        prev.map((e) =>
+          ids.includes(e.id)
+            ? {
+                ...e,
+                learn_status: status === "" ? null : status,
+              }
+            : e,
+        ),
+      );
+    },
+    [],
+  );
+
+  const applyLearnedTerms = useCallback(
+    async (ids: string[], terms: string[]) => {
+      const vocabulary = await invoke<string[]>("apply_learned_terms", {
+        ids,
+        terms,
+      });
+      setConfig((prev) => ({ ...prev, vocabulary }));
+      setHistory((prev) =>
+        prev.map((e) =>
+          ids.includes(e.id)
+            ? {
+                ...e,
+                learn_status: "applied",
+                learn_terms: Array.from(
+                  new Set([...(e.learn_terms ?? []), ...terms]),
+                ),
+              }
+            : e,
+        ),
+      );
+      setPendingLearn(null);
+      return vocabulary;
+    },
+    [],
+  );
+
+  const pendingLearnRef = useRef(pendingLearn);
+  pendingLearnRef.current = pendingLearn;
+
+  const offerLearnFromEntries = useCallback(
+    async (entries: HistoryEntry[], terms?: LearnCandidate[]) => {
+      if (!entries.length) return 0;
+      const cands =
+        terms ??
+        harvestFromTriples(entries, configRef.current.vocabulary);
+      if (!cands.length) return 0;
+      const sourceIds = entries.map((e) => e.id);
+      setPendingLearn((prev) => mergePendingLearn(prev, cands, sourceIds));
+      try {
+        await markHistoryLearnStatus(sourceIds, "suggested");
+      } catch {
+        /* non-fatal */
+      }
+      return cands.length;
+    },
+    [markHistoryLearnStatus],
+  );
+
+  const abortPendingLearn = useCallback(async () => {
+    const ids = pendingLearnRef.current?.sourceIds ?? [];
+    setPendingLearn(null);
+    if (!ids.length) return;
+    try {
+      await markHistoryLearnStatus(ids, "");
+    } catch {
+      /* non-fatal */
+    }
+  }, [markHistoryLearnStatus]);
+
+  const clearPendingLearn = useCallback(() => {
+    void abortPendingLearn();
+  }, [abortPendingLearn]);
+
+  const removePendingLearnTerm = useCallback(
+    async (term: string) => {
+      const prev = pendingLearnRef.current;
+      if (!prev) return;
+      const terms = prev.terms.filter(
+        (c) => c.term.toLocaleLowerCase() !== term.toLocaleLowerCase(),
+      );
+      if (!terms.length) {
+        await abortPendingLearn();
+        return;
+      }
+      setPendingLearn({ ...prev, terms });
+    },
+    [abortPendingLearn],
+  );
+
   const pruneHistory = useCallback(
     async (keep: number) => {
       await invoke("prune_history", { keep });
@@ -415,6 +614,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       modelLoading,
       newTerm,
       theme,
+      pendingLearn,
       setNewTerm,
       setTheme,
       updateConfig,
@@ -427,8 +627,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveVocabulary,
       clearHistory,
       deleteHistory,
+      rateHistory,
+      setHistoryUserText,
       pruneHistory,
       pruneHistoryOlderThan,
+      distillLearnFromRatings,
+      markHistoryLearnStatus,
+      applyLearnedTerms,
+      offerLearnFromEntries,
+      abortPendingLearn,
+      clearPendingLearn,
+      removePendingLearnTerm,
       markSession,
     }),
     [
@@ -439,6 +648,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       modelLoading,
       newTerm,
       theme,
+      pendingLearn,
       updateConfig,
       saveConfig,
       loadHistory,
@@ -449,8 +659,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveVocabulary,
       clearHistory,
       deleteHistory,
+      rateHistory,
+      setHistoryUserText,
       pruneHistory,
       pruneHistoryOlderThan,
+      distillLearnFromRatings,
+      markHistoryLearnStatus,
+      applyLearnedTerms,
+      offerLearnFromEntries,
+      abortPendingLearn,
+      clearPendingLearn,
+      removePendingLearnTerm,
       markSession,
     ],
   );

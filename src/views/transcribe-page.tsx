@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, Chip, Modal, toast } from "@heroui/react";
+import { Button, Chip, Input, Label, Modal, TextField, toast } from "@heroui/react";
 import {
   Clipboard,
+  Download,
   FileAudio,
   FileVideo,
   Plus,
@@ -21,13 +22,39 @@ import {
 } from "@/lib/constants";
 import { isVideoMediaKind } from "@/lib/alignment";
 import {
+  ModeSwitch,
   PageHeader,
   PageShell,
   SectionCard,
 } from "@/components/shared/page-shell";
-import { TranscriptViewer } from "@/components/ui/transcript-viewer";
 import { useApp } from "@/app-context";
 import { cn } from "@/lib/cn";
+
+type TranscriptViewerType =
+  typeof import("@/components/ui/transcript-viewer").TranscriptViewer;
+
+type UrlMode = "audio" | "video";
+
+type YtdlpStatus = {
+  available: boolean;
+  path: string | null;
+  version: string | null;
+  ffmpeg_available: boolean;
+  hint: string;
+};
+
+type UrlDownloadProgress = {
+  phase: string;
+  percent: number | null;
+  message: string;
+};
+
+type UrlDownloadResult = {
+  path: string;
+  media_kind: string;
+  title: string | null;
+  job_dir: string;
+};
 
 const VIDEO_EXTS = new Set([
   "mp4",
@@ -75,6 +102,8 @@ type StoredView = {
   activeId: string | null;
   /** Survives route remounts while a file job is in flight. */
   processingName: string | null;
+  /** Newest transcribe history id when job started (completion detection). */
+  jobBaselineId: string | null;
 };
 
 function isMediaPath(path: string) {
@@ -101,6 +130,7 @@ function readStored(): StoredView | null {
       view: parsed.view,
       activeId: parsed.activeId ?? null,
       processingName: parsed.processingName ?? null,
+      jobBaselineId: parsed.jobBaselineId ?? null,
     };
   } catch {
     return null;
@@ -109,6 +139,16 @@ function readStored(): StoredView | null {
 
 function writeStored(next: StoredView) {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+}
+
+/** Schedule after paint; prefer idle so tab-enter stays free. */
+function deferWork(fn: () => void, timeoutMs: number): () => void {
+  if (typeof window.requestIdleCallback === "function") {
+    const id = window.requestIdleCallback(fn, { timeout: timeoutMs });
+    return () => window.cancelIdleCallback(id);
+  }
+  const id = window.setTimeout(fn, 0);
+  return () => window.clearTimeout(id);
 }
 
 export function TranscribePage() {
@@ -130,7 +170,10 @@ export function TranscribePage() {
   const view: View =
     viewParam === "result" || viewParam === "upload"
       ? viewParam
-      : (stored?.view ?? "upload");
+      : (stored?.view ??
+        (history.some((e) => (e.source ?? "fn") === "transcribe")
+          ? "result"
+          : "upload"));
   const activeId = idParam ?? stored?.activeId ?? null;
 
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -138,7 +181,14 @@ export function TranscribePage() {
     () => stored?.processingName ?? null,
   );
   const [dragOver, setDragOver] = useState(false);
-  const historyLenRef = useRef(0);
+  const [urlMode, setUrlMode] = useState<UrlMode>("audio");
+  const [ytdlp, setYtdlp] = useState<YtdlpStatus | null>(null);
+  const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
+  const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
+  const [jobBaselineId, setJobBaselineId] = useState<string | null>(
+    () => stored?.jobBaselineId ?? null,
+  );
+  const jobDirRef = useRef<string | null>(null);
   const bootedRef = useRef(false);
 
   const processing = processingName != null;
@@ -157,6 +207,61 @@ export function TranscribePage() {
   const modelBlocked = config.asr_provider === "qwen" && !modelLoaded;
   const canStart = Boolean(selectedPath) && !modelBlocked && !processing;
 
+  useEffect(() => {
+    let cancelled = false;
+    // Defer IPC off first paint so page enter stays smooth.
+    const id = window.requestAnimationFrame(() => {
+      void invoke<YtdlpStatus>("get_ytdlp_status")
+        .then((status) => {
+          if (!cancelled) setYtdlp(status);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setYtdlp({
+              available: false,
+              path: null,
+              version: null,
+              ffmpeg_available: false,
+              hint: "无法检测 yt-dlp",
+            });
+          }
+        });
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(id);
+    };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    // Idle — not on the tab-click critical path.
+    const cancelDefer = deferWork(() => {
+      if (cancelled) return;
+      void listen<UrlDownloadProgress>("url-download-progress", (event) => {
+        const { percent, message } = event.payload;
+        if (percent != null) {
+          const next = percent;
+          setDownloadPercent((prev) =>
+            prev != null && Math.abs(prev - next) < 0.5 ? prev : next,
+          );
+        }
+        if (message) {
+          setDownloadMessage((prev) => (prev === message ? prev : message));
+        }
+      }).then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      });
+    }, 800);
+    return () => {
+      cancelled = true;
+      cancelDefer();
+      unlisten?.();
+    };
+  }, []);
+
   const activeEntry = useMemo(() => {
     if (!sessionEntries.length) return null;
     if (activeId) {
@@ -172,6 +277,7 @@ export function TranscribePage() {
         id?: string | null;
         processingName?: string | null;
         clearSelection?: boolean;
+        jobBaselineId?: string | null;
       },
     ) => {
       const nextId =
@@ -182,11 +288,16 @@ export function TranscribePage() {
         opts?.processingName !== undefined
           ? opts.processingName
           : processingName;
+      const nextBaseline =
+        opts?.jobBaselineId !== undefined
+          ? opts.jobBaselineId
+          : jobBaselineId;
 
       writeStored({
         view: next,
         activeId: nextId,
         processingName: nextProcessing,
+        jobBaselineId: nextBaseline,
       });
 
       const params = new URLSearchParams();
@@ -197,69 +308,103 @@ export function TranscribePage() {
       if (opts?.processingName !== undefined) {
         setProcessingName(opts.processingName);
       }
+      if (opts?.jobBaselineId !== undefined) {
+        setJobBaselineId(opts.jobBaselineId);
+      }
       if (opts?.clearSelection) setSelectedPath(null);
     },
-    [activeId, processingName, setSearchParams],
+    [activeId, jobBaselineId, processingName, setSearchParams],
   );
 
-  // Hydrate URL once from storage so leaving the page still remembers view.
-  // Default is upload — never auto-open result just because history exists.
+  const beginJob = useCallback(
+    (name: string) => {
+      const baseline = sessionEntries[0]?.id ?? null;
+      setJobBaselineId(baseline);
+      setDownloadPercent(null);
+      setDownloadMessage(null);
+      go("upload", {
+        processingName: name,
+        clearSelection: true,
+        jobBaselineId: baseline,
+      });
+    },
+    [go, sessionEntries],
+  );
+
+  // Hydrate URL once from already-painted view. Never re-fetch history / never
+  // go() when params already match — that remount cascade is the tab-click hitch.
   useEffect(() => {
     if (bootedRef.current) return;
     bootedRef.current = true;
-    historyLenRef.current = sessionEntries.length;
-
-    if (viewParam === "upload" || viewParam === "result") {
-      writeStored({
-        view: viewParam,
-        activeId: idParam,
-        processingName: stored?.processingName ?? null,
-      });
-      if (stored?.processingName) {
-        setProcessingName(stored.processingName);
-      }
-      return;
-    }
 
     if (stored?.processingName) {
-      go("upload", { processingName: stored.processingName });
-      return;
+      setProcessingName(stored.processingName);
+      setJobBaselineId(stored.jobBaselineId ?? null);
     }
-    if (stored) {
-      go(stored.view, { id: stored.activeId });
-      return;
-    }
-    go("upload");
+
+    const paintedView = view;
+    const paintedId =
+      paintedView === "result"
+        ? (activeId ?? sessionEntries[0]?.id ?? null)
+        : null;
+
+    writeStored({
+      view: paintedView,
+      activeId: paintedId,
+      processingName: stored?.processingName ?? null,
+      jobBaselineId: stored?.jobBaselineId ?? null,
+    });
+
+    if (viewParam === "upload" || viewParam === "result") return;
+
+    const id = window.requestAnimationFrame(() => {
+      const params = new URLSearchParams();
+      params.set("view", paintedView);
+      if (paintedView === "result" && paintedId) params.set("id", paintedId);
+      setSearchParams(params, { replace: true });
+    });
+    return () => window.cancelAnimationFrame(id);
     // intentionally once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Job finished → newest result page.
+  // Job finished → newest result (by id, not capped list length).
   useEffect(() => {
-    const prev = historyLenRef.current;
-    historyLenRef.current = sessionEntries.length;
     if (!processingName) return;
-    if (sessionEntries.length <= prev) return;
-
     const newest = sessionEntries[0];
-    go("result", {
-      id: newest.id,
-      processingName: null,
-      clearSelection: true,
-    });
-  }, [go, processingName, sessionEntries]);
+    if (!newest) return;
+    if (newest.id === jobBaselineId) return;
+    // New entry appeared (or first entry after empty baseline).
+    if (jobBaselineId == null || newest.id !== jobBaselineId) {
+      go("result", {
+        id: newest.id,
+        processingName: null,
+        clearSelection: true,
+        jobBaselineId: null,
+      });
+      setDownloadPercent(null);
+      setDownloadMessage(null);
+      if (jobDirRef.current) {
+        const dir = jobDirRef.current;
+        jobDirRef.current = null;
+        void invoke("cleanup_download_job", { jobDir: dir }).catch(() => {});
+      }
+    }
+  }, [go, jobBaselineId, processingName, sessionEntries]);
 
-  // Backend error while processing.
+  // Backend error while processing — also success path refreshes history.
   useEffect(() => {
     if (!processingName) return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
     void listen<TranscriptionResult>("transcription-result", (event) => {
-      if (!event.payload.error) {
-        void loadHistory();
+      if (event.payload.error) {
+        go("upload", { processingName: null, jobBaselineId: null });
+        setDownloadPercent(null);
+        setDownloadMessage(null);
         return;
       }
-      go("upload", { processingName: null });
+      void loadHistory();
     }).then((fn) => {
       if (disposed) fn();
       else unlisten = fn;
@@ -277,11 +422,12 @@ export function TranscribePage() {
       view,
       activeId: view === "result" ? (activeEntry?.id ?? activeId) : null,
       processingName,
+      jobBaselineId,
     });
-  }, [activeEntry?.id, activeId, processingName, view]);
+  }, [activeEntry?.id, activeId, jobBaselineId, processingName, view]);
 
   const enterUpload = () => {
-    go("upload", { processingName: null, clearSelection: true });
+    go("upload", { processingName: null, jobBaselineId: null, clearSelection: true });
   };
 
   const selectEntry = (id: string) => {
@@ -328,80 +474,149 @@ export function TranscribePage() {
   };
 
   useEffect(() => {
+    if (screen !== "upload") return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
-    void getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (event.payload.type === "enter" || event.payload.type === "over") {
-          if (screen === "upload") setDragOver(true);
-          return;
-        }
-        if (event.payload.type === "leave") {
-          setDragOver(false);
-          return;
-        }
-        if (event.payload.type === "drop") {
-          setDragOver(false);
-          if (screen !== "upload") return;
-          const path = event.payload.paths.find(isMediaPath);
-          if (!path) {
-            toast.warning("请拖入音频或视频文件");
+    const cancelDefer = deferWork(() => {
+      if (disposed) return;
+      void getCurrentWebview()
+        .onDragDropEvent((event) => {
+          if (event.payload.type === "enter" || event.payload.type === "over") {
+            setDragOver(true);
             return;
           }
-          acceptPath(path);
-        }
-      })
-      .then((fn) => {
-        if (disposed) fn();
-        else unlisten = fn;
-      })
-      .catch(() => {
-        /* web / HMR */
-      });
+          if (event.payload.type === "leave") {
+            setDragOver(false);
+            return;
+          }
+          if (event.payload.type === "drop") {
+            setDragOver(false);
+            const path = event.payload.paths.find(isMediaPath);
+            if (!path) {
+              toast.warning("请拖入音频或视频文件");
+              return;
+            }
+            acceptPath(path);
+          }
+        })
+        .then((fn) => {
+          if (disposed) fn();
+          else unlisten = fn;
+        })
+        .catch(() => {
+          /* web / HMR */
+        });
+    }, 1200);
     return () => {
       disposed = true;
+      cancelDefer();
       unlisten?.();
     };
-    // acceptPath closes over go; screen is the gate.
+    // acceptPath closes over go; only wire while upload is visible.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screen]);
 
-  const runTranscribe = async () => {
-    if (!selectedPath || !canStart) return;
-
-    const path = selectedPath;
-    const name = fileName(path);
-
-    // Switch away from upload immediately — before the backend round-trip.
-    historyLenRef.current = sessionEntries.length;
-    go("upload", { processingName: name, clearSelection: true });
-    markSession("transcribe");
-
+  const cancelProcessing = async () => {
     try {
-      await invoke("save_app_config", { config });
-      await invoke("transcribe_file", { path });
-      window.setTimeout(() => void loadHistory(), 800);
-    } catch (error) {
-      setSelectedPath(path);
-      go("upload", { processingName: null });
-      toast.danger(`转写失败: ${error}`);
+      await invoke("cancel_url_download");
+    } catch {
+      /* ignore */
     }
+    go("upload", { processingName: null, jobBaselineId: null });
+    setDownloadPercent(null);
+    setDownloadMessage(null);
+    if (jobDirRef.current) {
+      const dir = jobDirRef.current;
+      jobDirRef.current = null;
+      void invoke("cleanup_download_job", { jobDir: dir }).catch(() => {});
+    }
+    toast.success("已取消");
   };
 
   const languageLabel =
     config.language === "auto" ? "自动检测" : config.language;
   const selectedIsVideo = selectedPath ? isVideoPath(selectedPath) : false;
 
+  const runTranscribe = async () => {
+    if (!selectedPath || !canStart) return;
+
+    const path = selectedPath;
+    const name = fileName(path);
+    const kind = isVideoPath(path) ? "video" : "audio";
+    beginJob(name);
+    markSession("transcribe");
+
+    try {
+      await invoke("save_app_config", { config });
+      await invoke("transcribe_file", {
+        path,
+        mediaKind: kind,
+      });
+      window.setTimeout(() => void loadHistory(), 800);
+    } catch (error) {
+      setSelectedPath(path);
+      go("upload", { processingName: null, jobBaselineId: null });
+      toast.danger(`转写失败: ${error}`);
+    }
+  };
+
+  const runUrlDownloadAndTranscribe = async (rawUrl: string) => {
+    if (modelBlocked || processing) return;
+    const url = rawUrl.trim();
+    if (!/^https?:\/\//i.test(url)) return;
+    if (!ytdlp?.available) {
+      toast.danger(ytdlp?.hint || "请先安装 yt-dlp");
+      return;
+    }
+    if (!ytdlp.ffmpeg_available) {
+      toast.danger("需要本机 ffmpeg（brew install ffmpeg）");
+      return;
+    }
+
+    const label = urlMode === "audio" ? "下载音频中…" : "下载视频中…";
+    beginJob(label);
+    markSession("transcribe");
+
+    try {
+      const result = await invoke<UrlDownloadResult>("download_url_media", {
+        url,
+        mode: urlMode,
+      });
+      jobDirRef.current = result.job_dir;
+      const name =
+        result.title?.trim() ||
+        fileName(result.path) ||
+        (urlMode === "audio" ? "网络音频" : "网络视频");
+      go("upload", { processingName: `识别中 · ${name}` });
+      await invoke("save_app_config", { config });
+      await invoke("transcribe_file", {
+        path: result.path,
+        mediaKind: result.media_kind,
+      });
+      window.setTimeout(() => void loadHistory(), 800);
+    } catch (error) {
+      go("upload", { processingName: null, jobBaselineId: null });
+      toast.danger(`下载/转写失败: ${error}`);
+      if (jobDirRef.current) {
+        const dir = jobDirRef.current;
+        jobDirRef.current = null;
+        void invoke("cleanup_download_job", { jobDir: dir }).catch(() => {});
+      }
+    } finally {
+      setDownloadPercent(null);
+    }
+  };
+
   return (
     <PageShell className="max-w-5xl">
       <PageHeader
         title="转写"
-        subtitle={
+        status={
           screen === "processing"
-            ? "正在识别…"
+            ? "识别中"
             : screen === "result"
-              ? "播放时跟随当前一句。"
-              : undefined
+              ? languageLabel
+              : `${providerLabel(config.asr_provider)} · ${languageLabel}`
         }
         action={
           screen === "result" ? (
@@ -409,56 +624,50 @@ export function TranscribePage() {
               <Plus size={16} aria-hidden />
               新转写
             </Button>
-          ) : screen === "upload" && sessionEntries.length > 0 ? (
-            <Button
-              variant="secondary"
-              onPress={() =>
-                go("result", {
-                  id: activeEntry?.id ?? sessionEntries[0].id,
-                  processingName: null,
-                })
-              }
-            >
-              查看结果
-            </Button>
           ) : null
         }
       />
 
-      <div key={screen} className="page-enter">
-        {screen === "upload" ? (
-          <UploadPhase
-            selectedPath={selectedPath}
-            selectedIsVideo={selectedIsVideo}
-            dragOver={dragOver}
-            modelBlocked={modelBlocked}
-            canStart={canStart}
-            provider={providerLabel(config.asr_provider)}
-            languageLabel={languageLabel}
-            onPick={() => void pickFile()}
-            onStart={() => void runTranscribe()}
-          />
-        ) : null}
+      {/* No nested AnimatePresence — PageShell already owns enter. Double motion = tab hitch. */}
+      {screen === "upload" ? (
+        <UploadPhase
+          selectedPath={selectedPath}
+          selectedIsVideo={selectedIsVideo}
+          dragOver={dragOver}
+          modelBlocked={modelBlocked}
+          canStart={canStart}
+          provider={providerLabel(config.asr_provider)}
+          urlMode={urlMode}
+          ytdlp={ytdlp}
+          processing={processing}
+          onUrlModeChange={setUrlMode}
+          onPick={() => void pickFile()}
+          onStart={() => void runTranscribe()}
+          onUrlStart={(url) => void runUrlDownloadAndTranscribe(url)}
+        />
+      ) : null}
 
-        {screen === "processing" ? (
-          <ProcessingPhase
-            fileName={processingName}
-            provider={providerLabel(config.asr_provider)}
-            languageLabel={languageLabel}
-          />
-        ) : null}
+      {screen === "processing" ? (
+        <ProcessingPhase
+          fileName={processingName}
+          provider={providerLabel(config.asr_provider)}
+          languageLabel={languageLabel}
+          downloadPercent={downloadPercent}
+          downloadMessage={downloadMessage}
+          onCancel={() => void cancelProcessing()}
+        />
+      ) : null}
 
-        {screen === "result" ? (
-          <ResultPhase
-            activeEntry={activeEntry}
-            sessionEntries={sessionEntries}
-            languageLabel={languageLabel}
-            onSelect={selectEntry}
-            onDelete={(id) => void removeEntry(id)}
-            onNew={enterUpload}
-          />
-        ) : null}
-      </div>
+      {screen === "result" ? (
+        <ResultPhase
+          activeEntry={activeEntry}
+          sessionEntries={sessionEntries}
+          languageLabel={languageLabel}
+          onSelect={selectEntry}
+          onDelete={(id) => void removeEntry(id)}
+          onNew={enterUpload}
+        />
+      ) : null}
     </PageShell>
   );
 }
@@ -470,9 +679,13 @@ function UploadPhase({
   modelBlocked,
   canStart,
   provider,
-  languageLabel,
+  urlMode,
+  ytdlp,
+  processing,
+  onUrlModeChange,
   onPick,
   onStart,
+  onUrlStart,
 }: {
   selectedPath: string | null;
   selectedIsVideo: boolean;
@@ -480,92 +693,182 @@ function UploadPhase({
   modelBlocked: boolean;
   canStart: boolean;
   provider: string;
-  languageLabel: string;
+  urlMode: UrlMode;
+  ytdlp: YtdlpStatus | null;
+  processing: boolean;
+  onUrlModeChange: (m: UrlMode) => void;
   onPick: () => void;
   onStart: () => void;
+  onUrlStart: (url: string) => void;
 }) {
+  const [source, setSource] = useState<"file" | "link">("file");
+  // Local — keystrokes must not re-render TranscribePage + history tree.
+  const [urlInput, setUrlInput] = useState("");
+  const urlLooksValid = /^https?:\/\//i.test(urlInput.trim());
+  const canUrlStart = urlLooksValid && !modelBlocked && !processing;
+
   return (
-    <SectionCard className="mx-auto flex w-full max-w-2xl flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-foreground">选择媒体</div>
-          <div className="text-xs text-muted">
-            {provider} · {languageLabel}
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Button variant="secondary" onPress={onPick}>
-            <Upload size={16} aria-hidden />
-            选择文件
-          </Button>
-          <Button variant="primary" isDisabled={!canStart} onPress={onStart}>
-            {selectedIsVideo ? (
-              <FileVideo size={16} aria-hidden />
-            ) : (
-              <FileAudio size={16} aria-hidden />
-            )}
-            开始转写
-          </Button>
-        </div>
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
+      <div className="flex gap-1 rounded-xl border border-border p-1 self-start">
+        <button
+          type="button"
+          className={cn(
+            "rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition",
+            source === "file"
+              ? "bg-default text-foreground"
+              : "text-muted hover:text-foreground",
+          )}
+          onClick={() => setSource("file")}
+        >
+          文件
+        </button>
+        <button
+          type="button"
+          className={cn(
+            "rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition",
+            source === "link"
+              ? "bg-default text-foreground"
+              : "text-muted hover:text-foreground",
+          )}
+          onClick={() => setSource("link")}
+        >
+          链接
+        </button>
       </div>
 
-      {modelBlocked ? (
-        <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">
-          Qwen 模型加载中或未加载。若已配置模型目录，启动时会自动加载。
-        </div>
-      ) : null}
+      <ModeSwitch modeKey={source}>
+        {source === "file" ? (
+          <SectionCard className="flex flex-col gap-4">
+            {modelBlocked ? (
+              <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 type-meta text-warning">
+                模型未就绪
+              </div>
+            ) : null}
 
-      <button
-        type="button"
-        onClick={onPick}
-        className={cn(
-          "flex min-h-[200px] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-8 text-center transition",
-          dragOver
-            ? "border-accent/50 bg-accent/10"
-            : "border-border bg-surface-secondary/40 hover:border-foreground/25 hover:bg-surface-secondary/60",
-        )}
-      >
-        {selectedPath ? (
-          <>
-            {selectedIsVideo ? (
-              <FileVideo
-                className="block text-foreground"
-                size={28}
-                aria-hidden
-              />
-            ) : (
-              <FileAudio
-                className="block text-foreground"
-                size={28}
-                aria-hidden
-              />
-            )}
-            <div className="max-w-full truncate text-sm font-medium text-foreground">
-              {fileName(selectedPath)}
-            </div>
-            <p className="text-[12px] text-muted">
-              {selectedIsVideo
-                ? "将提取音轨 · 点击可更换文件"
-                : "点击可更换文件"}
-            </p>
-          </>
+            <button
+              type="button"
+              onClick={onPick}
+              className={cn(
+                "flex min-h-[180px] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-8 text-center transition",
+                dragOver
+                  ? "border-accent/50 bg-accent/10"
+                  : "border-border bg-surface-secondary/40 hover:border-foreground/25 hover:bg-surface-secondary/60",
+              )}
+            >
+              {selectedPath ? (
+                <>
+                  {selectedIsVideo ? (
+                    <FileVideo
+                      className="block text-foreground"
+                      size={28}
+                      aria-hidden
+                    />
+                  ) : (
+                    <FileAudio
+                      className="block text-foreground"
+                      size={28}
+                      aria-hidden
+                    />
+                  )}
+                  <div className="max-w-full truncate text-sm font-medium text-foreground">
+                    {fileName(selectedPath)}
+                  </div>
+                  <p className="text-[12px] text-muted">点击更换</p>
+                </>
+              ) : (
+                <>
+                  <Upload
+                    className="block text-muted opacity-70"
+                    size={28}
+                    aria-hidden
+                  />
+                  <div className="text-sm font-medium text-foreground">
+                    {dragOver ? "松开以添加" : "拖拽或点击选择"}
+                  </div>
+                  <p className="max-w-md text-[12px] text-muted">
+                    {TRANSCRIBE_FORMAT_HINT}
+                  </p>
+                </>
+              )}
+            </button>
+
+            <Button
+              fullWidth
+              variant="primary"
+              isDisabled={!canStart}
+              onPress={onStart}
+            >
+              {selectedIsVideo ? (
+                <FileVideo size={16} aria-hidden />
+              ) : (
+                <FileAudio size={16} aria-hidden />
+              )}
+              开始转写
+            </Button>
+          </SectionCard>
         ) : (
-          <>
-            <Upload
-              className="block text-muted opacity-70"
-              size={28}
-              aria-hidden
-            />
-            <div className="text-sm font-medium text-foreground">
-              {dragOver ? "松开以添加文件" : "拖拽到此处，或点击选择"}
+          <SectionCard className="flex flex-col gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[12px] text-muted">{provider}</p>
+              <div className="flex shrink-0 gap-1 rounded-xl border border-border p-1">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-lg px-3 py-1.5 text-[12px] font-medium transition",
+                    urlMode === "audio"
+                      ? "bg-default text-foreground"
+                      : "text-muted hover:text-foreground",
+                  )}
+                  onClick={() => onUrlModeChange("audio")}
+                >
+                  音频
+                </button>
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-lg px-3 py-1.5 text-[12px] font-medium transition",
+                    urlMode === "video"
+                      ? "bg-default text-foreground"
+                      : "text-muted hover:text-foreground",
+                  )}
+                  onClick={() => onUrlModeChange("video")}
+                >
+                  视频
+                </button>
+              </div>
             </div>
-            <p className="max-w-md text-[12px] leading-relaxed text-muted">
-              {TRANSCRIBE_FORMAT_HINT}
-            </p>
-          </>
+
+            <TextField
+              fullWidth
+              variant="secondary"
+              value={urlInput}
+              onChange={setUrlInput}
+            >
+              <Label>媒体链接</Label>
+              <Input placeholder="https://…" />
+            </TextField>
+
+            {ytdlp && !ytdlp.available ? (
+              <p className="text-[12px] text-warning">{ytdlp.hint}</p>
+            ) : null}
+
+            <Button
+              fullWidth
+              variant="primary"
+              isDisabled={
+                !canUrlStart ||
+                ytdlp?.available === false ||
+                ytdlp?.ffmpeg_available === false
+              }
+              onPress={() => onUrlStart(urlInput)}
+            >
+              <Download size={16} aria-hidden />
+              开始转写
+            </Button>
+          </SectionCard>
         )}
-      </button>
-    </SectionCard>
+      </ModeSwitch>
+    </div>
   );
 }
 
@@ -573,27 +876,54 @@ function ProcessingPhase({
   fileName: name,
   provider,
   languageLabel,
+  downloadPercent,
+  downloadMessage,
+  onCancel,
 }: {
   fileName: string | null;
   provider: string;
   languageLabel: string;
+  downloadPercent: number | null;
+  downloadMessage: string | null;
+  onCancel: () => void;
 }) {
+  const downloading =
+    name?.includes("下载") === true || downloadPercent != null;
   return (
     <SectionCard className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4 py-16 text-center">
-      <div className="processing-pulse grid h-14 w-14 place-items-center rounded-2xl bg-accent/10 text-accent ring-1 ring-accent/20">
-        <FileAudio size={24} aria-hidden />
+      <div className="grid h-14 w-14 place-items-center rounded-2xl bg-accent/10 text-accent ring-1 ring-accent/20">
+        {downloading ? (
+          <Download size={24} aria-hidden />
+        ) : (
+          <FileAudio size={24} aria-hidden />
+        )}
       </div>
       <div>
-        <div className="text-sm font-semibold text-foreground">正在识别…</div>
+        <div className="text-sm font-semibold text-foreground">
+          {downloading ? "正在下载…" : "正在识别…"}
+        </div>
         {name ? (
           <p className="mt-1.5 max-w-sm truncate text-[13px] text-muted">
             {name}
+          </p>
+        ) : null}
+        {downloadPercent != null ? (
+          <p className="mt-1 text-[12px] text-muted">
+            {downloadPercent.toFixed(0)}%
+          </p>
+        ) : null}
+        {downloadMessage ? (
+          <p className="mt-1 max-w-md truncate text-[11px] text-muted">
+            {downloadMessage}
           </p>
         ) : null}
         <p className="mt-1 text-[12px] text-muted">
           {provider} · {languageLabel}
         </p>
       </div>
+      <Button size="sm" variant="secondary" onPress={onCancel}>
+        取消
+      </Button>
     </SectionCard>
   );
 }
@@ -614,15 +944,33 @@ function ResultPhase({
   onNew: () => void;
 }) {
   const [detailOpen, setDetailOpen] = useState(false);
+  const [Viewer, setViewer] = useState<TranscriptViewerType | null>(null);
+  // First paint: few rows. Rest after idle — tab-click must stay light.
+  const [visibleCount, setVisibleCount] = useState(8);
 
   useEffect(() => {
     if (!activeEntry) setDetailOpen(false);
   }, [activeEntry]);
 
+  useEffect(() => {
+    const cancelDefer = deferWork(() => setVisibleCount(30), 400);
+    return cancelDefer;
+  }, []);
+
+  const ensureViewer = useCallback(async () => {
+    if (Viewer) return Viewer;
+    const mod = await import("@/components/ui/transcript-viewer");
+    setViewer(() => mod.TranscriptViewer);
+    return mod.TranscriptViewer;
+  }, [Viewer]);
+
   const selectAndOpen = (id: string) => {
     if (activeEntry?.id !== id) onSelect(id);
     setDetailOpen(true);
+    void ensureViewer();
   };
+
+  const rows = sessionEntries.slice(0, visibleCount);
 
   return (
     <>
@@ -637,7 +985,7 @@ function ResultPhase({
               </Button>
             </div>
           ) : (
-            sessionEntries.map((entry) => (
+            rows.map((entry) => (
               <HistoryRow
                 key={entry.id}
                 entry={entry}
@@ -650,7 +998,7 @@ function ResultPhase({
         </div>
       </SectionCard>
 
-      {activeEntry ? (
+      {activeEntry && detailOpen && Viewer ? (
         <Modal.Backdrop
           isOpen={detailOpen}
           onOpenChange={setDetailOpen}
@@ -658,7 +1006,7 @@ function ResultPhase({
         >
           <Modal.Container scroll="inside">
             <Modal.Dialog className="flex w-full max-w-6xl max-h-[calc(100dvh-1rem)] flex-col overflow-hidden sm:max-h-[calc(100dvh-5rem)]">
-              <TranscriptViewer.Root
+              <Viewer.Root
                 key={activeEntry.id}
                 text={activeEntry.text}
                 mediaSrc={
@@ -712,13 +1060,13 @@ function ResultPhase({
 
                     <div className="flex min-h-0  gap-6">
                       <div className="flex flex-3 w-[min(64%,24rem)] shrink-0 flex-col items-center justify-center gap-4 px-3">
-                        <TranscriptViewer.Media />
-                        <TranscriptViewer.Controls className="w-full" />
+                        <Viewer.Media />
+                        <Viewer.Controls className="w-full" />
                       </div>
 
                       <div className="flex min-h-0 min-w-0 flex-2 flex-col gap-3">
-                        <TranscriptViewer.ModeToggle className="shrink-0" />
-                        <TranscriptViewer.Content
+                        <Viewer.ModeToggle className="shrink-0" />
+                        <Viewer.Content
                           scroll
                           fill
                           className="min-h-0"
@@ -727,7 +1075,7 @@ function ResultPhase({
                     </div>
                   </div>
                 </Modal.Body>
-              </TranscriptViewer.Root>
+              </Viewer.Root>
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>
@@ -736,7 +1084,9 @@ function ResultPhase({
   );
 }
 
-function HistoryRow({
+const PREVIEW_CHARS = 140;
+
+const HistoryRow = memo(function HistoryRow({
   entry,
   active,
   onSelect,
@@ -747,6 +1097,11 @@ function HistoryRow({
   onSelect: () => void;
   onDelete: () => void;
 }) {
+  const isVideo = isVideoMediaKind(entry.media_kind, entry.audio_path);
+  const raw = entry.text || "（空）";
+  const preview =
+    raw.length > PREVIEW_CHARS ? `${raw.slice(0, PREVIEW_CHARS)}…` : raw;
+
   return (
     <div
       className={`flex w-full gap-2 rounded-xl items-center border px-3 py-2.5 transition ${active
@@ -759,11 +1114,21 @@ function HistoryRow({
         className="min-w-0 flex-1 text-left cursor-pointer"
       >
         <div className="flex items-center justify-between gap-2 text-[11px] text-muted">
-          <span>{new Date(entry.created_at).toLocaleString()}</span>
+          <span className="inline-flex items-center gap-2">
+            <span>{new Date(entry.created_at).toLocaleString()}</span>
+            <span className="inline-flex items-center gap-1 text-foreground/80">
+              {isVideo ? (
+                <FileVideo size={11} aria-hidden />
+              ) : (
+                <FileAudio size={11} aria-hidden />
+              )}
+              {isVideo ? "视频" : "音频"}
+            </span>
+          </span>
           <span>{entry.duration_seconds.toFixed(1)}s</span>
         </div>
         <p className="mt-1 line-clamp-2 text-sm leading-snug text-foreground">
-          {entry.text || "（空）"}
+          {preview}
         </p>
       </div>
       <Button
@@ -780,4 +1145,4 @@ function HistoryRow({
       </Button>
     </div>
   );
-}
+});

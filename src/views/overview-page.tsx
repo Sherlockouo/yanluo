@@ -1,27 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Kbd, toast } from "@heroui/react";
 import { NavLink } from "react-router-dom";
-import {
-  AudioLines,
-  Brain,
-  BookOpen,
-  Download,
-  Languages,
-  Wand2,
-} from "lucide-react";
+import { AudioLines, Download } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { hotkeySegments, providerLabel, stateLabel } from "@/lib/constants";
-import { PageHeader, PageShell, SectionCard } from "@/components/shared/page-shell";
+import {
+  ModeSwitch,
+  PageHeader,
+  PageShell,
+  SectionCard,
+} from "@/components/shared/page-shell";
 import { useApp } from "@/app-context";
-
-const LINKS = [
-  { to: "/transcribe", icon: AudioLines, title: "转写" },
-  { to: "/translate", icon: Languages, title: "翻译" },
-  { to: "/asr", icon: Brain, title: "ASR" },
-  { to: "/vocabulary", icon: BookOpen, title: "词库" },
-  { to: "/llm", icon: Wand2, title: "LLM" },
-] as const;
 
 type ModelStatus = {
   model_id: string;
@@ -114,7 +104,7 @@ export function OverviewPage() {
     }
   };
 
-  const showBanner =
+  const needsInstall =
     config.asr_provider === "qwen" &&
     (status?.needs_download ??
       (!modelLoaded && !config.asr_model_dir?.trim()));
@@ -131,83 +121,64 @@ export function OverviewPage() {
   ].filter(Boolean);
 
   return (
-    <PageShell>
-      <PageHeader title="ASR Workshop" />
+    <PageShell className="max-w-xl">
+      <PageHeader
+        title="ASR Workshop"
+        status={
+          needsInstall ? undefined : (
+            <>
+              <HotkeyKbd label={config.hotkey_transcribe.label} />
+              {" · "}
+              <HotkeyKbd label={config.hotkey_translate.label} />
+              {" · "}
+              <span>{statusBits.join(" · ")}</span>
+            </>
+          )
+        }
+      />
 
-      {showBanner ? (
-        <SectionCard className="max-w-xl flex flex-col gap-3 border-accent/30">
-          <div className="text-sm font-semibold text-foreground">
-            尚未安装 Qwen 模型
-          </div>
-          <p className="text-[13px] text-muted">
-            一键下载 {config.asr_model_id || "Qwen3-ASR-0.6B"}
-            （约 2GB）后即可本地识别。也可稍后在 ASR 页操作。
-          </p>
-          {downloading && progress ? (
-            <div className="text-[12px] text-muted">
-              {progress.file} ·{" "}
-              {progress.percent != null
-                ? `${progress.percent.toFixed(0)}%`
-                : `${progress.file_index}/${progress.file_count}`}
+      <ModeSwitch modeKey={needsInstall ? "install" : "ready"}>
+        {needsInstall ? (
+          <SectionCard className="flex flex-col gap-4 border-accent/30">
+            <div className="type-section">
+              安装 {config.asr_model_id || "Qwen3-ASR-0.6B"}
             </div>
-          ) : null}
-          <div className="flex flex-wrap gap-2">
+            {downloading && progress ? (
+              <div className="type-meta">
+                {progress.file} ·{" "}
+                {progress.percent != null
+                  ? `${progress.percent.toFixed(0)}%`
+                  : `${progress.file_index}/${progress.file_count}`}
+              </div>
+            ) : (
+              <p className="type-meta">约 2GB · 本地识别</p>
+            )}
             <Button
-              size="sm"
+              fullWidth
               variant="primary"
+              className="btn-press"
               isPending={downloading}
               onPress={() => void startDownload()}
             >
               <Download size={14} />
-              {downloading ? "下载中…" : "立即下载"}
+              {downloading ? "下载中…" : "下载并加载"}
             </Button>
-            <NavLink
-              to="/asr"
-              className="inline-flex items-center rounded-lg border border-border px-3 py-1.5 text-[13px] text-muted hover:text-foreground"
-            >
-              前往 ASR 页
-            </NavLink>
-          </div>
-        </SectionCard>
-      ) : null}
-
-      <SectionCard className="max-w-xl">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-muted">
-          <span className="inline-flex items-center gap-2 text-foreground">
-            <HotkeyKbd label={config.hotkey_transcribe.label} />
-            转录
-          </span>
-          <span className="inline-flex items-center gap-2 text-foreground">
-            <HotkeyKbd label={config.hotkey_translate.label} />
-            翻译
-          </span>
-          <span className="inline-flex items-center gap-2">
-            <HotkeyKbd label={config.hotkey_cancel.label} />
-            取消
-          </span>
-          <span className="text-border">·</span>
-          <span>{statusBits.join(" · ")}</span>
-        </div>
-      </SectionCard>
-
-      <div className="grid max-w-xl gap-2.5 sm:grid-cols-2">
-        {LINKS.map(({ to, icon: Icon, title }) => (
+          </SectionCard>
+        ) : (
           <NavLink
-            key={to}
-            to={to}
-            className="group rounded-2xl border border-border bg-surface px-4 py-4 transition duration-200 hover:border-accent/25 hover:bg-surface-secondary/40"
+            to="/transcribe"
+            className="group flex items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-5 transition duration-200 hover:border-accent/30 hover:bg-surface-secondary/40"
           >
-            <div className="flex items-center gap-3">
-              <div className="grid h-9 w-9 place-items-center rounded-xl bg-default text-foreground transition group-hover:bg-accent/10 group-hover:text-accent">
-                <Icon size={16} />
-              </div>
-              <div className="text-sm font-semibold text-foreground">
-                {title}
-              </div>
+            <div className="grid h-11 w-11 place-items-center rounded-xl bg-accent/10 text-accent transition group-hover:scale-[1.03]">
+              <AudioLines size={18} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="type-section">转写</div>
+              <div className="mt-0.5 type-meta">文件或链接</div>
             </div>
           </NavLink>
-        ))}
-      </div>
+        )}
+      </ModeSwitch>
     </PageShell>
   );
 }
