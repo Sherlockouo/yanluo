@@ -38,12 +38,13 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSView", "NSColor", "NSGraphics", "NSPasteboard", "NSPasteboardItem", "NSAppearance", "NSApplication", "NSRunningApplication", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSGeometry", "NSString"] }
 
-# Qwen3-ASR Rust implementation (local tree; MLX — macOS).
+# Qwen3-ASR Rust implementation (MLX — macOS).
 # Enable with `--features qwen-local` (Apple Silicon recommended).
-# Path dep for co-development with segmented streaming / VAD work.
-# Switch back to git `feat/forced-aligner` after pushing engine changes.
+# Git dep for CI/release. Local path override:
+#   path = "../../qwen3_asr_rs"
 [dependencies.qwen3-asr-rs]
-path = "../../qwen3_asr_rs"
+git = "https://github.com/XBCoder128/qwen3_asr_rs"
+branch = "main"
 default-features = false
 features = ["mlx"]
 optional = true
