@@ -1,0 +1,17 @@
+/* Official HeroUI v3 + Tailwind v4 setup (matches heroui-inc/vite-template) */
+@import "tailwindcss";
+@import "@heroui/styles";
+
+/* Streamdown (LLM markdown) — detect utility classes in package */
+@source "../node_modules/streamdown/dist/*.js";
+
+/* Enable `dark:` utilities when <html class="dark"> is set */
+@custom-variant dark (&:is(.dark *));
+
+@import "./styles/theme.css";
+@import "./styles/base.css";
+@import "./styles/hud.css";
+@import "./styles/utilities.css";
+@import "./styles/layout.css";
+@import "./styles/components.css";
+@import "./styles/agent.css";

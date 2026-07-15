@@ -45,12 +45,12 @@ tok.backend_tokenizer.save('./Qwen3-ASR-0.6B/tokenizer.json')
 
 ```bash
 pnpm install          # 前端依赖
-pnpm tauri dev        # 启动桌面应用
+pnpm tauri dev        # 启动桌面应用（不启用本地 Qwen/MLX 后端）
+pnpm tauri:dev:local  # 启动桌面应用并启用本地 Qwen/MLX 后端
 ```
+首次 `pnpm tauri:dev:local` 会编译 Rust 依赖（含 MLX C++ 库），预计 5-10 分钟。后续增量编译很快。
 
-首次 `pnpm tauri dev` 会编译 Rust 依赖（含 MLX C++ 库），预计 5-10 分钟。后续增量编译很快。
-
-`pnpm tauri build` 产出 `.app` / `.dmg`，位于 `src-tauri/target/release/bundle/`。
+`pnpm tauri:build:local` 产出带本地 Qwen/MLX 后端的 `.app` / `.dmg`，位于 `src-tauri/target/release/bundle/`。
 
 ### 如何更新本地asr推理库
 

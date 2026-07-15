@@ -1,0 +1,29 @@
+/* Accent / display utility helpers */
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.text-accent-fg {
+  color: var(--color-accent-fg);
+}
+
+.bg-accent\/15 {
+  background-color: color-mix(in oklab, var(--accent) 15%, transparent);
+}
+
+.bg-accent\/20 {
+  background-color: color-mix(in oklab, var(--accent) 20%, transparent);
+}
+
+.bg-accent\/5 {
+  background-color: color-mix(in oklab, var(--accent) 5%, transparent);
+}
+
+.border-accent\/20 {
+  border-color: color-mix(in oklab, var(--accent) 20%, transparent);
+}
+
+.ring-accent\/25 {
+  --tw-ring-color: color-mix(in oklab, var(--accent) 25%, transparent);
+}

@@ -1,15 +1,28 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegoodcode/tauri-2.0/main/crates/tauri/permissions/schemas/cap.schema.json",
   "identifier": "default",
-  "description": "Default capability for the ASR Workshop app",
-  "windows": ["main"],
+  "description": "Default capability for the 言落 (Yanluo) app",
+  "windows": ["main", "floating", "floating-lang", "floating-agent-menu"],
   "permissions": [
-      "core:default",
-      "core:event:default",
-      "core:event:allow-listen",
-      "core:event:allow-emit",
-      "shell:allow-open",
-      "dialog:default",
-      "dialog:allow-open"
-    ]
+    "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-emit",
+    "core:window:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position",
+    "core:window:allow-outer-position",
+    "core:window:allow-inner-size",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-visible-on-all-workspaces",
+    "core:webview:default",
+    "core:path:default",
+    "shell:allow-open",
+    "dialog:default",
+    "dialog:allow-open"
+  ]
 }

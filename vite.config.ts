@@ -1,25 +1,42 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
-import solidPlugin from "vite-plugin-solid";
+import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import { codeInspectorPlugin } from "code-inspector-plugin";
 
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * HeroUI v3 official Vite setup:
+ * - @tailwindcss/vite only (no PostCSS Tailwind plugin)
+ * - CSS: @import "tailwindcss"; @import "@heroui/styles";
+ * See: https://github.com/heroui-inc/vite-template
+ */
 export default defineConfig({
-  plugins: [solidPlugin()],
-  // Prevent vite from obscuring rust error messages
+  plugins: [
+    codeInspectorPlugin({
+      bundler: "vite",
+    }),
+    react(),
+    tailwindcss(),
+  ],
   clearScreen: false,
   server: {
     port: 1420,
     strictPort: true,
     watch: {
-      // Tell vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
   },
   build: {
-    // Tauri uses Chromium on Windows/Linux, WebKit on macOS
     target: "esnext",
+    // LightningCSS minify can corrupt Tailwind v4 nested :where(&) selectors.
+    cssMinify: false,
   },
   resolve: {
     alias: {
-      "@": "/src",
+      "@": path.resolve(rootDir, "src"),
     },
   },
 });

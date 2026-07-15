@@ -1,0 +1,19 @@
+---
+description: Floating HUD is tiny — never put large previews/modals inside it
+alwaysApply: true
+---
+
+# HUD: no cramped overlays
+
+Floating HUD capsule is ~400–520×56–88. **Never** open image/file preview, big forms, or HeroUI `Modal` **inside** that webview.
+
+## Must
+
+- Attachment / image / file → **system default app** via `open_path_in_system` (macOS `open` / Windows `start` / Linux `xdg-open`).
+- HUD keeps only compact chips / glyphs that fit the capsule row.
+- Click chip → `invoke("open_path_in_system")` — no extra Tauri window, no Modal in HUD.
+
+## Must not
+
+- `Modal` / drawer / large panel / dedicated preview window for HUD attachments.
+- Assuming “HeroUI Modal” is OK just because the component exists — **context size wins**.

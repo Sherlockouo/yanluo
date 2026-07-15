@@ -1,0 +1,119 @@
+/* Base: type ladder, btn-press, html/body */
+
+/* —— Type ladder —— */
+.type-display {
+  font-family: var(--font-display);
+  font-size: var(--text-display);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+  color: var(--foreground);
+}
+
+.type-section {
+  font-family: var(--font-display);
+  font-size: var(--text-section);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  color: var(--foreground);
+}
+
+.type-body {
+  font-size: var(--text-body);
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--foreground);
+}
+
+.type-ui {
+  font-size: var(--text-ui);
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--foreground);
+}
+
+.type-meta {
+  font-size: var(--text-meta);
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.type-micro {
+  font-size: var(--text-micro);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+/* Primary CTA press — compositor only */
+.btn-press {
+  transition:
+    transform 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 120ms ease;
+}
+.btn-press:hover {
+  transform: scale(1.01);
+}
+.btn-press:active {
+  transform: scale(0.98);
+  opacity: 0.92;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-press,
+  .btn-press:hover,
+  .btn-press:active {
+    transform: none;
+    transition: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  color: var(--foreground);
+  background: var(--background);
+  -webkit-font-smoothing: antialiased;
+}
+
+.dark body,
+[data-theme="dark"] body {
+  background:
+    radial-gradient(
+      900px 520px at 8% -12%,
+      rgba(232, 230, 227, 0.04),
+      transparent 55%
+    ),
+    radial-gradient(
+      700px 480px at 100% 0%,
+      rgba(196, 120, 74, 0.08),
+      transparent 50%
+    ),
+    linear-gradient(180deg, #0e0f12 0%, #0a0b0d 55%, #080909 100%);
+}
+
+.light body,
+[data-theme="light"] body {
+  background:
+    radial-gradient(
+      900px 520px at 8% -12%,
+      rgba(18, 20, 26, 0.03),
+      transparent 55%
+    ),
+    linear-gradient(180deg, #f6f7f8 0%, #f3f4f6 100%);
+}

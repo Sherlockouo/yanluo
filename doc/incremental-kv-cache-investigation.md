@@ -1,5 +1,7 @@
 # Incremental KV Cache 调查报告
 
+> 本文是 **段内增量 KV 的验证基线**（已落地）。长录音 / VAD 分段的产品架构与阶段见 [`ROADMAP-streaming-asr-vad.md`](./ROADMAP-streaming-asr-vad.md)、[`design-streaming-asr-vad.md`](./design-streaming-asr-vad.md)；索引 [`README.md`](./README.md)。
+
 ## 目标
 
 在 `qwen3_asr_rs_fork` 中实现真正的 O(n) 增量流式 ASR：复用 decoder 的 KV cache，每次只 prefill 新增的音频 token，而非每次重新 prefill 全部音频（O(n²)）。
