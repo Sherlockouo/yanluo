@@ -948,11 +948,13 @@ fn spawn_agent_process(
         }
     }
 
-    // Pi: `@path` file args before the prompt message.
+    // Pi: `@path` CLI args are file-only (inline text/image via file-processor).
+    // Directories → EISDIR in detectSupportedImageMimeTypeFromFile; keep them in
+    // compose_prompt so the model explores with tools (cwd / absolute paths).
     if matches!(agent, AgentKind::Pi) {
         for p in attachments {
             let path = Path::new(p);
-            if path.exists() {
+            if path.is_file() {
                 args.push(format!("@{p}"));
             }
         }
@@ -1032,7 +1034,11 @@ fn compose_prompt(voice: &str, attachments: &[String]) -> String {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
         if path.is_dir() {
-            out.push_str(&format!("- @{p}\n"));
+            // Pi `@` CLI cannot ingest dirs (EISDIR). Point the model at the path
+            // for tool-based exploration instead of file-inline.
+            out.push_str(&format!(
+                "- directory: {p}  (list/read files under this path; do not open as a single file)\n"
+            ));
         } else if path.is_file() && is_image_ext(&ext) {
             // Claude: Read tool; Codex also gets -i flags in spawn.
             out.push_str(&format!("- image: {p}\n"));
