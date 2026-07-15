@@ -1,16 +1,47 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
+} from "react";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { AnimatePresence, motion } from "framer-motion";
-import type { AudioLevelPayload, FloatingPayload } from "@/types";
+import {
+  AtSign,
+  ChevronUp,
+  Paperclip,
+  Send,
+  Square,
+  X,
+} from "lucide-react";
+import type {
+  AgentKind,
+  AgentPathInfo,
+  AppConfig,
+  AudioLevelPayload,
+  FloatingPayload,
+  TranscriptionResult,
+} from "@/types";
+import { defaultConfig } from "@/lib/constants";
 import { useSmoothedRms } from "@/hooks/useAudioBars";
 import { AudioBars } from "@/components/ui/audio-bars";
 import { cn } from "@/lib/cn";
 
-/** Fixed HUD footprint — never resize with transcript length. */
-const CAPSULE_W = 320;
+const CAPSULE_W = 400;
 const CAPSULE_H = 56;
+const AGENT_W = 520;
+/** Pills row above + capsule row. */
+const AGENT_BASE_H = 88;
+const AGENT_ATTACH_H = 34;
+const AGENT_PREVIEW_H = 148;
+
+type Attachment = AgentPathInfo & { at: boolean };
 
 function applyHudTheme(theme: "light" | "dark") {
   const root = document.documentElement;
@@ -20,10 +51,26 @@ function applyHudTheme(theme: "light" | "dark") {
   void invoke("set_floating_theme", { theme }).catch(() => {});
 }
 
+function shortName(name: string, max = 12): string {
+  if (name.length <= max) return name;
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".")) : "";
+  const base = name.slice(0, Math.max(4, max - ext.length - 1));
+  return `${base}…${ext}`;
+}
+
+function cwdLabel(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  const base = trimmed.split("/").filter(Boolean).pop() || trimmed;
+  return shortName(base, 14);
+}
+
+async function loadPathInfo(path: string, at: boolean): Promise<Attachment> {
+  const info = await invoke<AgentPathInfo>("get_path_info", { path });
+  return { ...info, at: at || info.kind === "dir" };
+}
+
 /**
- * Independent ASR HUD window content.
- * Mounted only when the Tauri window label is `floating`.
- * The native window itself is the frosted capsule (HudWindow vibrancy).
+ * Floating HUD: ASR capsule + agent extras (rail / edit / dispatch).
  */
 export function AsrHud() {
   const [payload, setPayload] = useState<FloatingPayload>({
@@ -33,121 +80,934 @@ export function AsrHud() {
     rms: 0,
     bands: [],
   });
+  const [agent, setAgent] = useState<AgentKind>("claude");
+  const [cwd, setCwd] = useState("");
+  const [cwdHistory, setCwdHistory] = useState<string[]>([]);
+  const [editText, setEditText] = useState("");
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [preview, setPreview] = useState<Attachment | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [pickerMode, setPickerMode] = useState<"" | "agent" | "cwd">("");
+  const [profiles, setProfiles] = useState(defaultConfig.agent_profiles);
+  const [profileId, setProfileId] = useState(defaultConfig.agent_profile_id);
+
+  const payloadRef = useRef(payload);
+  const editRef = useRef<HTMLTextAreaElement>(null);
+  const attachmentsRef = useRef(attachments);
+  const agentRef = useRef(agent);
+  const cwdRef = useRef(cwd);
+  const pickerModeRef = useRef(pickerMode);
+  const dispatchingRef = useRef(false);
+
+  useEffect(() => {
+    payloadRef.current = payload;
+  }, [payload]);
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+  useEffect(() => {
+    agentRef.current = agent;
+  }, [agent]);
+  useEffect(() => {
+    cwdRef.current = cwd;
+  }, [cwd]);
+  useEffect(() => {
+    pickerModeRef.current = pickerMode;
+  }, [pickerMode]);
+
+  const isAgent = payload.intention === "agent";
+  const editing = payload.state === "editing";
+  const agentEditing = isAgent && editing;
+  const confirmEditing = !isAgent && editing;
+  const editTextRef = useRef(editText);
+  const confirmingRef = useRef(false);
+  useEffect(() => {
+    editTextRef.current = editText;
+  }, [editText]);
+
+  const agentLabel =
+    profiles.find((p) => p.id === profileId)?.name ??
+    (agent === "claude" ? "Claude" : "Codex");
+
+  const resize = useCallback(
+    (agentMode: boolean, hasAttach: boolean, hasPreview: boolean) => {
+      if (!agentMode) {
+        void invoke("resize_floating_hud", {
+          width: CAPSULE_W,
+          height: CAPSULE_H,
+        }).catch(() => {});
+        return;
+      }
+      let h = AGENT_BASE_H;
+      if (hasAttach) h += AGENT_ATTACH_H;
+      if (hasPreview) h += AGENT_PREVIEW_H;
+      void invoke("resize_floating_hud", { width: AGENT_W, height: h }).catch(
+        () => {},
+      );
+      void getCurrentWindow()
+        .setSize(new LogicalSize(AGENT_W, h))
+        .catch(() => {});
+    },
+    [],
+  );
+
+  useEffect(() => {
+    resize(isAgent, attachments.length > 0, Boolean(preview));
+  }, [isAgent, attachments.length, preview, resize]);
+
+  useEffect(() => {
+    if (!editing) return;
+    setEditText(payload.text || "");
+    requestAnimationFrame(() => {
+      editRef.current?.focus();
+      editRef.current?.select();
+    });
+    void getCurrentWindow().setFocus().catch(() => {});
+  }, [editing, payload.text]);
+
+  const confirmTranscript = useCallback(async () => {
+    if (confirmingRef.current) return;
+    const text = editTextRef.current.trim();
+    if (!text) {
+      setError("无内容");
+      return;
+    }
+    confirmingRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await invoke("confirm_floating_transcript", { text });
+      setEditText("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      confirmingRef.current = false;
+    }
+  }, []);
+
+  const cancelTranscript = useCallback(async () => {
+    try {
+      await invoke("cancel_floating_transcript");
+    } catch {
+      /* ignore */
+    }
+    setEditText("");
+    setError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!isAgent) setPickerMode("");
+  }, [isAgent]);
+
+  const startVoice = useCallback(async () => {
+    setError(null);
+    setEditText("");
+    setPayload((prev) => ({
+      ...prev,
+      text: "",
+      committed: "",
+      active: "",
+      bands: [],
+      rms: 0,
+    }));
+    try {
+      const cfg = await invoke<AppConfig>("get_app_config").catch(
+        () => defaultConfig,
+      );
+      if (
+        cfg.agent_kind === "claude" ||
+        cfg.agent_kind === "codex" ||
+        cfg.agent_kind === "pi"
+      ) {
+        setAgent(cfg.agent_kind);
+      }
+      setCwd(cfg.agent_cwd || "");
+      setCwdHistory(cfg.agent_cwd_history ?? []);
+      setProfiles(
+        cfg.agent_profiles?.length
+          ? cfg.agent_profiles
+          : defaultConfig.agent_profiles,
+      );
+      setProfileId(cfg.agent_profile_id || "claude");
+      await invoke("start_recording", {
+        chunkSec: cfg.chunk_size_sec ?? 1.5,
+        rollbackTokens: cfg.unfixed_token_num ?? 5,
+        language: cfg.language === "auto" ? null : cfg.language,
+        mode: "agent",
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const stopVoice = useCallback(async () => {
+    try {
+      await invoke("stop_recording");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  const cancelVoice = useCallback(async () => {
+    try {
+      await invoke("cancel_recording", { reason: "hud-cancel" });
+    } catch {
+      /* ignore */
+    }
+    setEditText("");
+    setAttachments([]);
+    setPreview(null);
+    setPickerMode("");
+  }, []);
+
+  const dispatch = useCallback(async (text: string) => {
+    if (dispatchingRef.current) return;
+    const voice = text.trim();
+    const attachPaths = attachmentsRef.current.map((a) => a.path);
+    if (!voice && attachPaths.length === 0) {
+      setError("无内容");
+      return;
+    }
+    const workDir = cwdRef.current.trim();
+    dispatchingRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await invoke("dispatch_agent", {
+        agent: agentRef.current,
+        prompt: voice || "（见附件）",
+        cwd: workDir,
+        attachments: attachPaths,
+      });
+      setEditText("");
+      setAttachments([]);
+      setPreview(null);
+      setPickerMode("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      dispatchingRef.current = false;
+    }
+  }, []);
+
+  const mergeAttachments = useCallback(async (paths: string[], at: boolean) => {
+    const next: Attachment[] = [];
+    for (const p of paths) {
+      try {
+        next.push(await loadPathInfo(p, at));
+      } catch {
+        /* skip */
+      }
+    }
+    if (!next.length) return;
+    setAttachments((prev) => {
+      const merged = [...prev];
+      for (const a of next) {
+        if (!merged.some((x) => x.path === a.path)) merged.push(a);
+      }
+      return merged;
+    });
+    if (next.length === 1) setPreview(next[0]);
+  }, []);
+
+  const pasteClipboard = useCallback(async () => {
+    try {
+      const paths = await invoke<string[]>("read_clipboard_attachments");
+      if (!paths.length) {
+        setError("剪贴板无文件/图片");
+        return;
+      }
+      setError(null);
+      await mergeAttachments(paths, false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [mergeAttachments]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-floating", "1");
-
     const syncTheme = () => {
-      const theme =
-        localStorage.getItem("asr-theme") === "light" ? "light" : "dark";
-      applyHudTheme(theme);
+      applyHudTheme(
+        localStorage.getItem("asr-theme") === "light" ? "light" : "dark",
+      );
     };
     syncTheme();
-
     const onStorage = (event: StorageEvent) => {
       if (event.key === "asr-theme") syncTheme();
     };
     window.addEventListener("storage", onStorage);
 
     let disposed = false;
-    let unlistenStatus: UnlistenFn | null = null;
-    let unlistenLevel: UnlistenFn | null = null;
-    let unlistenPartial: UnlistenFn | null = null;
-    let unlistenTheme: UnlistenFn | null = null;
+    const unlisteners: UnlistenFn[] = [];
+    const add = (p: Promise<UnlistenFn>) => {
+      void p.then((u) => {
+        if (disposed) u();
+        else unlisteners.push(u);
+      });
+    };
 
     void invoke<FloatingPayload>("get_floating_status")
       .then((status) => {
-        if (!disposed) setPayload(status);
+        if (!disposed) {
+          setPayload(status);
+          if (
+            status.agent === "claude" ||
+            status.agent === "codex" ||
+            status.agent === "pi"
+          ) {
+            setAgent(status.agent);
+          }
+          if (status.cwd) setCwd(status.cwd);
+        }
       })
-      .catch(() => {
-        /* ignore — command may not be ready during HMR */
-      });
+      .catch(() => {});
 
-    void listen<FloatingPayload>("floating-status", (event) =>
-      setPayload((prev) => ({
-        ...event.payload,
-        // Never let status snapshots wipe the live meter.
-        rms: event.payload.rms > 0 ? event.payload.rms : prev.rms,
-      })),
-    ).then((u) => {
-      unlistenStatus = u;
-    });
-    void listen<AudioLevelPayload | number>("audio-level", (event) => {
-      const raw = event.payload;
-      if (typeof raw === "number") {
-        if (!Number.isFinite(raw)) return;
+    void invoke<AppConfig>("get_app_config")
+      .then((cfg) => {
+        if (disposed) return;
+        if (
+          cfg.agent_kind === "claude" ||
+          cfg.agent_kind === "codex" ||
+          cfg.agent_kind === "pi"
+        ) {
+          setAgent(cfg.agent_kind);
+        }
+        if (cfg.agent_cwd) setCwd(cfg.agent_cwd);
+        setCwdHistory(cfg.agent_cwd_history ?? []);
+        setProfiles(
+          cfg.agent_profiles?.length
+            ? cfg.agent_profiles
+            : defaultConfig.agent_profiles,
+        );
+        setProfileId(cfg.agent_profile_id || "claude");
+      })
+      .catch(() => {});
+
+    add(
+      listen<FloatingPayload>("floating-status", (event) => {
+        setPayload((prev) => {
+          const next = event.payload;
+          // Same live session only — new recording/idle must wipe prior ASR.
+          const sameSession =
+            (prev.state === "recording" || prev.state === "processing") &&
+            (next.state === "recording" || next.state === "processing") &&
+            prev.intention === next.intention;
+          const keepLive = sameSession && !next.text?.trim();
+          if (
+            next.state === "recording" &&
+            !next.text?.trim() &&
+            !sameSession
+          ) {
+            return {
+              ...next,
+              rms: next.rms > 0 ? next.rms : 0,
+              bands: Array.isArray(next.bands) ? next.bands : [],
+              committed: "",
+              active: "",
+              text: "",
+            };
+          }
+          return {
+            ...next,
+            rms: next.rms > 0 ? next.rms : prev.rms,
+            bands:
+              Array.isArray(next.bands) && next.bands.length > 0
+                ? next.bands
+                : keepLive
+                  ? prev.bands
+                  : next.bands ?? [],
+            committed:
+              next.committed != null && next.committed !== ""
+                ? next.committed
+                : keepLive
+                  ? prev.committed
+                  : (next.committed ?? ""),
+            active:
+              next.active != null && next.active !== ""
+                ? next.active
+                : keepLive
+                  ? prev.active
+                  : (next.active ?? ""),
+            text: keepLive && prev.text?.trim() ? prev.text : next.text,
+          };
+        });
+        if (
+          event.payload.agent === "claude" ||
+          event.payload.agent === "codex"
+        ) {
+          setAgent(event.payload.agent);
+        }
+        if (event.payload.cwd != null) setCwd(event.payload.cwd || "");
+      }),
+    );
+    add(
+      listen<AudioLevelPayload | number>("audio-level", (event) => {
+        const raw = event.payload;
+        if (typeof raw === "number") {
+          if (!Number.isFinite(raw)) return;
+          setPayload((prev) => ({
+            ...prev,
+            rms: Math.max(0, Math.min(1, raw)),
+          }));
+          return;
+        }
+        const rms = Number(raw?.rms);
+        if (!Number.isFinite(rms)) return;
+        const bands = Array.isArray(raw.bands)
+          ? raw.bands.map((v) => Math.max(0, Math.min(1, Number(v) || 0)))
+          : [];
         setPayload((prev) => ({
           ...prev,
-          rms: Math.max(0, Math.min(1, raw)),
+          rms: Math.max(0, Math.min(1, rms)),
+          bands,
         }));
-        return;
-      }
-      const rms = Number(raw?.rms);
-      if (!Number.isFinite(rms)) return;
-      const bands = Array.isArray(raw.bands)
-        ? raw.bands.map((v) => Math.max(0, Math.min(1, Number(v) || 0)))
-        : [];
-      setPayload((prev) => ({
-        ...prev,
-        rms: Math.max(0, Math.min(1, rms)),
-        bands,
-      }));
-    }).then((u) => {
-      unlistenLevel = u;
-    });
-    void listen<{
-      text: string;
-      committed?: string;
-      active?: string;
-      segment_index?: number;
-    }>("partial-result", (event) =>
-      setPayload((prev) => ({
-        ...prev,
-        visible: true,
-        state: prev.state === "idle" ? "recording" : prev.state,
-        text: event.payload.text,
-        committed: event.payload.committed ?? "",
-        active: event.payload.active ?? "",
-        switching:
-          event.payload.text.trim() === "" ? prev.switching : false,
-      })),
-    ).then((u) => {
-      unlistenPartial = u;
-    });
-    void listen<"light" | "dark">("theme-changed", (event) => {
-      applyHudTheme(event.payload);
-    }).then((u) => {
-      unlistenTheme = u;
-    });
+      }),
+    );
+    add(
+      listen<{
+        text: string;
+        committed?: string;
+        active?: string;
+      }>("partial-result", (event) =>
+        setPayload((prev) => ({
+          ...prev,
+          visible: true,
+          state: prev.state === "idle" ? "recording" : prev.state,
+          text: event.payload.text,
+          committed: event.payload.committed ?? "",
+          active: event.payload.active ?? "",
+          switching:
+            event.payload.text.trim() === "" ? prev.switching : false,
+        })),
+      ),
+    );
+    add(
+      listen("agent-voice-start", () => {
+        void startVoice();
+      }),
+    );
+    add(
+      listen("agent-voice-stop", () => {
+        void stopVoice();
+      }),
+    );
+    add(
+      listen("agent-voice-cancel", () => {
+        // Rust already cancelled; clear local agent UI only.
+        setEditText("");
+        setAttachments([]);
+        setPreview(null);
+        setPickerMode("");
+      }),
+    );
+    add(
+      listen<string>("agent-picker", (event) => {
+        const m = event.payload;
+        setPickerMode(m === "agent" || m === "cwd" ? m : "");
+      }),
+    );
+    add(
+      listen("agent-focus-edit", () => {
+        editRef.current?.focus();
+      }),
+    );
+    add(
+      listen<TranscriptionResult>("agent-transcription-result", (event) => {
+        if (event.payload.error) {
+          setError(event.payload.error);
+          return;
+        }
+        setEditText(event.payload.text || "");
+      }),
+    );
+    add(
+      listen<{ text?: string; asr_text?: string }>("hud-edit-ready", (event) => {
+        const t = event.payload?.text ?? event.payload?.asr_text ?? "";
+        setEditText(t);
+        setError(null);
+        requestAnimationFrame(() => {
+          editRef.current?.focus();
+          editRef.current?.select();
+        });
+      }),
+    );
+    add(
+      listen("hud-confirm-request", () => {
+        void confirmTranscript();
+      }),
+    );
+    add(
+      listen("hud-cancel-request", () => {
+        void cancelTranscript();
+      }),
+    );
+    add(
+      listen<"light" | "dark">("theme-changed", (event) => {
+        applyHudTheme(event.payload);
+      }),
+    );
+    add(
+      listen<AppConfig>("config-updated", (event) => {
+        const cfg = event.payload;
+        if (
+          cfg.agent_kind === "claude" ||
+          cfg.agent_kind === "codex" ||
+          cfg.agent_kind === "pi"
+        ) {
+          setAgent(cfg.agent_kind);
+        }
+        if (cfg.agent_cwd != null) setCwd(cfg.agent_cwd || "");
+        setCwdHistory(cfg.agent_cwd_history ?? []);
+        setProfiles(
+          cfg.agent_profiles?.length
+            ? cfg.agent_profiles
+            : defaultConfig.agent_profiles,
+        );
+        setProfileId(cfg.agent_profile_id || "claude");
+      }),
+    );
 
     return () => {
       disposed = true;
       window.removeEventListener("storage", onStorage);
-      unlistenStatus?.();
-      unlistenLevel?.();
-      unlistenPartial?.();
-      unlistenTheme?.();
+      unlisteners.forEach((u) => u());
     };
-  }, []);
+  }, [startVoice, stopVoice, cancelVoice, confirmTranscript, cancelTranscript]);
 
-  const show = payload.visible && payload.state !== "idle";
+  const addAttach = async (asDir: boolean) => {
+    const selected = await open(
+      asDir
+        ? {
+            directory: true,
+            multiple: false,
+            defaultPath: cwd || undefined,
+          }
+        : {
+            multiple: true,
+            defaultPath: cwd || undefined,
+          },
+    ).catch(() => null);
+    const paths = Array.isArray(selected)
+      ? selected
+      : typeof selected === "string"
+        ? [selected]
+        : [];
+    if (!paths.length) return;
+    await mergeAttachments(paths, asDir);
+  };
+
+  const toggleMenu = useCallback(
+    (mode: "agent" | "cwd") => {
+      if (pickerMode === mode) {
+        void invoke("set_agent_picker", { mode: "", itemCount: 1 }).catch(
+          () => {},
+        );
+        setPickerMode("");
+      } else {
+        const itemCount =
+          mode === "agent"
+            ? Math.max(profiles.length, 2)
+            : 1 + cwdHistory.length;
+        void invoke("set_agent_picker", { mode, itemCount }).catch(() => {});
+        setPickerMode(mode);
+      }
+    },
+    [pickerMode, profiles.length, cwdHistory.length],
+  );
+
+  const onEditKey = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (pickerModeRef.current) return;
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (confirmEditing) {
+        void confirmTranscript();
+      } else {
+        void dispatch(editText);
+      }
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (confirmEditing) {
+        void cancelTranscript();
+      } else {
+        void invoke("hide_agent_hud").catch(() => {});
+      }
+    }
+  };
+
+  // Global keys while agent HUD visible (picker toggles + paste).
+  useEffect(() => {
+    if (!isAgent) return;
+    const onKey = (event: KeyboardEvent) => {
+      const meta = event.metaKey || event.ctrlKey;
+
+      if (meta && event.key === ".") {
+        event.preventDefault();
+        toggleMenu("agent");
+        return;
+      }
+      if (meta && event.key === "/") {
+        event.preventDefault();
+        toggleMenu("cwd");
+        return;
+      }
+      if (meta && (event.key === "v" || event.key === "V")) {
+        event.preventDefault();
+        void pasteClipboard();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isAgent, pasteClipboard, toggleMenu]);
+
+  const show =
+    payload.visible &&
+    payload.state !== "idle" &&
+    (payload.state === "recording" ||
+      payload.state === "processing" ||
+      payload.state === "refining" ||
+      payload.state === "editing");
 
   return (
     <div
       className="hud-root"
       onPointerDown={(event) => {
         if (event.button !== 0) return;
+        const t = event.target as HTMLElement;
+        if (t.closest("input,textarea,button,a,[data-no-drag]")) return;
         void getCurrentWindow().startDragging().catch(() => {});
       }}
     >
       <AnimatePresence mode="wait">
-        {show && <FloatingCapsule key="capsule" payload={payload} />}
+        {show ? (
+          <motion.div
+            key="hud"
+            className={cn(
+              "flex h-full w-full items-center justify-center",
+              isAgent && "px-0",
+            )}
+            initial={{ opacity: 0, scale: 0.92, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{
+              opacity: 0,
+              scale: 0.94,
+              y: 6,
+              transition: { duration: 0.18 },
+            }}
+            transition={{ type: "spring", stiffness: 420, damping: 28 }}
+          >
+            {isAgent ? (
+              <AgentCapsule
+                payload={payload}
+                agentLabel={agentLabel}
+                cwd={cwd}
+                pickerMode={pickerMode}
+                editText={editText}
+                editing={agentEditing}
+                busy={busy}
+                error={error}
+                editRef={editRef}
+                attachments={attachments}
+                preview={preview}
+                onToggleAgent={() => toggleMenu("agent")}
+                onToggleCwd={() => toggleMenu("cwd")}
+                onStop={() => void stopVoice()}
+                onEditChange={setEditText}
+                onEditKey={onEditKey}
+                onSend={() => void dispatch(editText)}
+                onAddFile={() => void addAttach(false)}
+                onAddDir={() => void addAttach(true)}
+                onSelectAttach={setPreview}
+                onRemoveAttach={(path) => {
+                  setAttachments((prev) => prev.filter((x) => x.path !== path));
+                  setPreview((p) => (p?.path === path ? null : p));
+                }}
+                onClosePreview={() => setPreview(null)}
+              />
+            ) : (
+              <FloatingCapsule
+                payload={payload}
+                editText={editText}
+                editing={confirmEditing}
+                busy={busy}
+                error={error}
+                editRef={editRef}
+                onEditChange={setEditText}
+                onEditKey={onEditKey}
+              />
+            )}
+          </motion.div>
+        ) : null}
       </AnimatePresence>
     </div>
   );
 }
 
-function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
+function AgentCapsule({
+  payload,
+  agentLabel,
+  cwd,
+  pickerMode,
+  editText,
+  editing,
+  busy,
+  error,
+  editRef,
+  attachments,
+  preview,
+  onToggleAgent,
+  onToggleCwd,
+  onStop,
+  onEditChange,
+  onEditKey,
+  onSend,
+  onAddFile,
+  onAddDir,
+  onSelectAttach,
+  onRemoveAttach,
+  onClosePreview,
+}: {
+  payload: FloatingPayload;
+  agentLabel: string;
+  cwd: string;
+  pickerMode: "" | "agent" | "cwd";
+  editText: string;
+  editing: boolean;
+  busy: boolean;
+  error: string | null;
+  editRef: RefObject<HTMLTextAreaElement | null>;
+  attachments: Attachment[];
+  preview: Attachment | null;
+  onToggleAgent: () => void;
+  onToggleCwd: () => void;
+  onStop: () => void;
+  onEditChange: (v: string) => void;
+  onEditKey: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  onSend: () => void;
+  onAddFile: () => void;
+  onAddDir: () => void;
+  onSelectAttach: (a: Attachment) => void;
+  onRemoveAttach: (path: string) => void;
+  onClosePreview: () => void;
+}) {
+  const recording = payload.state === "recording";
+  const processing = payload.state === "processing";
+  const smoothed = useSmoothedRms(payload.rms, recording);
+
+  const committed = (payload.committed ?? "").trim();
+  const active = (payload.active ?? "").trim();
+  const live =
+    committed || active
+      ? `${committed}${committed && active ? " " : ""}${active}`
+      : payload.text;
+
+  const hint =
+    error ??
+    (busy
+      ? "派发中…"
+      : recording
+        ? "说完再按 Fn+Space"
+        : processing
+          ? "识别中…"
+          : "编辑后 Enter 派发");
+
+  return (
+    <div className="hud-agent" data-no-drag>
+      <div className="hud-agent-rail">
+        <div className="hud-agent-pills">
+          <button
+            type="button"
+            className={cn(
+              "hud-agent-pill",
+              pickerMode === "agent" && "is-open",
+            )}
+            aria-haspopup="listbox"
+            aria-expanded={pickerMode === "agent"}
+            title="⌘. 选择 Agent"
+            onClick={onToggleAgent}
+          >
+            <span>{agentLabel}</span>
+            <ChevronUp size={12} strokeWidth={2.4} className="opacity-70" />
+          </button>
+          <button
+            type="button"
+            className={cn("hud-agent-pill", pickerMode === "cwd" && "is-open")}
+            aria-haspopup="listbox"
+            aria-expanded={pickerMode === "cwd"}
+            title={cwd || "工作目录 · ⌘/"}
+            onClick={onToggleCwd}
+          >
+            <span className="truncate">{cwd ? cwdLabel(cwd) : "工作目录"}</span>
+            <ChevronUp size={12} strokeWidth={2.4} className="opacity-70" />
+          </button>
+        </div>
+      </div>
+
+      <div className="hud-agent-main">
+        {processing ? (
+          <span className="hud-spinner" aria-label="处理中" />
+        ) : recording ? (
+          <AudioBars rms={smoothed} bands={payload.bands} active />
+        ) : null}
+
+        {editing ? (
+          <textarea
+            ref={editRef}
+            value={editText}
+            onChange={(e) => onEditChange(e.target.value)}
+            onKeyDown={onEditKey}
+            rows={1}
+            disabled={busy}
+            placeholder={hint}
+            className="hud-agent-input"
+          />
+        ) : (
+          <div className="hud-text-viewport min-w-0 flex-1">
+            <span className="hud-text-scroll">
+              {live.trim() || (
+                <span className="hud-agent-hint">{hint}</span>
+              )}
+            </span>
+          </div>
+        )}
+
+        <div className="hud-agent-tools">
+          <button
+            type="button"
+            className="hud-agent-icon-btn"
+            title="@ 目录"
+            onClick={onAddDir}
+          >
+            <AtSign size={15} strokeWidth={2.25} />
+          </button>
+          <button
+            type="button"
+            className="hud-agent-icon-btn"
+            title="附件 · ⌘V 粘贴"
+            onClick={onAddFile}
+          >
+            <Paperclip size={15} strokeWidth={2.25} />
+          </button>
+          {recording ? (
+            <button
+              type="button"
+              className="hud-agent-icon-btn is-danger"
+              title="停止"
+              onClick={onStop}
+            >
+              <Square size={12} fill="currentColor" />
+            </button>
+          ) : null}
+          {editing ? (
+            <button
+              type="button"
+              className="hud-agent-send"
+              title="派发 Enter"
+              disabled={busy}
+              onClick={onSend}
+            >
+              <Send size={14} strokeWidth={2.4} />
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {attachments.length > 0 ? (
+        <div className="hud-agent-attach">
+          {attachments.map((a) => (
+            <button
+              key={a.path}
+              type="button"
+              title={a.path}
+              className={cn(
+                "hud-agent-chip",
+                preview?.path === a.path && "is-active",
+              )}
+              onClick={() => onSelectAttach(a)}
+            >
+              {a.at || a.kind === "dir" ? (
+                <AtSign size={11} className="shrink-0 opacity-70" />
+              ) : (
+                <Paperclip size={11} className="shrink-0 opacity-70" />
+              )}
+              <span className="truncate">
+                {a.at || a.kind === "dir"
+                  ? `@${shortName(a.name)}`
+                  : shortName(a.name)}
+              </span>
+              <span
+                role="button"
+                tabIndex={0}
+                className="hud-agent-chip-x"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemoveAttach(a.path);
+                }}
+              >
+                <X size={11} />
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {preview ? (
+        <div className="hud-agent-preview">
+          <div className="hud-agent-preview-head">
+            <span className="min-w-0 flex-1 truncate font-medium">
+              {preview.at || preview.kind === "dir"
+                ? `@${preview.name}`
+                : preview.name}
+            </span>
+            <button
+              type="button"
+              className="hud-agent-icon-btn"
+              onClick={onClosePreview}
+            >
+              <X size={13} />
+            </button>
+          </div>
+          <div className="hud-agent-preview-body">
+            {preview.kind === "image" ? (
+              <img
+                src={convertFileSrc(preview.path)}
+                alt={preview.name}
+                className="max-h-24 rounded object-contain"
+              />
+            ) : preview.preview ? (
+              <pre className="hud-agent-preview-text">{preview.preview}</pre>
+            ) : (
+              <p className="hud-agent-hint">{preview.path}</p>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FloatingCapsule({
+  payload,
+  editText,
+  editing,
+  busy,
+  error,
+  editRef,
+  onEditChange,
+  onEditKey,
+}: {
+  payload: FloatingPayload;
+  editText: string;
+  editing: boolean;
+  busy: boolean;
+  error: string | null;
+  editRef: RefObject<HTMLTextAreaElement | null>;
+  onEditChange: (v: string) => void;
+  onEditKey: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+}) {
   const refining = payload.state === "refining";
   const processing = payload.state === "processing";
   const recording = payload.state === "recording";
@@ -172,9 +1032,9 @@ function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
     (refining || processing ? lastTextRef.current : "");
   const displayText = switching ? "" : sourceText;
 
-  // Final success: stay green until the capsule unmounts — never flash back to white.
   const justRefined = processing && !switching && Boolean(displayText.trim());
-  const loading = refining || switching || (processing && !justRefined);
+  const loading =
+    !editing && (refining || switching || (processing && !justRefined));
 
   const [overflowing, setOverflowing] = useState(false);
   const smoothed = useSmoothedRms(payload.rms, recording && !switching);
@@ -188,36 +1048,24 @@ function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
   }, []);
 
   useLayoutEffect(() => {
+    if (editing) return;
     const el = textViewportRef.current;
     if (!el) return;
     el.scrollLeft = el.scrollWidth;
     setOverflowing(el.scrollWidth > el.clientWidth + 1);
-  }, [displayText, committed, active, loading, switching]);
+  }, [displayText, committed, active, loading, switching, editing]);
+
+  const hint = error ?? (busy ? "确认中…" : "");
 
   return (
-    <motion.div
+    <div
       className={cn(
         "hud-capsule",
         loading && "hud-capsule-refining",
         switching && "hud-capsule-switching",
         justRefined && "hud-capsule-refined",
       )}
-      initial={{ opacity: 0, scale: 0.86, y: 10 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{
-        opacity: 0,
-        scale: 0.92,
-        y: 6,
-        transition: { duration: 0.22, ease: [0.4, 0, 1, 1] },
-      }}
-      transition={{
-        type: "spring",
-        stiffness: 420,
-        damping: 28,
-        mass: 0.85,
-        duration: 0.35,
-      }}
-      style={{ width: "100%", height: "100%" }}
+      style={{ width: "100%", height: CAPSULE_H }}
     >
       <div className="hud-inner">
         {loading ? (
@@ -227,6 +1075,8 @@ function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
               switching ? "切换目标语言" : translating ? "翻译中" : "处理中"
             }
           />
+        ) : busy ? (
+          <span className="hud-spinner" aria-label="确认中" />
         ) : (
           <AudioBars
             rms={smoothed}
@@ -237,56 +1087,70 @@ function FloatingCapsule({ payload }: { payload: FloatingPayload }) {
         <span className="hud-colon" aria-hidden>
           :
         </span>
-        <div
-          ref={textViewportRef}
-          className={cn(
-            "hud-text-viewport",
-            overflowing && "hud-text-overflow",
-            loading && "hud-text-refining",
-            switching && "hud-text-switching",
-            justRefined && "hud-text-refined",
-          )}
-        >
-          <AnimatePresence mode="wait" initial={false}>
-            <motion.span
-              key={switching ? "switching" : "content"}
-              className="hud-text-scroll"
-              initial={
-                switching
-                  ? { opacity: 0, filter: "blur(4px)" }
-                  : { opacity: 0.7 }
-              }
-              animate={{ opacity: 1, filter: "blur(0px)" }}
-              exit={{ opacity: 0, filter: "blur(3px)" }}
-              transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-            >
-              {switching ? (
-                "切换中"
-              ) : hasSplit && recording && !loading ? (
-                <>
-                  {committed ? (
-                    <span className="hud-text-committed">{committed}</span>
-                  ) : null}
-                  {committed && active ? " " : null}
-                  {active ? (
-                    <span className="hud-text-active">{active}</span>
-                  ) : null}
-                </>
-              ) : (
-                displayText ||
-                (loading ? (translating ? "翻译中" : "处理中") : "")
-              )}
-              {(loading || switching) && (displayText || switching) ? (
-                <span className="hud-loading-dots" aria-hidden>
-                  <i />
-                  <i />
-                  <i />
-                </span>
-              ) : null}
-            </motion.span>
-          </AnimatePresence>
-        </div>
+        {editing ? (
+          <textarea
+            ref={editRef}
+            value={editText}
+            onChange={(e) => onEditChange(e.target.value)}
+            onKeyDown={onEditKey}
+            rows={1}
+            disabled={busy}
+            placeholder={hint || "确认或修改后按 Fn / Enter"}
+            className="hud-agent-input"
+            data-no-drag
+          />
+        ) : (
+          <div
+            ref={textViewportRef}
+            className={cn(
+              "hud-text-viewport",
+              overflowing && "hud-text-overflow",
+              loading && "hud-text-refining",
+              switching && "hud-text-switching",
+              justRefined && "hud-text-refined",
+            )}
+          >
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.span
+                key={switching ? "switching" : "content"}
+                className="hud-text-scroll"
+                initial={
+                  switching
+                    ? { opacity: 0, filter: "blur(4px)" }
+                    : { opacity: 0.7 }
+                }
+                animate={{ opacity: 1, filter: "blur(0px)" }}
+                exit={{ opacity: 0, filter: "blur(3px)" }}
+                transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+              >
+                {switching ? (
+                  "切换中"
+                ) : hasSplit && recording && !loading ? (
+                  <>
+                    {committed ? (
+                      <span className="hud-text-committed">{committed}</span>
+                    ) : null}
+                    {committed && active ? " " : null}
+                    {active ? (
+                      <span className="hud-text-active">{active}</span>
+                    ) : null}
+                  </>
+                ) : (
+                  displayText ||
+                  (loading ? (translating ? "翻译中" : "处理中") : "")
+                )}
+                {(loading || switching) && (displayText || switching) ? (
+                  <span className="hud-loading-dots" aria-hidden>
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                ) : null}
+              </motion.span>
+            </AnimatePresence>
+          </div>
+        )}
       </div>
-    </motion.div>
+    </div>
   );
 }

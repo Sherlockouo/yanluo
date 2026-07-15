@@ -121,7 +121,19 @@ pub(crate) fn append_history(
     source: &str,
     audio_path: Option<String>,
     media_kind: &str,
-) {
+) -> Option<String> {
+    append_history_with_user(app, result, source, audio_path, media_kind, None)
+}
+
+/// Append history; optional user correction sets learn fields in one write.
+pub(crate) fn append_history_with_user(
+    app: &AppHandle,
+    result: &TranscriptionResult,
+    source: &str,
+    audio_path: Option<String>,
+    media_kind: &str,
+    user_text: Option<&str>,
+) -> Option<String> {
     let state = app.state::<AsrEngine>();
     // Lock order: config → history (same as apply_learned_terms) to avoid deadlock.
     let translate_target_language = if source == "translate" {
@@ -137,21 +149,34 @@ pub(crate) fn append_history(
     };
     let mut history = match state.inner().history.lock() {
         Ok(history) => history,
-        Err(_) => return,
+        Err(_) => return None,
     };
     let id = format!(
         "{}-{}",
         chrono::Utc::now().timestamp_millis(),
         history.len().saturating_add(1)
     );
+    let user_trim = user_text.map(str::trim).filter(|s| !s.is_empty());
+    let (text, user_text_field, quality_rating, rated_at, learn_status) =
+        if let Some(u) = user_trim {
+            (
+                u.to_string(),
+                Some(u.to_string()),
+                Some("bad".to_string()),
+                Some(chrono::Utc::now().to_rfc3339()),
+                Some("suggested".to_string()),
+            )
+        } else {
+            (result.text.clone(), None, None, None, None)
+        };
     history.insert(
         0,
         HistoryEntry {
-            id,
-            text: result.text.clone(),
+            id: id.clone(),
+            text,
             raw_text: result.raw_text.clone(),
             llm_text: result.llm_text.clone(),
-            user_text: None,
+            user_text: user_text_field,
             language: result.language.clone(),
             duration_seconds: result.duration_seconds,
             created_at: chrono::Utc::now().to_rfc3339(),
@@ -162,14 +187,15 @@ pub(crate) fn append_history(
             alignment: result.alignment.clone(),
             source: source.to_string(),
             translate_target_language,
-            quality_rating: None,
-            rated_at: None,
-            learn_status: None,
+            quality_rating,
+            rated_at,
+            learn_status,
             learn_terms: Vec::new(),
         },
     );
     history.truncate(5000);
     let _ = save_history_to_disk(&history);
+    Some(id)
 }
 
 fn learn_status_ok(status: &str) -> bool {

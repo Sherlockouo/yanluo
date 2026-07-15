@@ -88,10 +88,6 @@ export function AsrPage() {
   }, [config.asr_model_id]);
 
   useEffect(() => {
-    if (config.asr_provider === "qwen") void refreshStatus();
-  }, [config.asr_provider, refreshStatus]);
-
-  useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listen<ModelDownloadProgress>("model-download-progress", (event) => {
       setProgress(event.payload);
@@ -139,13 +135,20 @@ export function AsrPage() {
     }
   };
 
+  // Local dir filled → load only. Download only when no dir and cache missing.
+  const hasLocalDir = Boolean(config.asr_model_dir?.trim());
   const needsDownload =
     config.asr_provider === "qwen" &&
-    (status?.needs_download ?? !config.asr_model_dir?.trim());
+    !hasLocalDir &&
+    (status?.needs_download ?? true);
 
   useEffect(() => {
     if (needsDownload) setEngineOpen(true);
   }, [needsDownload]);
+
+  useEffect(() => {
+    if (config.asr_provider === "qwen") void refreshStatus();
+  }, [config.asr_provider, config.asr_model_dir, refreshStatus]);
 
   const primaryAction = async () => {
     if (needsDownload) {

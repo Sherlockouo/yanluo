@@ -1,4 +1,5 @@
 import type {
+  AgentKind,
   AppConfig,
   AsrProvider,
   HotkeyBinding,
@@ -23,6 +24,12 @@ export const defaultHotkeyCancel: HotkeyBinding = {
   key: "escape",
   modifiers: [],
   label: "Esc",
+};
+
+export const defaultHotkeyAgent: HotkeyBinding = {
+  key: "49",
+  modifiers: ["fn"],
+  label: "Fn+Space",
 };
 
 /** Built-in refine prompt — tuned for small local chat models (esp. qwen3:1.7b). */
@@ -132,6 +139,20 @@ export const defaultConfig: AppConfig = {
   hotkey_transcribe: defaultHotkeyTranscribe,
   hotkey_translate: defaultHotkeyTranslate,
   hotkey_cancel: defaultHotkeyCancel,
+  hotkey_agent: defaultHotkeyAgent,
+  agent_kind: "claude",
+  agent_profile_id: "claude",
+  agent_profiles: [
+    { id: "claude", name: "Claude", kind: "claude", bin: "", model: "sonnet" },
+    { id: "codex", name: "Codex", kind: "codex", bin: "", model: "" },
+    { id: "pi", name: "Pi", kind: "pi", bin: "", model: "" },
+  ],
+  agent_cwd: "",
+  agent_cwd_history: [],
+  agent_claude_bin: "",
+  agent_codex_bin: "",
+  agent_pi_bin: "",
+  agent_trusted_dirs: [],
   audio_capture_mode: "external",
   llm_enabled: false,
   llm_provider: "openai",
@@ -142,6 +163,34 @@ export const defaultConfig: AppConfig = {
   llm_translate_prompt: "",
   vocabulary: [],
 };
+
+/** CLI model aliases for agent spawn (`--model` / `-m`). */
+export const AGENT_MODELS: Record<AgentKind, { id: string; label: string }[]> = {
+  claude: [
+    { id: "sonnet", label: "Sonnet" },
+    { id: "opus", label: "Opus" },
+    { id: "haiku", label: "Haiku" },
+    { id: "fable", label: "Fable" },
+  ],
+  codex: [
+    { id: "", label: "默认" },
+    { id: "o3", label: "o3" },
+    { id: "o4-mini", label: "o4-mini" },
+    { id: "gpt-5.1", label: "GPT-5.1" },
+    { id: "gpt-5.2", label: "GPT-5.2" },
+  ],
+  pi: [
+    { id: "", label: "默认" },
+    { id: "anthropic/claude-sonnet-4-5", label: "Sonnet 4.5" },
+    { id: "anthropic/claude-opus-4-5", label: "Opus 4.5" },
+    { id: "openai/gpt-5.2", label: "GPT-5.2" },
+    { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+  ],
+};
+
+export function agentModelsFor(kind: AgentKind) {
+  return AGENT_MODELS[kind] ?? AGENT_MODELS.claude;
+}
 
 /** Split "⇧+Fn" / "⌃+Space" into Kbd segments. */
 export function hotkeySegments(label: string): string[] {
@@ -211,6 +260,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: "overview", label: "主页" },
       { id: "transcribe", label: "转写" },
+      { id: "agent", label: "Agent" },
       { id: "history", label: "历史" },
     ],
   },
@@ -246,6 +296,7 @@ export function stateLabel(state: RecState) {
   if (state === "recording") return "录音中";
   if (state === "processing") return "转写中";
   if (state === "refining") return "处理中";
+  if (state === "editing") return "编辑中";
   return "就绪";
 }
 

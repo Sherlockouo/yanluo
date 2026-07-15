@@ -77,7 +77,7 @@ export function TranslatePage() {
                 className={cn(
                   "h-7 gap-1 rounded-lg border border-border/80 bg-surface px-2.5",
                   "shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)_inset]",
-                  "text-[12px] font-medium text-foreground",
+                  "text-[12px] font-medium text-foreground items-center",
                   "transition-[border-color,background-color] duration-150",
                   "hover:border-foreground/20 hover:bg-surface-secondary/60",
                 )}
@@ -86,14 +86,6 @@ export function TranslatePage() {
                   {() => (
                     <span className="inline-flex items-center gap-1.5">
                       <span>{targetLabel}</span>
-                      {llmReady ? (
-                        <>
-                          <span className="text-muted/50">·</span>
-                          <span className="font-normal text-muted">
-                            {config.llm_model}
-                          </span>
-                        </>
-                      ) : null}
                     </span>
                   )}
                 </Select.Value>

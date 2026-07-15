@@ -59,6 +59,17 @@ pub(crate) enum WorkerCommand {
 // App state
 // ---------------------------------------------------------------------------
 
+/// Fn/⇧Fn: ASR done, HUD editing — paste deferred until confirm.
+#[derive(Clone)]
+pub(crate) struct PendingHudConfirm {
+    pub(crate) mode: String,
+    /// Text shown when editing started (post-vocab / translate accept).
+    pub(crate) asr_text: String,
+    pub(crate) result: TranscriptionResult,
+    pub(crate) gen: u64,
+    pub(crate) media_kind: String,
+}
+
 pub struct AsrEngine {
     pub(crate) model_dir: Mutex<String>,
     pub(crate) recorder: Mutex<Option<SendWrapper<AudioRecorder>>>,
@@ -77,6 +88,8 @@ pub struct AsrEngine {
     pub(crate) session_mode: Mutex<String>,
     /// Live translate accumulation (strategy C). Translate mode only.
     pub(crate) translate_stream: Mutex<TranslateStreamState>,
+    /// Fn/translate confirm-then-paste slot.
+    pub(crate) pending_hud_confirm: Mutex<Option<PendingHudConfirm>>,
 }
 
 impl AsrEngine {
@@ -129,6 +142,7 @@ impl AsrEngine {
             history: Mutex::new(history),
             session_mode: Mutex::new("fn".into()),
             translate_stream: Mutex::new(TranslateStreamState::default()),
+            pending_hud_confirm: Mutex::new(None),
         }
     }
 
@@ -166,6 +180,30 @@ impl AsrEngine {
 
     pub(crate) fn finalize_aborted(app: &AppHandle, gen: u64) -> bool {
         Self::finalize_gen(app) != gen
+    }
+
+    pub(crate) fn set_pending_hud_confirm(app: &AppHandle, pending: Option<PendingHudConfirm>) {
+        if let Ok(mut slot) = app.state::<AsrEngine>().inner().pending_hud_confirm.lock() {
+            *slot = pending;
+        }
+    }
+
+    pub(crate) fn take_pending_hud_confirm(app: &AppHandle) -> Option<PendingHudConfirm> {
+        app.state::<AsrEngine>()
+            .inner()
+            .pending_hud_confirm
+            .lock()
+            .ok()?
+            .take()
+    }
+
+    pub(crate) fn has_pending_hud_confirm(app: &AppHandle) -> bool {
+        app.state::<AsrEngine>()
+            .inner()
+            .pending_hud_confirm
+            .lock()
+            .map(|s| s.is_some())
+            .unwrap_or(false)
     }
 
     pub(crate) fn send_worker(&self, cmd: WorkerCommand) -> Result<(), String> {

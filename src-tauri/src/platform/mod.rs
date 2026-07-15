@@ -217,6 +217,50 @@ pub(crate) fn raise_floating_hud_level(window: &tauri::WebviewWindow, order_fron
     }
 }
 
+/// Agent edit mode: temporarily drop NonactivatingPanel so textarea can take keys.
+/// Must run on the AppKit main thread (mlx-worker must not call this directly).
+#[cfg(target_os = "macos")]
+pub(crate) fn set_floating_hud_keyable(app: &tauri::AppHandle, keyable: bool) {
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        let Some(window) = app.get_webview_window("floating") else {
+            return;
+        };
+        use objc2_app_kit::{NSWindow, NSWindowStyleMask};
+        let Ok(ns_ptr) = window.ns_window() else {
+            return;
+        };
+        unsafe {
+            let ns_window = &*(ns_ptr as *const NSWindow);
+            let mut mask = ns_window.styleMask();
+            if keyable {
+                mask.remove(NSWindowStyleMask::NonactivatingPanel);
+                ns_window.setStyleMask(mask);
+                ns_window.makeKeyAndOrderFront(None);
+            } else {
+                mask.insert(NSWindowStyleMask::NonactivatingPanel);
+                ns_window.setStyleMask(mask);
+            }
+        }
+        if keyable {
+            let _ = window.set_focus();
+        }
+    });
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn set_floating_hud_keyable(app: &tauri::AppHandle, keyable: bool) {
+    if !keyable {
+        return;
+    }
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        if let Some(window) = app.get_webview_window("floating") {
+            let _ = window.set_focus();
+        }
+    });
+}
+
 #[cfg(target_os = "macos")]
 pub(crate) fn configure_floating_hud_panel(window: &tauri::WebviewWindow, corner_radius: f64) {
     configure_floating_overlay_panel(window, corner_radius, true, true);
@@ -227,6 +271,16 @@ pub(crate) fn configure_floating_hud_panel(window: &tauri::WebviewWindow, corner
 #[cfg(target_os = "macos")]
 pub(crate) fn configure_floating_lang_panel(window: &tauri::WebviewWindow, corner_radius: f64) {
     configure_floating_overlay_panel(window, corner_radius, false, true);
+}
+
+/// Agent/cwd picker outside HUD: NonactivatingPanel + shadow, no vibrancy
+/// (vibrancy washed out list text → looked empty).
+#[cfg(target_os = "macos")]
+pub(crate) fn configure_floating_agent_menu_panel(
+    window: &tauri::WebviewWindow,
+    corner_radius: f64,
+) {
+    configure_floating_overlay_panel(window, corner_radius, true, false);
 }
 
 #[cfg(target_os = "macos")]
@@ -385,4 +439,73 @@ pub(crate) fn post_cmd_v() -> Result<(), String> {
     // Auto-paste (synthetic keystroke) is macOS-only; text remains on the clipboard.
     eprintln!("[paste] auto-paste skipped (non-macOS); text is on clipboard");
     Ok(())
+}
+
+/// Read file paths and/or a bitmap image from the general pasteboard.
+/// Images are written under `{app_data}/agent/clipboard/`.
+#[cfg(target_os = "macos")]
+pub(crate) fn read_clipboard_attachment_paths() -> Result<Vec<String>, String> {
+    use objc2_app_kit::{
+        NSFilenamesPboardType, NSPasteboard, NSPasteboardTypePNG, NSPasteboardTypeTIFF,
+    };
+    use objc2_foundation::{NSArray, NSString};
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let pb = NSPasteboard::generalPasteboard();
+    let mut out: Vec<String> = Vec::new();
+
+    // Finder / file manager paths.
+    if let Some(plist) = pb.propertyListForType(unsafe { NSFilenamesPboardType }) {
+        if let Some(arr) = plist.downcast_ref::<NSArray>() {
+            for i in 0..arr.count() {
+                let item = arr.objectAtIndex(i);
+                if let Some(s) = item.downcast_ref::<NSString>() {
+                    let path = s.to_string();
+                    if !path.is_empty() && PathBuf::from(&path).exists() {
+                        out.push(path);
+                    }
+                }
+            }
+        }
+    }
+
+    if !out.is_empty() {
+        return Ok(out);
+    }
+
+    // Bitmap image → temp file under agent/clipboard.
+    let png = pb.dataForType(unsafe { NSPasteboardTypePNG });
+    let tiff = if png.is_none() {
+        pb.dataForType(unsafe { NSPasteboardTypeTIFF })
+    } else {
+        None
+    };
+    let (data, ext) = match (png, tiff) {
+        (Some(d), _) => (Some(d), "png"),
+        (None, Some(d)) => (Some(d), "tiff"),
+        _ => (None, ""),
+    };
+    if let Some(data) = data {
+        let dir = crate::config::app_data_dir().join("agent").join("clipboard");
+        fs::create_dir_all(&dir).map_err(|e| format!("创建 clipboard 目录失败: {e}"))?;
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let path = dir.join(format!("paste-{ts}.{ext}"));
+        let ns_path = NSString::from_str(&path.to_string_lossy());
+        if !data.writeToFile_atomically(&ns_path, true) {
+            return Err("写入剪贴板图片失败".into());
+        }
+        out.push(path.to_string_lossy().into_owned());
+    }
+
+    Ok(out)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn read_clipboard_attachment_paths() -> Result<Vec<String>, String> {
+    Err("剪贴板附件仅支持 macOS".into())
 }

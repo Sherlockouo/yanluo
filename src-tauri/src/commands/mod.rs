@@ -9,6 +9,7 @@ use crate::config::*;
 use crate::history::*;
 use crate::hotkey::*;
 use crate::hud::*;
+use crate::paste::*;
 use crate::transcription::*;
 use crate::permissions;
 
@@ -101,6 +102,7 @@ pub(crate) fn save_app_config(
 ) -> Result<(), String> {
     let mut config = config;
     normalize_config_for_platform(&mut config);
+    ensure_agent_profiles(&mut config);
     let previous_target = engine
         .inner()
         .config
@@ -455,15 +457,18 @@ pub(crate) fn start_recording(
     let session = match mode.as_deref() {
         Some("transcribe") => "transcribe",
         Some("translate") => "translate",
+        Some("agent") => "agent",
         _ => "fn",
     };
     AsrEngine::set_session_mode(&app, session);
     reset_translate_stream(&app);
     let _ = AsrEngine::bump_finalize_gen(&app);
+    AsrEngine::set_pending_hud_confirm(&app, None);
 
     // Show HUD *before* ScreenCaptureKit start — that path can take seconds and
     // used to leave the UI frozen with no capsule until capture finished/failed.
-    let show_hud = session == "fn" || session == "translate";
+    // Agent also uses the same floating HUD (with extras).
+    let show_hud = session == "fn" || session == "translate" || session == "agent";
     emit_floating_status(&app, show_hud, "recording", "", 0.0);
 
     let rec = match AudioRecorder::start(config.audio_capture_mode) {
@@ -538,16 +543,26 @@ pub(crate) fn start_recording(
 
 /// Abort in-progress recording or mid-pipeline finalize (paste/history follow-ups).
 /// Already-pasted text (if any) is kept; late transcription-result is suppressed.
+/// `reason` is logged for diagnosing accidental cancels (`agent-esc` / `escape-key` / `hud-cancel`).
 #[tauri::command]
-pub(crate) fn cancel_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Result<(), String> {
-    let was_recording = engine.inner().recording.load(Ordering::Acquire);
+pub(crate) fn cancel_recording(
+    app: AppHandle,
+    engine: State<'_, AsrEngine>,
+    reason: Option<String>,
+) -> Result<(), String> {
+    cancel_recording_with_reason(&app, engine.inner(), reason.as_deref().unwrap_or("unspecified"));
+    Ok(())
+}
+
+/// Shared cancel path for IPC + hotkey tap (must not depend on floating webview).
+pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, reason: &str) {
+    let was_recording = engine.recording.load(Ordering::Acquire);
     let has_recorder = engine
-        .inner()
         .recorder
         .lock()
         .map(|g| g.is_some())
         .unwrap_or(false);
-    let hud_busy = floating_status_slot(&app)
+    let hud_busy = floating_status_slot(app)
         .lock()
         .map(|s| {
             s.visible
@@ -557,40 +572,133 @@ pub(crate) fn cancel_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> 
                 )
         })
         .unwrap_or(false);
+    let session = AsrEngine::session_mode(app);
 
-    // Invalidate any in-flight finalize / stream translate apply.
-    let _ = AsrEngine::bump_finalize_gen(&app);
-    engine
-        .inner()
-        .cancel_requested
-        .store(true, Ordering::Release);
-    engine.inner().recording.store(false, Ordering::Release);
-    reset_translate_stream(&app);
+    let _ = AsrEngine::bump_finalize_gen(app);
+    engine.cancel_requested.store(true, Ordering::Release);
+    engine.recording.store(false, Ordering::Release);
+    reset_translate_stream(app);
+    AsrEngine::set_pending_hud_confirm(app, None);
 
     if !was_recording && !has_recorder && !hud_busy {
-        emit_floating_status(&app, false, "idle", "", 0.0);
+        emit_floating_status(app, false, "idle", "", 0.0);
         let _ = app.emit("recording-cancelled", ());
-        return Ok(());
+        eprintln!(
+            "[asr] cancelled noop reason={reason} session={session} (recording=false recorder=false hud_busy=false)"
+        );
+        return;
     }
 
-    // For Apple/ElevenLabs the recorder is owned here; drop samples.
-    // For Qwen the mlx worker owns the stop path and will see cancel_requested.
     let config = engine
-        .inner()
         .config
         .lock()
         .map(|c| c.clone())
         .unwrap_or_default();
     if !matches!(config.asr_provider, AsrProvider::Qwen) {
-        let _ = AsrEngine::take_recorder_and_stop(&app);
+        let _ = AsrEngine::take_recorder_and_stop(app);
+    }
+
+    emit_floating_status(app, false, "idle", "", 0.0);
+    let _ = app.emit("recording-cancelled", ());
+    eprintln!(
+        "[asr] cancelled reason={reason} session={session} (recording={} recorder={} hud_busy={})",
+        was_recording, has_recorder, hud_busy
+    );
+}
+
+#[derive(Clone, Serialize)]
+pub(crate) struct LearnFromHudPayload {
+    pub(crate) entry_id: String,
+    pub(crate) before: String,
+    pub(crate) after: String,
+}
+
+/// Confirm Fn/⇧Fn HUD edit: paste → history → optional learn → hide.
+#[tauri::command]
+pub(crate) fn confirm_floating_transcript(
+    app: AppHandle,
+    text: String,
+) -> Result<(), String> {
+    let pending = AsrEngine::take_pending_hud_confirm(&app)
+        .ok_or_else(|| "没有待确认的识别结果".to_string())?;
+    if AsrEngine::finalize_aborted(&app, pending.gen) {
+        emit_floating_status(&app, false, "idle", "", 0.0);
+        return Err("会话已取消".into());
+    }
+
+    let confirmed = text.trim().to_string();
+    if confirmed.is_empty() {
+        // Put pending back so user can retry / Esc cancel.
+        AsrEngine::set_pending_hud_confirm(&app, Some(pending));
+        return Err("确认文本不能为空".into());
+    }
+
+    let asr_text = pending.asr_text.clone();
+    let mode = pending.mode.clone();
+    let edited = confirmed != asr_text.trim();
+    let learn = mode == "fn" && edited;
+
+    let mut result = pending.result;
+    // Keep ASR baseline in raw_text for learn harvest.
+    if result.raw_text.trim().is_empty() || mode == "fn" {
+        result.raw_text = asr_text.clone();
+    }
+    result.text = confirmed.clone();
+
+    match inject_text_via_paste_on_main(&app, &confirmed) {
+        Ok(()) => {
+            eprintln!(
+                "[paste] confirmed {} chars (edited={edited} mode={mode})",
+                confirmed.chars().count()
+            );
+        }
+        Err(e) => {
+            eprintln!("[paste] injection failed: {e}");
+            let _ = app.emit(
+                "partial-error",
+                format!("已写入剪切板，但粘贴失败（请检查辅助功能权限）: {e}"),
+            );
+        }
+    }
+
+    let user_for_history = if learn {
+        Some(confirmed.as_str())
+    } else {
+        None
+    };
+    let entry_id = append_history_with_user(
+        &app,
+        &result,
+        &mode,
+        None,
+        &pending.media_kind,
+        user_for_history,
+    );
+
+    if learn {
+        if let Some(id) = entry_id.clone() {
+            let payload = LearnFromHudPayload {
+                entry_id: id,
+                before: asr_text.clone(),
+                after: confirmed.clone(),
+            };
+            let _ = app.emit("learn-from-hud", &payload);
+        }
     }
 
     emit_floating_status(&app, false, "idle", "", 0.0);
+    let _ = app.emit("transcription-result", &result);
+    Ok(())
+}
+
+/// Discard Fn/⇧Fn HUD edit without paste or history.
+#[tauri::command]
+pub(crate) fn cancel_floating_transcript(app: AppHandle) -> Result<(), String> {
+    let _ = AsrEngine::take_pending_hud_confirm(&app);
+    let _ = AsrEngine::bump_finalize_gen(&app);
+    emit_floating_status(&app, false, "idle", "", 0.0);
     let _ = app.emit("recording-cancelled", ());
-    eprintln!(
-        "[asr] cancelled (recording={} recorder={} hud_busy={})",
-        was_recording, has_recorder, hud_busy
-    );
+    eprintln!("[asr] hud confirm cancelled");
     Ok(())
 }
 
@@ -603,7 +711,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
         .map(|config| config.clone())
         .map_err(|e| e.to_string())?;
     let session = AsrEngine::session_mode(&app);
-    let show_hud = session == "fn" || session == "translate";
+    let show_hud = session == "fn" || session == "translate" || session == "agent";
     let finalize_gen = AsrEngine::finalize_gen(&app);
 
     // Signal the worker's streaming loop to stop.
@@ -621,6 +729,10 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
         String::new()
     };
     emit_floating_status(&app, show_hud, "processing", &hud_text, 0.0);
+    if session == "agent" {
+        let _ = app.emit("agent-voice-status", "processing");
+        let _ = app.emit_to("floating", "agent-voice-status", "processing");
+    }
 
     if matches!(config.asr_provider, AsrProvider::Qwen) {
         eprintln!("[asr] stop signaled, worker will finish current partial then paste");
@@ -673,16 +785,28 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
                     // Aborted mid-pipeline; recording-cancelled already (or) HUD idle.
                     return;
                 }
-                Some(false) => emit_floating_status(&app, false, "idle", "", 0.0),
+                Some(false) => {
+                    if AsrEngine::session_mode(&app) != "agent" {
+                        emit_floating_status(&app, false, "idle", "", 0.0);
+                    }
+                }
                 Some(true) => {}
             }
         } else {
             emit_floating_status(&app, false, "idle", "", 0.0);
+            if AsrEngine::session_mode(&app) == "agent" {
+                let _ = app.emit("agent-transcription-result", &result);
+                let _ = app.emit_to("floating", "agent-transcription-result", &result);
+            }
         }
         if AsrEngine::finalize_aborted(&app, finalize_gen) {
             return;
         }
-        let _ = app.emit("transcription-result", &result);
+        if AsrEngine::session_mode(&app) != "agent"
+            && !AsrEngine::has_pending_hud_confirm(&app)
+        {
+            let _ = app.emit("transcription-result", &result);
+        }
     });
     Ok(())
 }

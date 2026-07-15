@@ -1137,14 +1137,14 @@ const HistoryRow = memo(function HistoryRow({
         <div className="flex items-center justify-between gap-2 text-[11px] text-muted">
           <span className="inline-flex items-center gap-2">
             <span>{new Date(entry.created_at).toLocaleString()}</span>
-            <span className="inline-flex items-center gap-1 text-foreground/80">
+            <div className=" inline-flex items-center gap-1 text-foreground/80">
               {isVideo ? (
                 <FileVideo size={11} aria-hidden />
               ) : (
                 <FileAudio size={11} aria-hidden />
-              )}
+               )}
               {isVideo ? "视频" : "音频"}
-            </span>
+            </div>
           </span>
           <span>{entry.duration_seconds.toFixed(1)}s</span>
         </div>

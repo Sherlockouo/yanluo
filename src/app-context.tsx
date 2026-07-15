@@ -14,6 +14,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "@heroui/react";
 import { useNavigate } from "react-router-dom";
 import type {
+  AgentJob,
   AppConfig,
   FloatingPayload,
   HistoryEntry,
@@ -24,7 +25,10 @@ import { defaultConfig } from "@/lib/constants";
 import {
   harvestFromTriples,
 } from "@/lib/learn-cases";
-import type { LearnCandidate } from "@/lib/learn-from-refine";
+import {
+  extractLearnCandidates,
+  type LearnCandidate,
+} from "@/lib/learn-from-refine";
 import {
   mergePendingLearn,
   type PendingLearn,
@@ -35,6 +39,7 @@ export type ThemeMode = "dark" | "light";
 type AppContextValue = {
   config: AppConfig;
   history: HistoryEntry[];
+  agentJobs: AgentJob[];
   state: RecState;
   modelLoaded: boolean;
   modelLoading: boolean;
@@ -46,6 +51,10 @@ type AppContextValue = {
   updateConfig: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void;
   saveConfig: (next?: AppConfig, opts?: { silent?: boolean }) => Promise<void>;
   loadHistory: () => Promise<void>;
+  cancelAgentJob: (id: string) => Promise<void>;
+  continueAgentJob: (id: string, prompt: string, attachments?: string[]) => Promise<AgentJob>;
+  deleteAgentJob: (id: string) => Promise<boolean>;
+  clearAgentJobs: (finishedOnly?: boolean) => Promise<number>;
   chooseModelDir: () => Promise<void>;
   loadModel: () => Promise<void>;
   testLlm: () => Promise<void>;
@@ -94,6 +103,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [agentJobs, setAgentJobs] = useState<AgentJob[]>([]);
   const [state, setState] = useState<RecState>("idle");
   const [modelLoaded, setModelLoaded] = useState(false);
   const [modelLoading, setModelLoading] = useState(false);
@@ -148,6 +158,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       hotkey_transcribe: next.hotkey_transcribe ?? defaultConfig.hotkey_transcribe,
       hotkey_translate: next.hotkey_translate ?? defaultConfig.hotkey_translate,
       hotkey_cancel: next.hotkey_cancel ?? defaultConfig.hotkey_cancel,
+      hotkey_agent: next.hotkey_agent ?? defaultConfig.hotkey_agent,
+      agent_kind: next.agent_kind ?? defaultConfig.agent_kind,
+      agent_profile_id:
+        next.agent_profile_id ?? defaultConfig.agent_profile_id,
+      agent_profiles:
+        next.agent_profiles?.length
+          ? next.agent_profiles
+          : defaultConfig.agent_profiles,
+      agent_cwd: next.agent_cwd ?? defaultConfig.agent_cwd,
+      agent_cwd_history:
+        next.agent_cwd_history ?? defaultConfig.agent_cwd_history,
+      agent_claude_bin: next.agent_claude_bin ?? defaultConfig.agent_claude_bin,
+      agent_codex_bin: next.agent_codex_bin ?? defaultConfig.agent_codex_bin,
+      agent_pi_bin: next.agent_pi_bin ?? defaultConfig.agent_pi_bin,
+      agent_trusted_dirs:
+        next.agent_trusted_dirs ?? defaultConfig.agent_trusted_dirs,
       audio_capture_mode: next.audio_capture_mode ?? defaultConfig.audio_capture_mode,
     });
   }, []);
@@ -157,22 +183,67 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setHistory(entries);
   }, []);
 
-  useEffect(() => {
-    void loadConfig();
-    // History can be multi‑MiB on disk (alignment). Defer past first paint.
-    let idleId: number | null = null;
-    let timeoutId: number | null = null;
-    if (typeof window.requestIdleCallback === "function") {
-      idleId = window.requestIdleCallback(
-        () => {
-          void loadHistory();
-        },
-        { timeout: 1200 },
+  const loadAgentJobs = useCallback(async () => {
+    const jobs = await invoke<AgentJob[]>("list_agent_jobs").catch(() => []);
+    setAgentJobs(jobs);
+  }, []);
+
+  const cancelAgentJob = useCallback(async (id: string) => {
+    await invoke("cancel_agent_job", { id });
+  }, []);
+
+  const continueAgentJob = useCallback(
+    async (id: string, prompt: string, attachments?: string[]) => {
+      const job = await invoke<AgentJob>("continue_agent_job", {
+        jobId: id,
+        prompt,
+        attachments: attachments ?? null,
+      });
+      setAgentJobs((prev) => {
+        const i = prev.findIndex((j) => j.id === job.id);
+        if (i < 0) return [job, ...prev];
+        const next = prev.slice();
+        next[i] = job;
+        return next;
+      });
+      return job;
+    },
+    [],
+  );
+
+  const deleteAgentJob = useCallback(async (id: string) => {
+    const ok = await invoke<boolean>("delete_agent_job", { id });
+    if (ok) {
+      setAgentJobs((prev) => prev.filter((j) => j.id !== id));
+    }
+    return ok;
+  }, []);
+
+  const clearAgentJobs = useCallback(async (finishedOnly = true) => {
+    const n = await invoke<number>("clear_agent_jobs", { finishedOnly });
+    if (finishedOnly) {
+      setAgentJobs((prev) =>
+        prev.filter((j) => j.status === "queued" || j.status === "running"),
       );
     } else {
-      timeoutId = window.setTimeout(() => {
-        void loadHistory();
-      }, 0);
+      setAgentJobs([]);
+    }
+    return n;
+  }, []);
+
+  useEffect(() => {
+    void loadConfig();
+    // History / agent jobs can be multi‑MiB on disk. Defer past first paint.
+    let idleId: number | null = null;
+    let timeoutId: number | null = null;
+    const deferred = () => {
+      void loadHistory();
+      void loadAgentJobs();
+    };
+    if (typeof window.requestIdleCallback === "function") {
+      idleId = window.requestIdleCallback(deferred, { timeout: 1200 });
+    } else {
+      timeoutId = window.setTimeout(deferred, 0);
     }
 
     const unlisteners: UnlistenFn[] = [];
@@ -253,17 +324,60 @@ export function AppProvider({ children }: { children: ReactNode }) {
             event.payload.hotkey_translate ?? defaultConfig.hotkey_translate,
           hotkey_cancel:
             event.payload.hotkey_cancel ?? defaultConfig.hotkey_cancel,
+          hotkey_agent:
+            event.payload.hotkey_agent ?? defaultConfig.hotkey_agent,
+          agent_kind: event.payload.agent_kind ?? defaultConfig.agent_kind,
+          agent_profile_id:
+            event.payload.agent_profile_id ?? defaultConfig.agent_profile_id,
+          agent_profiles:
+            event.payload.agent_profiles?.length
+              ? event.payload.agent_profiles
+              : defaultConfig.agent_profiles,
+          agent_cwd: event.payload.agent_cwd ?? defaultConfig.agent_cwd,
+          agent_cwd_history:
+            event.payload.agent_cwd_history ?? defaultConfig.agent_cwd_history,
+          agent_claude_bin:
+            event.payload.agent_claude_bin ?? defaultConfig.agent_claude_bin,
+          agent_codex_bin:
+            event.payload.agent_codex_bin ?? defaultConfig.agent_codex_bin,
+          agent_pi_bin:
+            event.payload.agent_pi_bin ?? defaultConfig.agent_pi_bin,
+          agent_trusted_dirs:
+            event.payload.agent_trusted_dirs ?? defaultConfig.agent_trusted_dirs,
           audio_capture_mode:
             event.payload.audio_capture_mode ?? defaultConfig.audio_capture_mode,
         });
+      }),
+      listen<AgentJob>("agent-job-updated", (event) => {
+        setAgentJobs((prev) => {
+          const idx = prev.findIndex((j) => j.id === event.payload.id);
+          if (idx === -1) return [event.payload, ...prev].slice(0, 40);
+          const next = prev.slice();
+          next[idx] = event.payload;
+          return next;
+        });
+      }),
+      listen<{ id: string }>("agent-job-deleted", (event) => {
+        setAgentJobs((prev) => prev.filter((j) => j.id !== event.payload.id));
+      }),
+      listen("agent-jobs-reload", () => {
+        void loadAgentJobs();
       }),
       listen<string>("open-settings", (event) => {
         const page = event.payload;
         if (page === "llm") navigate("/llm");
         else if (page === "updates") navigate("/settings?tab=updates");
+        else if (page === "agent") navigate("/settings?tab=agent");
         else navigate("/settings");
       }),
+      listen<string>("open-agent-job", (event) => {
+        const id = event.payload;
+        if (id) navigate(`/agent/${id}`);
+      }),
       listen<{ shift?: boolean; intention?: string }>("fn-key-down", async (event) => {
+        // Confirm-wait: Fn is handled in floating via hud-confirm-request (hotkey tap).
+        if (stateRef.current === "editing") return;
+
         const current = configRef.current;
         const intention =
           event.payload?.intention === "translate" || event.payload?.shift
@@ -317,6 +431,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }),
       listen("escape-key-down", async () => {
+        if (stateRef.current === "editing") {
+          try {
+            await invoke("cancel_floating_transcript");
+            setState("idle");
+            stateRef.current = "idle";
+            toast.info("已取消");
+          } catch (error) {
+            toast.danger(`取消失败: ${error}`);
+          }
+          return;
+        }
         if (
           stateRef.current !== "recording" &&
           stateRef.current !== "processing" &&
@@ -327,7 +452,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const midPipeline =
           stateRef.current === "processing" || stateRef.current === "refining";
         try {
-          await invoke("cancel_recording");
+          await invoke("cancel_recording", { reason: "escape-key" });
           setState("idle");
           stateRef.current = "idle";
           toast.info(midPipeline ? "已中止后续处理" : "已取消录音");
@@ -364,7 +489,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (timeoutId != null) window.clearTimeout(timeoutId);
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [loadConfig, loadHistory, navigate]);
+  }, [loadConfig, loadHistory, loadAgentJobs, navigate]);
 
   const saveConfig = useCallback(
     async (next = config, opts?: { silent?: boolean }) => {
@@ -572,6 +697,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [markHistoryLearnStatus],
   );
 
+  useEffect(() => {
+    let unlisten: UnlistenFn | undefined;
+    void listen<{ entry_id: string; before: string; after: string }>(
+      "learn-from-hud",
+      (event) => {
+        const { entry_id, before, after } = event.payload;
+        const terms = extractLearnCandidates(before, after);
+        if (!terms.length) {
+          void loadHistory();
+          return;
+        }
+        const entry: HistoryEntry = {
+          id: entry_id,
+          text: after,
+          raw_text: before,
+          user_text: after,
+          language: "",
+          duration_seconds: 0,
+          created_at: new Date().toISOString(),
+          refined: false,
+          source: "fn",
+          learn_status: "suggested",
+          quality_rating: "bad",
+        };
+        void offerLearnFromEntries([entry], terms).then((n) => {
+          void loadHistory();
+          if (n > 0) {
+            toast.success(`已加入学习待确认 ${n} 条`);
+          }
+        });
+      },
+    ).then((u) => {
+      unlisten = u;
+    });
+    return () => unlisten?.();
+  }, [offerLearnFromEntries, loadHistory]);
+
   const abortPendingLearn = useCallback(async () => {
     const ids = pendingLearnRef.current?.sourceIds ?? [];
     setPendingLearn(null);
@@ -627,6 +789,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     () => ({
       config,
       history,
+      agentJobs,
       state,
       modelLoaded,
       modelLoading,
@@ -638,6 +801,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateConfig,
       saveConfig,
       loadHistory,
+      cancelAgentJob,
+      continueAgentJob,
+      deleteAgentJob,
+      clearAgentJobs,
       chooseModelDir,
       loadModel,
       testLlm,
@@ -661,6 +828,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [
       config,
       history,
+      agentJobs,
       state,
       modelLoaded,
       modelLoading,
@@ -670,6 +838,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateConfig,
       saveConfig,
       loadHistory,
+      cancelAgentJob,
+      continueAgentJob,
+      deleteAgentJob,
+      clearAgentJobs,
       chooseModelDir,
       loadModel,
       testLlm,

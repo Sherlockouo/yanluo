@@ -56,6 +56,10 @@ pub(crate) struct FloatingStatus {
     /// True while clearing + re-translating after a live target switch.
     #[serde(default)]
     pub(crate) switching: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) agent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) cwd: Option<String>,
 }
 
 impl Default for FloatingStatus {
@@ -68,6 +72,8 @@ impl Default for FloatingStatus {
             intention: None,
             target_language: None,
             switching: false,
+            agent: None,
+            cwd: None,
         }
     }
 }
@@ -152,7 +158,19 @@ pub(crate) fn emit_floating_status(app: &AppHandle, visible: bool, state: &str, 
     let intention = match mode.as_str() {
         "translate" => Some("translate".into()),
         "fn" => Some("transcribe".into()),
+        "agent" => Some("agent".into()),
         _ => None,
+    };
+    let (agent_kind, cwd) = if mode == "agent" {
+        app.state::<AsrEngine>()
+            .inner()
+            .config
+            .lock()
+            .ok()
+            .map(|c| (Some(c.agent_kind.clone()), Some(c.agent_cwd.clone())))
+            .unwrap_or((None, None))
+    } else {
+        (None, None)
     };
     let (target_language, switching) = if mode == "translate" {
         let target = app
@@ -182,11 +200,17 @@ pub(crate) fn emit_floating_status(app: &AppHandle, visible: bool, state: &str, 
         intention,
         target_language,
         switching,
+        agent: agent_kind,
+        cwd,
     };
     if let Ok(mut slot) = floating_status_slot(app).lock() {
         *slot = payload.clone();
     }
     set_floating_window_visible(app, visible);
+    // Agent HUD needs key focus for Raycast menus / paste (⌘. ⌘/ ⌘V); editing too.
+    // AppKit: always hop to main thread (mlx-worker must not call makeKey*).
+    let keyable = visible && (state == "editing" || mode == "agent");
+    crate::platform::set_floating_hud_keyable(app, keyable);
     let _ = app.emit("floating-status", &payload);
     let _ = app.emit_to("floating", "floating-status", &payload);
     let _ = app.emit_to("floating-lang", "floating-status", &payload);
@@ -309,6 +333,7 @@ pub(crate) fn persist_floating_hud_position(window: &tauri::WebviewWindow) {
 pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
     if app.get_webview_window("floating").is_some() {
         let _ = create_floating_lang_window(app);
+        let _ = create_floating_agent_menu_window(app);
         return Ok(());
     }
     let (x, y) = resolve_hud_logical_position(app, FLOATING_HUD_MIN_W);
@@ -365,6 +390,7 @@ pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
 
     eprintln!("[floating] ASR HUD window created");
     let _ = create_floating_lang_window(app);
+    let _ = create_floating_agent_menu_window(app);
     Ok(())
 }
 
@@ -590,7 +616,7 @@ pub(crate) fn recenter_floating_hud(app: AppHandle, width: f64) {
     let app_clone = app.clone();
     let _ = app_clone.run_on_main_thread(move || {
         if let Some(window) = app.get_webview_window("floating") {
-            let width = width.clamp(FLOATING_HUD_MIN_W, FLOATING_HUD_MAX_W);
+            let width = width.clamp(FLOATING_HUD_MIN_W, 560.0);
             let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
             let (x, y) = match (window.outer_position(), window.outer_size()) {
                 (Ok(pos), Ok(size)) => {
@@ -602,19 +628,40 @@ pub(crate) fn recenter_floating_hud(app: AppHandle, width: f64) {
                 }
                 _ => resolve_hud_logical_position(&app, width),
             };
+            // Keep current height (agent HUD may be taller than FLOATING_HUD_H).
+            let height = window
+                .outer_size()
+                .ok()
+                .map(|s| (s.height as f64 / scale).clamp(FLOATING_HUD_H, 280.0))
+                .unwrap_or(FLOATING_HUD_H);
+            let _ = window.set_size(tauri::LogicalSize::new(width, height));
             let _ = window.set_position(tauri::LogicalPosition::new(x, y));
             save_hud_position(x, y);
-            let _ = window.set_always_on_top(true);
-            #[cfg(target_os = "macos")]
-            {
-                // Never orderFront here — recenter can run while HUD is hidden
-                // (AsrHud mount) and would flash the capsule on launch.
-                let visible = floating_status_slot(&app)
-                    .lock()
-                    .map(|s| s.visible)
-                    .unwrap_or(false);
-                raise_floating_hud_level(&window, visible);
-            }
+        }
+    });
+}
+
+/// Resize floating HUD (agent mode grows for rail / preview / edit).
+#[tauri::command]
+pub(crate) fn resize_floating_hud(app: AppHandle, width: f64, height: f64) {
+    let app_clone = app.clone();
+    let _ = app_clone.run_on_main_thread(move || {
+        if let Some(window) = app.get_webview_window("floating") {
+            let width = width.clamp(FLOATING_HUD_MIN_W, 560.0);
+            let height = height.clamp(FLOATING_HUD_H, 280.0);
+            let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
+            let (x, y) = match (window.outer_position(), window.outer_size()) {
+                (Ok(pos), Ok(size)) => {
+                    let cur_x = pos.x as f64 / scale;
+                    let cur_y = pos.y as f64 / scale;
+                    let cur_w = size.width as f64 / scale;
+                    let center_x = cur_x + cur_w / 2.0;
+                    ((center_x - width / 2.0).max(8.0), cur_y)
+                }
+                _ => resolve_hud_logical_position(&app, width),
+            };
+            let _ = window.set_size(tauri::LogicalSize::new(width, height));
+            let _ = window.set_position(tauri::LogicalPosition::new(x, y));
         }
     });
 }
@@ -624,7 +671,7 @@ pub(crate) fn recenter_floating_hud(app: AppHandle, width: f64) {
 pub(crate) fn set_floating_theme(theme: String, app: AppHandle) {
     let dark = theme != "light";
     let _ = app.clone().run_on_main_thread(move || {
-        for label in ["floating", "floating-lang"] {
+        for label in ["floating", "floating-lang", "floating-agent-menu"] {
             let Some(window) = app.get_webview_window(label) else {
                 continue;
             };
@@ -657,6 +704,8 @@ pub(crate) fn set_floating_theme(theme: String, app: AppHandle) {
                     .map(|s| {
                         if label == "floating-lang" {
                             s.visible && s.intention.as_deref() == Some("translate")
+                        } else if label == "floating-agent-menu" {
+                            false // menu raises itself when open
                         } else {
                             s.visible
                         }
@@ -668,5 +717,211 @@ pub(crate) fn set_floating_theme(theme: String, app: AppHandle) {
             }
             let _ = window.set_always_on_top(true);
         }
+    });
+}
+
+// —— Agent picker menu (separate window above HUD, like floating-lang) ——
+
+pub(crate) const FLOATING_AGENT_MENU_W: f64 = 200.0;
+pub(crate) const FLOATING_AGENT_MENU_ROW: f64 = 30.0;
+pub(crate) const FLOATING_AGENT_MENU_PAD: f64 = 10.0;
+
+fn agent_picker_mode_slot() -> &'static Mutex<String> {
+    static MODE: std::sync::OnceLock<Mutex<String>> = std::sync::OnceLock::new();
+    MODE.get_or_init(|| Mutex::new(String::new()))
+}
+
+pub(crate) fn agent_picker_mode() -> String {
+    agent_picker_mode_slot()
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default()
+}
+
+pub(crate) fn floating_agent_menu_is_open() -> bool {
+    !agent_picker_mode().is_empty()
+}
+
+fn create_floating_agent_menu_window(app: &AppHandle) -> Result<(), String> {
+    if app.get_webview_window("floating-agent-menu").is_some() {
+        return Ok(());
+    }
+    let (x, y) = resolve_hud_logical_position(app, FLOATING_HUD_MIN_W);
+    let window = WebviewWindowBuilder::new(
+        app,
+        "floating-agent-menu",
+        WebviewUrl::App("index.html".into()),
+    )
+    .title("ASR Agent Menu")
+    .inner_size(FLOATING_AGENT_MENU_W, FLOATING_AGENT_MENU_ROW + FLOATING_AGENT_MENU_PAD)
+    .position(x, y - 40.0)
+    .decorations(false)
+    .transparent(true)
+    .always_on_top(true)
+    .visible_on_all_workspaces(true)
+    .skip_taskbar(true)
+    .focused(false)
+    .visible(false)
+    .resizable(false)
+    .initialization_script(
+        r#"
+            window.__ASR_FLOATING_AGENT_MENU__ = true;
+            document.documentElement.setAttribute('data-floating', '1');
+            document.documentElement.setAttribute('data-floating-agent-menu', '1');
+            (function(){
+              var t = localStorage.getItem('asr-theme') === 'light' ? 'light' : 'dark';
+              document.documentElement.classList.remove('light','dark');
+              document.documentElement.classList.add(t);
+              document.documentElement.setAttribute('data-theme', t);
+            })();
+            "#,
+    )
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "macos")]
+    {
+        // Opaque-ish overlay: NonactivatingPanel, NO vibrancy (vibrancy hid text).
+        crate::platform::configure_floating_agent_menu_panel(
+            &window,
+            FLOATING_LANG_CORNER_RADIUS,
+        );
+        if let Ok(ns_ptr) = window.ns_window() {
+            use objc2_app_kit::NSWindow;
+            unsafe {
+                let ns_window = &*(ns_ptr as *const NSWindow);
+                ns_window.setMovableByWindowBackground(false);
+                ns_window.setHasShadow(true);
+            }
+        }
+        let _ = window.hide();
+    }
+    let _ = window.hide();
+    eprintln!("[floating-agent-menu] picker window created");
+    Ok(())
+}
+
+fn agent_menu_height(item_count: usize) -> f64 {
+    let n = item_count.max(1) as f64;
+    FLOATING_AGENT_MENU_PAD + n * FLOATING_AGENT_MENU_ROW + 4.0
+}
+
+fn position_floating_agent_menu(app: &AppHandle, item_count: usize) {
+    let Some(hud) = app.get_webview_window("floating") else {
+        return;
+    };
+    let Some(menu) = app.get_webview_window("floating-agent-menu") else {
+        return;
+    };
+    let Ok(scale) = hud.scale_factor() else {
+        return;
+    };
+    let scale = scale.max(1.0);
+    let Ok(pos) = hud.outer_position() else {
+        return;
+    };
+    let mode = agent_picker_mode();
+    let h = agent_menu_height(item_count);
+    let w = FLOATING_AGENT_MENU_W;
+    // Above HUD top-left; cwd menu slightly inset.
+    let x_off = if mode == "cwd" { 110.0 } else { 10.0 };
+    let x = pos.x as f64 / scale + x_off;
+    let y = pos.y as f64 / scale - h - 6.0;
+    let _ = menu.set_size(tauri::LogicalSize::new(w, h));
+    let _ = menu.set_position(tauri::LogicalPosition::new(x, y.max(8.0)));
+    let _ = menu.set_always_on_top(true);
+}
+
+fn apply_agent_picker_open(app: &AppHandle, mode: &str, item_count: usize) {
+    let Some(menu) = app.get_webview_window("floating-agent-menu") else {
+        let _ = create_floating_agent_menu_window(app);
+        // retry once after create
+        if app.get_webview_window("floating-agent-menu").is_none() {
+            return;
+        }
+        return apply_agent_picker_open(app, mode, item_count);
+    };
+    let mode = mode.trim();
+    if mode.is_empty() || (mode != "agent" && mode != "cwd") {
+        if let Ok(mut slot) = agent_picker_mode_slot().lock() {
+            slot.clear();
+        }
+        let _ = menu.hide();
+        let _ = app.emit_to("floating-agent-menu", "agent-picker", "");
+        let _ = app.emit_to("floating", "agent-picker", "");
+        return;
+    }
+    if let Ok(mut slot) = agent_picker_mode_slot().lock() {
+        *slot = mode.to_string();
+    }
+    position_floating_agent_menu(app, item_count);
+    // Raise without set_focus — focus steal caused double-click-to-toggle.
+    #[cfg(target_os = "macos")]
+    raise_floating_hud_level(&menu, true);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = menu.show();
+    }
+    let _ = app.emit_to("floating-agent-menu", "agent-picker", mode);
+    let _ = app.emit_to("floating", "agent-picker", mode);
+    // Hidden webview may mount late — re-emit so list paints.
+    let app_re = app.clone();
+    let mode_re = mode.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(60));
+        let _ = app_re.emit_to("floating-agent-menu", "agent-picker", &mode_re);
+        let _ = app_re.emit_to("floating", "agent-picker", &mode_re);
+        std::thread::sleep(Duration::from_millis(120));
+        let _ = app_re.emit_to("floating-agent-menu", "agent-picker", &mode_re);
+    });
+}
+
+/// Resize open picker only (no focus / no mode change).
+#[tauri::command]
+pub(crate) fn resize_floating_agent_menu(
+    app: AppHandle,
+    item_count: Option<usize>,
+) -> Result<(), String> {
+    let count = item_count.unwrap_or(4).clamp(1, 16);
+    if agent_picker_mode().is_empty() {
+        return Ok(());
+    }
+    let app_clone = app.clone();
+    app_clone
+        .run_on_main_thread(move || {
+            position_floating_agent_menu(&app, count);
+        })
+        .map_err(|e| e.to_string())
+}
+
+/// Open/close agent or cwd picker outside the HUD capsule.
+#[tauri::command]
+pub(crate) fn set_agent_picker(
+    app: AppHandle,
+    mode: String,
+    item_count: Option<usize>,
+) -> Result<(), String> {
+    let count = item_count.unwrap_or(4).clamp(1, 16);
+    let app_clone = app.clone();
+    app_clone
+        .run_on_main_thread(move || {
+            apply_agent_picker_open(&app, &mode, count);
+        })
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn get_agent_picker() -> String {
+    agent_picker_mode()
+}
+
+/// Collapse agent picker from Esc / HUD.
+pub(crate) fn close_floating_agent_menu(app: &AppHandle) {
+    if !floating_agent_menu_is_open() {
+        return;
+    }
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        apply_agent_picker_open(&app, "", 1);
     });
 }

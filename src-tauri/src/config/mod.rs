@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::Manager;
 use crate::audio::*;
@@ -43,8 +43,68 @@ pub(crate) fn default_hotkey_cancel() -> HotkeyBinding {
     }
 }
 
+/// Fn held + Space (keycode 49). `"fn"` is a pseudo-modifier (not CGEventFlags).
+pub(crate) fn default_hotkey_agent() -> HotkeyBinding {
+    HotkeyBinding {
+        key: "49".into(),
+        modifiers: vec!["fn".into()],
+        label: "Fn+Space".into(),
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct AgentProfile {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    /// `claude` | `codex` | `pi`
+    pub(crate) kind: String,
+    /// Optional CLI override (empty → agent_*_bin / which).
+    #[serde(default)]
+    pub(crate) bin: String,
+    /// Underlying model for CLI (`claude --model` / `codex -m`). Empty → CLI default.
+    #[serde(default)]
+    pub(crate) model: String,
+}
+
+pub(crate) fn default_agent_profiles() -> Vec<AgentProfile> {
+    vec![
+        AgentProfile {
+            id: "claude".into(),
+            name: "Claude".into(),
+            kind: "claude".into(),
+            bin: String::new(),
+            model: "sonnet".into(),
+        },
+        AgentProfile {
+            id: "codex".into(),
+            name: "Codex".into(),
+            kind: "codex".into(),
+            bin: String::new(),
+            model: String::new(),
+        },
+        AgentProfile {
+            id: "pi".into(),
+            name: "Pi".into(),
+            kind: "pi".into(),
+            bin: String::new(),
+            model: String::new(),
+        },
+    ]
+}
+
+pub(crate) fn default_agent_profile_id() -> String {
+    "claude".into()
+}
+
+pub(crate) fn default_agent_kind() -> String {
+    "claude".into()
+}
+
 pub(crate) fn format_hotkey_label(key: &str, modifiers: &[String]) -> String {
     let mut parts: Vec<String> = Vec::new();
+    if modifiers.iter().any(|m| m == "fn") {
+        parts.push("Fn".into());
+    }
     if modifiers.iter().any(|m| m == "control") {
         parts.push("⌃".into());
     }
@@ -213,6 +273,36 @@ pub(crate) struct AppConfig {
     pub(crate) hotkey_translate: HotkeyBinding,
     #[serde(default = "default_hotkey_cancel")]
     pub(crate) hotkey_cancel: HotkeyBinding,
+    /// Summon agent HUD (default Fn+Space).
+    #[serde(default = "default_hotkey_agent")]
+    pub(crate) hotkey_agent: HotkeyBinding,
+    /// Last agent kind: `claude` | `codex` (mirrors selected profile.kind).
+    #[serde(default = "default_agent_kind")]
+    pub(crate) agent_kind: String,
+    /// Selected agent profile id (settings-managed list).
+    #[serde(default = "default_agent_profile_id")]
+    pub(crate) agent_profile_id: String,
+    /// User-managed agent presets (HUD picker).
+    #[serde(default = "default_agent_profiles")]
+    pub(crate) agent_profiles: Vec<AgentProfile>,
+    /// Working directory for agent CLI runs.
+    #[serde(default)]
+    pub(crate) agent_cwd: String,
+    /// Recent / custom agent working directories (HUD picker). Cap enforced on write.
+    #[serde(default)]
+    pub(crate) agent_cwd_history: Vec<String>,
+    /// Absolute path to `claude` CLI (empty = `which claude`). Fallback if profile.bin empty.
+    #[serde(default)]
+    pub(crate) agent_claude_bin: String,
+    /// Absolute path to `codex` CLI (empty = `which codex`). Fallback if profile.bin empty.
+    #[serde(default)]
+    pub(crate) agent_codex_bin: String,
+    /// Absolute path to `pi` CLI (empty = `which pi`). Fallback if profile.bin empty.
+    #[serde(default)]
+    pub(crate) agent_pi_bin: String,
+    /// CWD paths user granted for Codex outside a git repo (`--skip-git-repo-check`).
+    #[serde(default)]
+    pub(crate) agent_trusted_dirs: Vec<String>,
     /// Recording source: external mic / system playback / both.
     #[serde(default)]
     pub(crate) audio_capture_mode: AudioCaptureMode,
@@ -322,6 +412,16 @@ impl Default for AppConfig {
             hotkey_transcribe: default_hotkey_transcribe(),
             hotkey_translate: default_hotkey_translate(),
             hotkey_cancel: default_hotkey_cancel(),
+            hotkey_agent: default_hotkey_agent(),
+            agent_kind: default_agent_kind(),
+            agent_profile_id: default_agent_profile_id(),
+            agent_profiles: default_agent_profiles(),
+            agent_cwd: String::new(),
+            agent_cwd_history: Vec::new(),
+            agent_claude_bin: String::new(),
+            agent_codex_bin: String::new(),
+            agent_pi_bin: String::new(),
+            agent_trusted_dirs: Vec::new(),
             audio_capture_mode: AudioCaptureMode::External,
             llm_enabled: false,
             llm_provider: default_llm_provider(),
@@ -333,6 +433,10 @@ impl Default for AppConfig {
             vocabulary: Vec::new(),
         }
     }
+}
+
+pub(crate) fn agent_jobs_path() -> PathBuf {
+    app_data_dir().join("agent-jobs.json")
 }
 
 pub(crate) fn default_asr_provider() -> AsrProvider {
@@ -381,6 +485,52 @@ pub(crate) fn app_data_dir() -> PathBuf {
         .join("ASR Workshop")
 }
 
+/// Default agent working directory: `{app_data_dir}/agent` (created on demand).
+pub(crate) fn default_agent_workdir() -> PathBuf {
+    app_data_dir().join("agent")
+}
+
+pub(crate) fn ensure_default_agent_workdir() -> Result<PathBuf, String> {
+    let dir = default_agent_workdir();
+    fs::create_dir_all(&dir).map_err(|e| format!("创建 agent 工作目录失败: {e}"))?;
+    Ok(dir)
+}
+
+/// Empty `agent_cwd` → ensure `{app}/agent` and write back.
+pub(crate) fn resolve_agent_cwd(config: &mut AppConfig) -> Result<String, String> {
+    let trimmed = config.agent_cwd.trim().to_string();
+    if !trimmed.is_empty() && Path::new(&trimmed).is_dir() {
+        push_agent_cwd_history(config, &trimmed);
+        return Ok(trimmed);
+    }
+    let dir = ensure_default_agent_workdir()?;
+    let s = dir.to_string_lossy().into_owned();
+    config.agent_cwd = s.clone();
+    push_agent_cwd_history(config, &s);
+    Ok(s)
+}
+
+const AGENT_CWD_HISTORY_CAP: usize = 12;
+
+/// Dedupe + move `cwd` to front; always keep default agent workdir in list.
+pub(crate) fn push_agent_cwd_history(config: &mut AppConfig, cwd: &str) {
+    let cwd = cwd.trim();
+    if cwd.is_empty() {
+        return;
+    }
+    config.agent_cwd_history.retain(|p| p != cwd);
+    config.agent_cwd_history.insert(0, cwd.to_string());
+    if let Ok(default) = ensure_default_agent_workdir() {
+        let d = default.to_string_lossy().into_owned();
+        if !config.agent_cwd_history.iter().any(|p| p == &d) {
+            config.agent_cwd_history.push(d);
+        }
+    }
+    if config.agent_cwd_history.len() > AGENT_CWD_HISTORY_CAP {
+        config.agent_cwd_history.truncate(AGENT_CWD_HISTORY_CAP);
+    }
+}
+
 pub(crate) fn recordings_dir() -> PathBuf {
     app_data_dir().join("recordings")
 }
@@ -399,7 +549,50 @@ pub(crate) fn load_config_from_disk() -> AppConfig {
         .and_then(|data| serde_json::from_str(&data).ok())
         .unwrap_or_default();
     normalize_config_for_platform(&mut config);
+    ensure_agent_profiles(&mut config);
+    let before = config.agent_cwd.clone();
+    if resolve_agent_cwd(&mut config).is_ok() && config.agent_cwd != before {
+        let _ = save_config_to_disk(&config);
+    }
     config
+}
+
+/// Ensure at least default Claude/Codex profiles; sync kind from selected profile.
+pub(crate) fn ensure_agent_profiles(config: &mut AppConfig) {
+    if config.agent_profiles.is_empty() {
+        config.agent_profiles = default_agent_profiles();
+    }
+    // Deduplicate ids.
+    let mut seen = std::collections::HashSet::new();
+    config.agent_profiles.retain(|p| {
+        let id = p.id.trim().to_string();
+        if id.is_empty() || !seen.insert(id) {
+            return false;
+        }
+        true
+    });
+    if config.agent_profiles.is_empty() {
+        config.agent_profiles = default_agent_profiles();
+    }
+    if !config
+        .agent_profiles
+        .iter()
+        .any(|p| p.id == config.agent_profile_id)
+    {
+        config.agent_profile_id = config.agent_profiles[0].id.clone();
+    }
+    if let Some(p) = config
+        .agent_profiles
+        .iter()
+        .find(|p| p.id == config.agent_profile_id)
+    {
+        let kind = match p.kind.as_str() {
+            "codex" => "codex",
+            "pi" => "pi",
+            _ => "claude",
+        };
+        config.agent_kind = kind.into();
+    }
 }
 
 pub(crate) fn normalize_config_for_platform(config: &mut AppConfig) {

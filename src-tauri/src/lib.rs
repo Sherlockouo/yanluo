@@ -1,5 +1,6 @@
 //! ASR Workshop backend — Tauri application wiring.
 
+mod agent;
 mod audio;
 mod commands;
 mod config;
@@ -23,7 +24,7 @@ pub(crate) use platform::*;
 pub(crate) use state::*;
 
 use std::sync::{Arc, Mutex};
-use tauri::Manager;
+use tauri::{Listener, Manager};
 
 pub fn main() {
     // Info.plist is already embedded by `tauri::generate_context!()` —
@@ -36,6 +37,7 @@ pub fn main() {
             let handle = app.handle().clone();
             app.manage(Arc::new(Mutex::new(FloatingStatus::default())));
             app.manage(Arc::new(Mutex::new(HotkeyCaptureSlot::None)));
+            app.manage(Arc::new(agent::AgentRuntime::new()));
 
             // HUD must be *created* under Accessory or macOS ignores
             // CanJoinAllSpaces / FullScreenAuxiliary (won't overlay fullscreen apps).
@@ -72,6 +74,12 @@ pub fn main() {
             if let Err(e) = install_tray(&handle) {
                 eprintln!("[tray] install failed: {e}");
             }
+
+            let summon_handle = handle.clone();
+            let _ = app.listen("agent-summon", move |_| {
+                agent::handle_agent_summon(&summon_handle);
+            });
+
             start_fn_event_tap(handle);
             Ok(())
         })
@@ -105,6 +113,24 @@ pub fn main() {
             hud::popup_translate_target_menu,
             hud::set_floating_lang_menu_open,
             hud::set_translate_target_language,
+            hud::set_agent_picker,
+            hud::get_agent_picker,
+            hud::resize_floating_agent_menu,
+            agent::show_agent_hud,
+            agent::hide_agent_hud,
+            agent::list_agent_jobs,
+            agent::get_agent_job,
+            agent::dispatch_agent,
+            agent::continue_agent_job,
+            agent::cancel_agent_job,
+            agent::delete_agent_job,
+            agent::clear_agent_jobs,
+            agent::set_agent_defaults,
+            agent::detect_agent_bins,
+            agent::get_path_info,
+            agent::read_clipboard_attachments,
+            agent::set_agent_hud_menu_open,
+            hud::resize_floating_hud,
             commands::get_permission_status,
             commands::open_permission_settings,
             commands::request_permission,
@@ -113,6 +139,8 @@ pub fn main() {
             commands::start_recording,
             commands::stop_recording,
             commands::cancel_recording,
+            commands::confirm_floating_transcript,
+            commands::cancel_floating_transcript,
             commands::transcribe_file,
             download::get_ytdlp_status,
             download::download_url_media,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Kbd, toast } from "@heroui/react";
 import { NavLink } from "react-router-dom";
-import { AudioLines, Download } from "lucide-react";
+import { AudioLines, Bot, Download } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { hotkeySegments, providerLabel, stateLabel } from "@/lib/constants";
@@ -45,7 +45,8 @@ function HotkeyKbd({ label }: { label: string }) {
 }
 
 export function OverviewPage() {
-  const { config, state, modelLoaded, updateConfig, loadModel } = useApp();
+  const { config, state, modelLoaded, updateConfig, loadModel, agentJobs } =
+    useApp();
   const [status, setStatus] = useState<ModelStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
@@ -104,10 +105,15 @@ export function OverviewPage() {
     }
   };
 
+  // Local dir set → skip install CTA; only prompt download when no path.
   const needsInstall =
     config.asr_provider === "qwen" &&
-    (status?.needs_download ??
-      (!modelLoaded && !config.asr_model_dir?.trim()));
+    !config.asr_model_dir?.trim() &&
+    (status?.needs_download ?? !modelLoaded);
+
+  const activeAgents = agentJobs.filter(
+    (j) => j.status === "queued" || j.status === "running",
+  ).length;
 
   const statusBits = [
     providerLabel(config.asr_provider),
@@ -118,6 +124,7 @@ export function OverviewPage() {
       : null,
     stateLabel(state),
     config.language === "auto" ? "自动检测" : config.language,
+    activeAgents > 0 ? `Agent ${activeAgents}` : null,
   ].filter(Boolean);
 
   return (
@@ -130,6 +137,10 @@ export function OverviewPage() {
               <HotkeyKbd label={config.hotkey_transcribe.label} />
               {" · "}
               <HotkeyKbd label={config.hotkey_translate.label} />
+              {" · "}
+              <HotkeyKbd
+                label={config.hotkey_agent?.label ?? "Fn+Space"}
+              />
               {" · "}
               <span>{statusBits.join(" · ")}</span>
             </>
@@ -165,18 +176,42 @@ export function OverviewPage() {
             </Button>
           </SectionCard>
         ) : (
-          <NavLink
-            to="/transcribe"
-            className="group flex items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-5 transition duration-200 hover:border-accent/30 hover:bg-surface-secondary/40"
-          >
-            <div className="grid h-11 w-11 place-items-center rounded-xl bg-accent/10 text-accent transition group-hover:scale-[1.03]">
-              <AudioLines size={18} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="type-section">转写</div>
-              <div className="mt-0.5 type-meta">文件或链接</div>
-            </div>
-          </NavLink>
+          <div className="flex flex-col gap-2">
+            <NavLink
+              to="/transcribe"
+              className="group flex items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-5 transition duration-200 hover:border-accent/30 hover:bg-surface-secondary/40"
+            >
+              <div className="grid h-11 w-11 place-items-center rounded-xl bg-accent/10 text-accent transition group-hover:scale-[1.03]">
+                <AudioLines size={18} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="type-section">转写</div>
+                <div className="mt-0.5 type-meta">文件或链接</div>
+              </div>
+            </NavLink>
+            <NavLink
+              to="/agent"
+              className="group flex items-center gap-3 rounded-2xl border border-border/70 bg-surface/70 px-4 py-4 transition duration-200 hover:border-accent/30 hover:bg-surface-secondary/40"
+            >
+              <div className="grid h-11 w-11 place-items-center rounded-xl bg-default/50 text-muted transition group-hover:scale-[1.03] group-hover:text-accent">
+                <Bot size={18} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="type-section">Agent</div>
+                <div className="mt-0.5 type-meta">
+                  {activeAgents > 0
+                    ? `${activeAgents} 运行中`
+                    : agentJobs.length > 0
+                      ? `${agentJobs.length} 任务`
+                      : (
+                          <HotkeyKbd
+                            label={config.hotkey_agent?.label ?? "Fn+Space"}
+                          />
+                        )}
+                </div>
+              </div>
+            </NavLink>
+          </div>
         )}
       </ModeSwitch>
     </PageShell>

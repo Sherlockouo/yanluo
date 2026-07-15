@@ -25,6 +25,7 @@ import {
   RefreshCw,
   Save,
   Shield,
+  Trash2,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -55,6 +56,7 @@ import {
 
 type SettingsTab =
   | "general"
+  | "agent"
   | "asr"
   | "llm"
   | "hotkeys"
@@ -132,6 +134,7 @@ type DownloadInstallResult = {
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "常规" },
+  { id: "agent", label: "Agent" },
   { id: "asr", label: "ASR" },
   { id: "llm", label: "LLM" },
   { id: "hotkeys", label: "快捷键" },
@@ -253,6 +256,7 @@ export function SettingsPage() {
         style={{ willChange: "opacity" }}
       >
         {tab === "general" ? <GeneralPanel /> : null}
+        {tab === "agent" ? <AgentProfilesPanel /> : null}
         {tab === "asr" ? <AsrProviderPanel /> : null}
         {tab === "llm" ? <LlmProviderPanel /> : null}
         {tab === "hotkeys" ? <HotkeysPanel /> : null}
@@ -449,6 +453,235 @@ function LlmProviderPanel() {
   );
 }
 
+function AgentProfilesPanel() {
+  const { config, saveConfig } = useApp();
+  const profiles = config.agent_profiles?.length
+    ? config.agent_profiles
+    : [
+        { id: "claude", name: "Claude", kind: "claude" as const, bin: "" },
+        { id: "codex", name: "Codex", kind: "codex" as const, bin: "" },
+        { id: "pi", name: "Pi", kind: "pi" as const, bin: "" },
+      ];
+  const [draft, setDraft] = useState(profiles);
+  const [selected, setSelected] = useState(config.agent_profile_id || "claude");
+  const [detected, setDetected] = useState<{
+    claude: string | null;
+    codex: string | null;
+    pi: string | null;
+  }>({ claude: null, codex: null, pi: null });
+
+  useEffect(() => {
+    setDraft(
+      config.agent_profiles?.length
+        ? config.agent_profiles
+        : [
+            { id: "claude", name: "Claude", kind: "claude", bin: "" },
+            { id: "codex", name: "Codex", kind: "codex", bin: "" },
+            { id: "pi", name: "Pi", kind: "pi", bin: "" },
+          ],
+    );
+    setSelected(config.agent_profile_id || "claude");
+  }, [config.agent_profiles, config.agent_profile_id]);
+
+  useEffect(() => {
+    void invoke<{
+      claude: string | null;
+      codex: string | null;
+      pi: string | null;
+    }>("detect_agent_bins")
+      .then(setDetected)
+      .catch(() => {});
+  }, []);
+
+  const persist = async (next: typeof draft, profileId = selected) => {
+    const kind =
+      next.find((p) => p.id === profileId)?.kind ?? ("claude" as const);
+    try {
+      await saveConfig(
+        {
+          ...config,
+          agent_profiles: next,
+          agent_profile_id: profileId,
+          agent_kind: kind,
+        },
+        { silent: true },
+      );
+      toast.success("已保存");
+    } catch (e) {
+      toast.danger(`保存失败: ${e}`);
+    }
+  };
+
+  const addProfile = () => {
+    const id = `agent-${Date.now().toString(36)}`;
+    const next = [
+      ...draft,
+      { id, name: "新 Agent", kind: "claude" as const, bin: "" },
+    ];
+    setDraft(next);
+    setSelected(id);
+  };
+
+  const removeProfile = (id: string) => {
+    if (draft.length <= 1) {
+      toast.warning("至少保留一个 Agent");
+      return;
+    }
+    const next = draft.filter((p) => p.id !== id);
+    const nextSel = selected === id ? next[0].id : selected;
+    setDraft(next);
+    setSelected(nextSel);
+    void persist(next, nextSel);
+  };
+
+  const updateRow = (
+    id: string,
+    patch: Partial<(typeof draft)[number]>,
+  ) => {
+    setDraft((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+    );
+  };
+
+  return (
+    <SectionCard className="max-w-2xl flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="type-meta">
+          HUD 下拉读此列表；名称 / CLI / 模型 / 路径
+        </p>
+        <Button size="sm" variant="secondary" onPress={addProfile}>
+          添加
+        </Button>
+      </div>
+      <ul className="flex flex-col gap-3">
+        {draft.map((p) => {
+          const hit =
+            p.kind === "codex"
+              ? detected.codex
+              : p.kind === "pi"
+                ? detected.pi
+                : detected.claude;
+          return (
+            <li
+              key={p.id}
+              className={cn(
+                "rounded-xl border px-3 py-2.5",
+                selected === p.id ? "border-accent/40" : "border-border",
+              )}
+            >
+              <div className="mb-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  className={cn(
+                    "rounded-md px-2 py-0.5 text-xs font-medium",
+                    selected === p.id
+                      ? "bg-accent/15 text-accent"
+                      : "bg-default/40 text-muted",
+                  )}
+                  onClick={() => setSelected(p.id)}
+                >
+                  默认
+                </button>
+                <span className="type-meta truncate">{p.id}</span>
+                <button
+                  type="button"
+                  className="ml-auto rounded-md p-1 text-muted hover:bg-default/50 hover:text-foreground"
+                  title="删除"
+                  onClick={() => removeProfile(p.id)}
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <TextField
+                  value={p.name}
+                  onChange={(v) => updateRow(p.id, { name: v })}
+                >
+                  <Label>名称</Label>
+                  <Input />
+                </TextField>
+                <Select
+                  selectedKey={p.kind}
+                  onSelectionChange={(key) => {
+                    if (key !== "claude" && key !== "codex" && key !== "pi") {
+                      return;
+                    }
+                    updateRow(p.id, {
+                      kind: key,
+                      model: key === "claude" ? "sonnet" : "",
+                    });
+                  }}
+                >
+                  <Label>CLI</Label>
+                  <Select.Trigger>
+                    <Select.Value />
+                    <Select.Indicator />
+                  </Select.Trigger>
+                  <Select.Popover>
+                    <ListBox>
+                      <ListBox.Item id="claude" textValue="Claude">
+                        Claude
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="codex" textValue="Codex">
+                        Codex
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                      <ListBox.Item id="pi" textValue="Pi">
+                        Pi
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
+                <TextField
+                  value={p.model ?? ""}
+                  onChange={(v) => updateRow(p.id, { model: v })}
+                >
+                  <Label>模型</Label>
+                  <Input
+                    placeholder={
+                      p.kind === "claude"
+                        ? "sonnet / opus / haiku"
+                        : p.kind === "pi"
+                          ? "空=默认 · provider/id"
+                          : "空=默认 · o3 / gpt-5.1"
+                    }
+                  />
+                </TextField>
+                <TextField
+                  value={p.bin ?? ""}
+                  onChange={(v) => updateRow(p.id, { bin: v })}
+                >
+                  <Label>路径（空=which）</Label>
+                  <Input
+                    placeholder={hit ?? `which ${p.kind}`}
+                    className="font-mono text-[12px]"
+                  />
+                </TextField>
+              </div>
+              {hit ? (
+                <div className="type-meta mt-1.5 truncate">探测 {hit}</div>
+              ) : (
+                <div className="type-meta mt-1.5 text-warning">
+                  未找到 {p.kind}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      <Button
+        className="self-start"
+        onPress={() => void persist(draft, selected)}
+      >
+        <Save size={14} />
+        保存
+      </Button>
+    </SectionCard>
+  );
+}
+
 function GeneralPanel() {
   const { config, updateConfig, saveConfig } = useApp();
 
@@ -521,7 +754,7 @@ function GeneralPanel() {
 function HotkeysPanel() {
   const { config, updateConfig } = useApp();
   const [listening, setListening] = useState<
-    null | "transcribe" | "translate" | "cancel"
+    null | "transcribe" | "translate" | "cancel" | "agent"
   >(null);
   const [preview, setPreview] = useState<string | null>(null);
 
@@ -537,6 +770,7 @@ function HotkeysPanel() {
         if (slot === "transcribe") updateConfig("hotkey_transcribe", binding);
         if (slot === "translate") updateConfig("hotkey_translate", binding);
         if (slot === "cancel") updateConfig("hotkey_cancel", binding);
+        if (slot === "agent") updateConfig("hotkey_agent", binding);
         setListening(null);
         setPreview(null);
         toast.success(`已设置：${binding.label}`);
@@ -562,7 +796,9 @@ function HotkeysPanel() {
     };
   }, [updateConfig]);
 
-  const startCapture = async (slot: "transcribe" | "translate" | "cancel") => {
+  const startCapture = async (
+    slot: "transcribe" | "translate" | "cancel" | "agent",
+  ) => {
     try {
       setPreview(null);
       await invoke("begin_hotkey_capture", { slot });
@@ -583,7 +819,7 @@ function HotkeysPanel() {
   };
 
   const rows: {
-    slot: "transcribe" | "translate" | "cancel";
+    slot: "transcribe" | "translate" | "cancel" | "agent";
     title: string;
     binding: HotkeyBinding;
   }[] = [
@@ -596,6 +832,15 @@ function HotkeysPanel() {
       slot: "translate",
       title: "翻译",
       binding: config.hotkey_translate,
+    },
+    {
+      slot: "agent",
+      title: "Agent",
+      binding: config.hotkey_agent ?? {
+        key: "49",
+        modifiers: ["fn"],
+        label: "Fn+Space",
+      },
     },
     {
       slot: "cancel",

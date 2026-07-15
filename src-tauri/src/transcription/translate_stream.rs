@@ -89,15 +89,15 @@ pub(crate) fn handle_asr_partial_ex(
     }
     let mode = AsrEngine::session_mode(app);
     if mode != "translate" {
-        let _ = app.emit(
-            "partial-result",
-            &PartialResult {
-                text: text.to_string(),
-                committed: committed.to_string(),
-                active: active.to_string(),
-                segment_index,
-            },
-        );
+        let payload = PartialResult {
+            text: text.to_string(),
+            committed: committed.to_string(),
+            active: active.to_string(),
+            segment_index,
+        };
+        // Dual-emit: floating webview may miss broadcast-only events (parity with audio-level).
+        let _ = app.emit("partial-result", &payload);
+        let _ = app.emit_to("floating", "partial-result", &payload);
         return;
     }
 

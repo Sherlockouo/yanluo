@@ -1,0 +1,604 @@
+/* Agent chat — conversational, bright, few borders */
+
+/* Job page fills content pane; composer sits at window bottom */
+.app-content:has(.agent-job-shell),
+.app-content:has(.agent-list-shell) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 0.75rem;
+}
+
+.agent-job-shell,
+.agent-list-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+.agent-job-shell > header,
+.agent-list-shell > header {
+  flex-shrink: 0;
+}
+
+.agent-job-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.agent-job-back {
+  margin-top: 0.2rem;
+}
+
+.agent-msg-block,
+.agent-chat-bubble,
+.agent-tool-card {
+  position: relative;
+}
+
+.agent-msg-copy {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  z-index: 1;
+  display: inline-flex;
+  height: 26px;
+  width: 26px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--surface) 88%, transparent);
+  color: var(--muted);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.agent-chat-row:hover .agent-msg-copy,
+.agent-msg-copy:focus-visible {
+  opacity: 1;
+}
+
+.agent-msg-copy:hover {
+  background: var(--default);
+  color: var(--foreground);
+}
+
+.agent-tool-card-head .agent-msg-copy {
+  position: static;
+  margin-left: auto;
+  opacity: 0.55;
+}
+
+.agent-tool-card-head:hover .agent-msg-copy,
+.agent-tool-card-head .agent-msg-copy:hover {
+  opacity: 1;
+}
+
+.agent-chat-bubble .agent-md {
+  padding-right: 1.5rem;
+}
+
+.agent-profile-trigger {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 0;
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--foreground);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.agent-profile-trigger:hover {
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+
+.agent-list-body {
+  margin-inline: -0.25rem;
+  padding-inline: 0.25rem;
+}
+
+.agent-list-composer {
+  background: linear-gradient(
+    to top,
+    var(--background) 55%,
+    color-mix(in oklab, var(--background) 0%, transparent)
+  );
+}
+
+/* Job list rows — no card chrome; status color = focus */
+.agent-job-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.7rem 0.65rem;
+  border-radius: 12px;
+  transition: background 140ms ease;
+}
+
+.agent-job-row:hover {
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+.agent-job-row.is-active {
+  background: color-mix(in oklab, var(--accent) 7%, transparent);
+}
+
+.agent-job-row.is-error:hover {
+  background: color-mix(in oklab, var(--danger) 6%, transparent);
+}
+
+.agent-job-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--muted) 55%, transparent);
+  flex-shrink: 0;
+}
+
+.agent-job-status-dot.is-active {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+}
+
+.agent-job-status-dot.is-done {
+  background: var(--success);
+}
+
+.agent-job-status-dot.is-error {
+  background: var(--danger);
+}
+
+.agent-job-status-dot.is-muted {
+  background: color-mix(in oklab, var(--muted) 40%, transparent);
+}
+
+.agent-model-trigger {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 0;
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.agent-model-trigger:hover {
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+}
+
+.agent-model-trigger[data-disabled="true"],
+.agent-model-trigger[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.agent-composer-send.is-accent {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.agent-composer-send.is-accent:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.agent-composer-send.is-accent:disabled {
+  opacity: 0.35;
+}
+
+.agent-chat {
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 55%, transparent);
+}
+
+.agent-chat-composer-wrap {
+  background: linear-gradient(
+    to top,
+    var(--surface) 72%,
+    color-mix(in oklab, var(--surface) 0%, transparent)
+  );
+}
+
+.agent-chat-timeline {
+  scroll-behavior: smooth;
+}
+
+.agent-chat-row {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+}
+
+.agent-chat-row.is-user {
+  align-items: flex-end;
+}
+
+.agent-chat-row.is-assistant,
+.agent-chat-row.is-tool,
+.agent-chat-row.is-tool-result,
+.agent-chat-row.is-error {
+  align-items: flex-start;
+}
+
+.agent-chat-bubble {
+  padding: 0.65rem 0.95rem;
+  border-radius: 1.15rem;
+  background: var(--surface-secondary);
+  color: var(--foreground);
+}
+
+.agent-chat-bubble .agent-md {
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+.agent-chat-meta {
+  margin: 0;
+  font-size: var(--text-meta);
+  color: var(--muted);
+}
+
+.agent-chat-meta.is-danger {
+  color: var(--danger);
+}
+
+/* Tool: only bordered object in the stream */
+.agent-tool-card {
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  background: var(--surface);
+}
+
+.agent-tool-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.agent-tool-card-head + * {
+  margin-top: 0.35rem;
+}
+
+.agent-tool-card-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--foreground) 82%, transparent);
+}
+
+.agent-tool-card-body {
+  font-size: 0.8125rem !important;
+  line-height: 1.45 !important;
+}
+
+.agent-tool-card-body :where(em) {
+  display: block;
+  margin-bottom: 0.35em;
+  font-style: normal;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.agent-tool-result {
+  padding: 0 1rem;
+  min-width: 100%;
+  font-size: 0.8125rem !important;
+  opacity: 0.88;
+}
+
+/* ——— Markdown: bright, airy, uncluttered ——— */
+
+.agent-md {
+  overflow-x: auto;
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  color: color-mix(in oklab, var(--foreground) 92%, transparent);
+}
+
+.agent-md :where(p, ul, ol) {
+  margin: 0.55em 0;
+}
+
+.agent-md :where(p:first-child, ul:first-child, ol:first-child) {
+  margin-top: 0;
+}
+
+.agent-md :where(p:last-child, ul:last-child, ol:last-child) {
+  margin-bottom: 0;
+}
+
+.agent-md :where(h1, h2, h3, h4) {
+  margin: 1em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+
+.agent-md :where(h1) {
+  font-size: 1.2em;
+}
+.agent-md :where(h2) {
+  font-size: 1.08em;
+}
+.agent-md :where(h3, h4) {
+  font-size: 1em;
+}
+
+.agent-md :where(ul, ol) {
+  padding-left: 1.35em;
+}
+
+.agent-md :where(li) {
+  margin: 0.28em 0;
+}
+
+.agent-md :where(li::marker) {
+  color: color-mix(in oklab, var(--muted) 70%, transparent);
+}
+
+.agent-md :where(strong) {
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.agent-md :where(a) {
+  color: var(--link, var(--accent));
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in oklab, var(--link, var(--accent)) 35%, transparent);
+  transition: border-color 120ms ease;
+}
+
+.agent-md :where(a:hover) {
+  border-bottom-color: var(--link, var(--accent));
+}
+
+/* Inline code — soft pill, no heavy chrome */
+.agent-md :where(code) {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  padding: 0.12em 0.42em;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--default) 55%, transparent);
+  color: var(--foreground);
+}
+
+.agent-md :where(pre) {
+  margin: 0.65em 0;
+  padding: 0.85em 1em;
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 0;
+  background: var(--surface-secondary);
+  font-size: 0.8125em;
+  line-height: 1.5;
+}
+
+.agent-md :where(pre code) {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: inherit;
+}
+
+.agent-md :where(table) {
+  width: 100%;
+  margin: 0.75em 0;
+  border-collapse: collapse;
+  font-size: 0.875em;
+}
+
+.agent-md :where(th, td) {
+  border-bottom: 1px solid color-mix(in oklab, var(--separator, var(--border)) 90%, transparent);
+  padding: 0.45em 0.55em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.agent-md :where(th) {
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom-color: color-mix(in oklab, var(--border) 100%, transparent);
+}
+
+.agent-md :where(blockquote) {
+  margin: 0.65em 0;
+  padding: 0.15em 0 0.15em 0.85em;
+  border-left: 2px solid color-mix(in oklab, var(--muted) 35%, transparent);
+  color: var(--muted);
+}
+
+.agent-md :where(hr) {
+  margin: 1em 0;
+  border: 0;
+  border-top: 1px solid color-mix(in oklab, var(--separator, var(--border)) 80%, transparent);
+}
+
+.agent-md :where(em) {
+  font-style: italic;
+  color: color-mix(in oklab, var(--foreground) 72%, transparent);
+}
+
+.agent-attach-preview .agent-md {
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.agent-attach-preview .agent-md :where(pre) {
+  margin: 0.35em 0;
+  padding: 0.45em 0.55em;
+  font-size: 10.5px;
+  border-radius: 8px;
+}
+
+.agent-attach-preview-card {
+  padding: 0.7rem 0.85rem;
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  background: var(--surface);
+}
+
+/* Continue composer (Cursor-like) */
+.agent-composer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent) inset,
+    0 8px 24px color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+.agent-composer-attach-hint {
+  position: absolute;
+  left: 10px;
+  top: -11px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--border) 85%, transparent);
+  background: var(--surface);
+  font-size: 11px;
+  color: color-mix(in oklab, var(--foreground) 65%, transparent);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.agent-composer-attach-hint:hover {
+  background: color-mix(in oklab, var(--muted) 12%, var(--surface));
+  color: var(--foreground);
+}
+
+.agent-composer-menu {
+  position: absolute;
+  left: 8px;
+  bottom: calc(100% + 8px);
+  z-index: 20;
+  min-width: 220px;
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 85%, transparent);
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.1);
+}
+
+.agent-composer-menu-label {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  color: color-mix(in oklab, var(--foreground) 55%, transparent);
+}
+
+.agent-composer-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.agent-composer-menu-item:hover {
+  background: color-mix(in oklab, var(--muted) 14%, transparent);
+}
+
+.agent-composer-input {
+  width: 100%;
+  min-height: 2.75rem;
+  margin: 0;
+  padding: 14px 12px 8px;
+  border: 0;
+  resize: none;
+  background: transparent;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  outline: none;
+  color: var(--foreground);
+}
+
+.agent-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 8px;
+}
+
+.agent-composer-icon {
+  display: inline-flex;
+  height: 28px;
+  width: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: color-mix(in oklab, var(--foreground) 55%, transparent);
+  cursor: pointer;
+}
+
+.agent-composer-icon:hover {
+  background: color-mix(in oklab, var(--muted) 14%, transparent);
+  color: var(--foreground);
+}
+
+.agent-composer-icon.is-open {
+  background: color-mix(in oklab, var(--muted) 16%, transparent);
+  color: var(--foreground);
+}
+
+.agent-composer-send {
+  display: inline-flex;
+  height: 28px;
+  width: 28px;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  border: 0;
+  border-radius: 999px;
+  background: var(--foreground);
+  color: var(--background, #fff);
+  cursor: pointer;
+}
+
+.agent-composer-send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.agent-composer-meta {
+  margin-right: auto;
+  font-size: 11px;
+  color: color-mix(in oklab, var(--foreground) 55%, transparent);
+}

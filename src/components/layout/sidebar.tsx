@@ -4,6 +4,7 @@ import {
   Activity,
   AudioLines,
   BookOpen,
+  Bot,
   Brain,
   Languages,
   Mic,
@@ -28,6 +29,7 @@ const ICONS: Record<Page, typeof Mic> = {
   llm: Wand2,
   vocabulary: BookOpen,
   history: Activity,
+  agent: Bot,
   settings: Settings,
 };
 
@@ -39,6 +41,7 @@ const PATHS: Record<Page, string> = {
   llm: "/llm",
   vocabulary: "/vocabulary",
   history: "/history",
+  agent: "/agent",
   settings: "/settings",
 };
 

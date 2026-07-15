@@ -1,0 +1,329 @@
+/* Shared UI: rate, forms, settings, page-enter */
+
+/* Segmented rate control */
+.rate-segment {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--surface-secondary) 92%, var(--foreground));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.dark .rate-segment,
+[data-theme="dark"] .rate-segment {
+  background: color-mix(in oklab, var(--surface-secondary) 88%, #000);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.rate-segment-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-height: 1.75rem;
+  padding: 0 0.7rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease,
+    transform 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.rate-segment-btn:hover {
+  color: var(--foreground);
+}
+
+.rate-segment-btn:active {
+  transform: scale(0.97);
+}
+
+.rate-segment-btn[data-active="true"] {
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow:
+    0 1px 0 color-mix(in oklab, var(--foreground) 5%, transparent) inset,
+    0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.rate-segment-btn[data-active="true"][data-tone="bad"] {
+  color: var(--danger);
+  background: color-mix(in oklab, var(--danger-soft) 70%, var(--surface));
+}
+
+.rate-segment-btn[data-active="true"][data-tone="good"] {
+  color: var(--success-soft-foreground);
+  background: color-mix(in oklab, var(--success-soft) 70%, var(--surface));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .surface-card,
+  .surface-card:hover,
+  .rate-segment-btn,
+  .rate-segment-btn:active {
+    transition: none;
+    transform: none;
+  }
+}
+
+/*
+  HeroUI button CSS applies my-0.5 / sm:my-1 on child SVGs, which misaligns
+  Lucide icons next to labels. Zero the vertical margin inside @layer so we
+  stay after HeroUI component styles without !important wars.
+*/
+@layer components {
+  .button svg:not([data-slot="spinner"] svg, [data-slot="link-icon"] svg) {
+    margin-block: 0;
+  }
+}
+
+/* Primary CTA full-width; secondary actions sit above as muted row — never 50/50 peers. */
+.form-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.form-actions-secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.form-actions-primary {
+  width: 100%;
+}
+
+.form-actions-primary.button,
+.form-actions-primary [data-slot="button"],
+button.form-actions-primary,
+.form-actions > .form-actions-primary {
+  transition:
+    transform 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 120ms ease;
+}
+
+.form-actions-primary:hover {
+  transform: scale(1.01);
+}
+
+.form-actions-primary:active {
+  transform: scale(0.98);
+  opacity: 0.92;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .form-actions-primary:hover,
+  .form-actions-primary:active {
+    transform: none;
+  }
+}
+
+.stat-tile {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: color-mix(in oklab, var(--surface-secondary) 80%, transparent);
+  padding: 1rem;
+}
+
+.stat-tile-icon {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.75rem;
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  color: var(--foreground);
+  border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.status-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #636366;
+  box-shadow: 0 0 0 3px rgba(99, 99, 102, 0.2);
+}
+
+.status-dot-live {
+  background: #ff453a;
+  box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.22);
+  animation: pulse-dot 1.1s ease-in-out infinite;
+}
+
+.status-dot-busy {
+  background: #0a84ff;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.22);
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.7;
+  }
+}
+
+.perm-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.95rem 0;
+  border-bottom: 1px solid var(--separator);
+}
+
+.perm-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.perm-row:first-child {
+  padding-top: 0;
+}
+
+.settings-tabs {
+  position: relative;
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--surface) 80%, transparent);
+}
+
+.settings-tab {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.55rem 0.75rem;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-ui);
+  font-weight: 550;
+  cursor: pointer;
+  transition: color 160ms ease;
+}
+
+.settings-tab:hover {
+  color: var(--foreground);
+}
+
+.settings-tab-active {
+  color: var(--foreground);
+}
+
+.settings-tab-indicator {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: var(--default);
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 6%, transparent) inset;
+  pointer-events: none;
+  transform: translateZ(0);
+}
+
+.release-entry + .release-entry {
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--separator);
+}
+
+.update-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  overflow: hidden;
+}
+
+.update-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent, var(--foreground));
+  transition: width 160ms ease-out;
+}
+
+.perm-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.perm-status-ok {
+  background: var(--success-soft);
+  color: var(--success-soft-foreground);
+}
+
+.perm-status-off {
+  background: var(--warning-soft);
+  color: var(--warning-soft-foreground);
+}
+
+/* Long transcript: soft edge fade + calm scrollbar */
+.transcript-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--muted) 45%, transparent) transparent;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+}
+
+.transcript-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.transcript-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--muted) 40%, transparent);
+}
+
+/* Quiet page enter — Jobs: motion with purpose, not noise */
+@keyframes page-enter {
+  from {
+    opacity: 0.92;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-enter {
+  animation: page-enter 160ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter {
+    animation: none;
+  }
+}

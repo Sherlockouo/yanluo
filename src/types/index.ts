@@ -1,4 +1,9 @@
-export type RecState = "idle" | "recording" | "processing" | "refining";
+export type RecState =
+  | "idle"
+  | "recording"
+  | "processing"
+  | "refining"
+  | "editing";
 
 export type AsrProvider = "qwen" | "apple" | "elevenlabs";
 
@@ -17,6 +22,65 @@ export type HotkeyBinding = {
   key: string;
   modifiers: string[];
   label: string;
+};
+
+export type AgentKind = "claude" | "codex" | "pi";
+
+/** User-managed agent preset (settings + HUD picker). */
+export type AgentProfile = {
+  id: string;
+  name: string;
+  kind: AgentKind;
+  /** Optional CLI override; empty → global bin / which. */
+  bin?: string;
+  /** Underlying CLI model (`claude --model` / `codex -m`). Empty → CLI default. */
+  model?: string;
+};
+
+export type AgentJobStatus =
+  | "queued"
+  | "running"
+  | "done"
+  | "error"
+  | "cancelled";
+
+export type AgentJobEvent = {
+  seq: number;
+  ts: string;
+  /** user | assistant | tool | tool_result | status | error | system */
+  kind: string;
+  title: string;
+  text: string;
+};
+
+export type AgentJob = {
+  id: string;
+  agent: AgentKind;
+  prompt: string;
+  cwd: string;
+  attachments?: string[];
+  status: AgentJobStatus;
+  progress: string;
+  result: string;
+  error: string;
+  started_at: string;
+  finished_at?: string | null;
+  /** Claude/Codex conversation id for multi-turn resume. */
+  session_id?: string | null;
+  /** Full stream timeline (persisted). */
+  events?: AgentJobEvent[];
+  /** Attachments for the current / next turn only. */
+  turn_attachments?: string[];
+};
+
+export type AgentPathInfo = {
+  path: string;
+  name: string;
+  kind: "file" | "dir" | "text" | "image" | string;
+  size: number;
+  ext: string;
+  preview: string;
+  previewable: boolean;
 };
 
 export type AppConfig = {
@@ -50,6 +114,26 @@ export type AppConfig = {
   hotkey_transcribe: HotkeyBinding;
   hotkey_translate: HotkeyBinding;
   hotkey_cancel: HotkeyBinding;
+  /** Summon agent HUD (default Fn+Space). */
+  hotkey_agent: HotkeyBinding;
+  /** Last agent: claude | codex | pi (mirrors selected profile.kind). */
+  agent_kind: AgentKind;
+  /** Selected agent profile id. */
+  agent_profile_id: string;
+  /** Settings-managed agent presets. */
+  agent_profiles: AgentProfile[];
+  /** Working directory for agent CLI. */
+  agent_cwd: string;
+  /** Recent / custom agent working directories (HUD picker). */
+  agent_cwd_history: string[];
+  /** Absolute path to claude CLI (empty = which claude). Fallback if profile.bin empty. */
+  agent_claude_bin: string;
+  /** Absolute path to codex CLI (empty = which codex). Fallback if profile.bin empty. */
+  agent_codex_bin: string;
+  /** Absolute path to pi CLI (empty = which pi). Fallback if profile.bin empty. */
+  agent_pi_bin: string;
+  /** Codex dirs allowed outside git (`--skip-git-repo-check`). */
+  agent_trusted_dirs: string[];
   /** 录音源：外部麦 / 系统播放 / 两者。 */
   audio_capture_mode: AudioCaptureMode;
   llm_enabled: boolean;
@@ -120,12 +204,16 @@ export type FloatingPayload = {
   rms: number;
   /** Optional log-spaced speech spectrum for HUD bars. */
   bands?: number[];
-  /** Fn session intention: transcribe | translate */
-  intention?: "transcribe" | "translate";
+  /** Fn session intention: transcribe | translate | agent */
+  intention?: "transcribe" | "translate" | "agent";
   /** Translate target language id (e.g. en-US). */
   target_language?: string | null;
   /** Clearing + re-translating after a live target switch. */
   switching?: boolean;
+  /** Agent kind when intention=agent */
+  agent?: AgentKind | null;
+  /** Agent working directory */
+  cwd?: string | null;
 };
 
 export type AudioLevelPayload = {
@@ -154,4 +242,5 @@ export type Page =
   | "llm"
   | "vocabulary"
   | "history"
+  | "agent"
   | "settings";

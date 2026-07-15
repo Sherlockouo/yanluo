@@ -1,0 +1,177 @@
+/* Theme tokens: @theme + light/dark semantic vars */
+
+@theme {
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+  --font-display:
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --color-panel: rgba(28, 28, 30, 0.72);
+  --color-accent-fg: #f5f5f7;
+
+  /* Type ladder — Jobs: clear hierarchy, not denser soup */
+  --text-display: 1.875rem;
+  --text-section: 1.0625rem;
+  --text-body: 0.9375rem;
+  --text-ui: 0.875rem;
+  --text-meta: 0.75rem;
+  --text-micro: 0.6875rem;
+}
+
+/*
+  macOS-inspired themes. Override AFTER @heroui/styles so HeroUI components
+  pick up the same semantic tokens (including calculated hover/soft vars).
+
+  NOTE: HeroUI defaults --field-border-width to 0px (borderless fields).
+  We set 1px so TextField/Input borders are visible.
+*/
+:root,
+.light,
+[data-theme="light"] {
+  color-scheme: light;
+
+  --border-width: 1px;
+  --field-border-width: 1px;
+
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --muted: #6e6e73;
+  --border: rgba(0, 0, 0, 0.1);
+  --separator: rgba(0, 0, 0, 0.08);
+  --focus: #007aff;
+  --link: #007aff;
+
+  --accent: #007aff;
+  --accent-foreground: #ffffff;
+  --accent-hover: #0066d6;
+  --accent-soft: rgba(0, 122, 255, 0.12);
+  --accent-soft-foreground: #007aff;
+  --accent-soft-hover: rgba(0, 122, 255, 0.18);
+
+  --danger: #ff3b30;
+  --danger-foreground: #ffffff;
+  --danger-hover: #d70015;
+  --danger-soft: rgba(255, 59, 48, 0.12);
+  --danger-soft-foreground: #ff3b30;
+  --danger-soft-hover: rgba(255, 59, 48, 0.18);
+
+  --success: #34c759;
+  --success-foreground: #000000;
+  --success-hover: #248a3d;
+  --success-soft: rgba(52, 199, 89, 0.14);
+  --success-soft-foreground: #248a3d;
+  --success-soft-hover: rgba(52, 199, 89, 0.2);
+
+  --warning: #ff9f0a;
+  --warning-foreground: #000000;
+  --warning-hover: #c93400;
+  --warning-soft: rgba(255, 159, 10, 0.16);
+  --warning-soft-foreground: #9a6700;
+  --warning-soft-hover: rgba(255, 159, 10, 0.22);
+
+  --surface: #ffffff;
+  --surface-foreground: #1d1d1f;
+  --surface-secondary: #f2f2f7;
+  --surface-secondary-foreground: #1d1d1f;
+  --surface-hover: #f2f2f7;
+
+  --overlay: #ffffff;
+  --overlay-foreground: #1d1d1f;
+
+  --default: #e5e5ea;
+  --default-foreground: #1d1d1f;
+  --default-hover: #d1d1d6;
+  --default-soft: rgba(0, 0, 0, 0.05);
+  --default-soft-foreground: #1d1d1f;
+  --default-soft-hover: rgba(0, 0, 0, 0.08);
+
+  --field-background: #ffffff;
+  --field-foreground: #1d1d1f;
+  --field-placeholder: #8e8e93;
+  --field-border: rgba(0, 0, 0, 0.12);
+  --field-hover: #f2f2f7;
+  --field-focus: #ffffff;
+  --field-border-hover: rgba(0, 0, 0, 0.18);
+  --field-border-focus: rgba(0, 122, 255, 0.55);
+
+  --segment: #ffffff;
+  --segment-foreground: #1d1d1f;
+  --scrollbar: rgba(0, 0, 0, 0.28);
+}
+.dark,
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --border-width: 1px;
+  --field-border-width: 1px;
+
+  --background: #000000;
+  --foreground: #f5f5f7;
+  --muted: #98989d;
+  --border: rgba(255, 255, 255, 0.12);
+  --separator: rgba(255, 255, 255, 0.1);
+  --focus: #0a84ff;
+  --link: #0a84ff;
+
+  --accent: #0a84ff;
+  --accent-foreground: #ffffff;
+  --accent-hover: #409cff;
+  --accent-soft: rgba(10, 132, 255, 0.18);
+  --accent-soft-foreground: #64d2ff;
+  --accent-soft-hover: rgba(10, 132, 255, 0.26);
+
+  --danger: #ff453a;
+  --danger-foreground: #ffffff;
+  --danger-hover: #ff6961;
+  --danger-soft: rgba(255, 69, 58, 0.18);
+  --danger-soft-foreground: #ff6961;
+  --danger-soft-hover: rgba(255, 69, 58, 0.26);
+
+  --success: #30d158;
+  --success-foreground: #000000;
+  --success-hover: #64d2ff;
+  --success-soft: rgba(48, 209, 88, 0.18);
+  --success-soft-foreground: #30d158;
+  --success-soft-hover: rgba(48, 209, 88, 0.26);
+
+  --warning: #ffd60a;
+  --warning-foreground: #000000;
+  --warning-hover: #ffd426;
+  --warning-soft: rgba(255, 214, 10, 0.18);
+  --warning-soft-foreground: #ffd60a;
+  --warning-soft-hover: rgba(255, 214, 10, 0.26);
+
+  --surface: #1c1c1e;
+  --surface-foreground: #f5f5f7;
+  --surface-secondary: #2c2c2e;
+  --surface-secondary-foreground: #f5f5f7;
+  --surface-hover: #2c2c2e;
+
+  --overlay: #2c2c2e;
+  --overlay-foreground: #f5f5f7;
+
+  --default: #3a3a3c;
+  --default-foreground: #f5f5f7;
+  --default-hover: #48484a;
+  --default-soft: rgba(255, 255, 255, 0.08);
+  --default-soft-foreground: #f5f5f7;
+  --default-soft-hover: rgba(255, 255, 255, 0.12);
+
+  /* Distinct from surface so inputs are readable on cards */
+  --field-background: #2c2c2e;
+  --field-foreground: #f5f5f7;
+  --field-placeholder: #8e8e93;
+  --field-border: rgba(255, 255, 255, 0.14);
+  --field-hover: #3a3a3c;
+  --field-focus: #3a3a3c;
+  --field-border-hover: rgba(255, 255, 255, 0.22);
+  --field-border-focus: rgba(10, 132, 255, 0.65);
+
+  --segment: #2c2c2e;
+  --segment-foreground: #f5f5f7;
+  --scrollbar: rgba(255, 255, 255, 0.28);
+}

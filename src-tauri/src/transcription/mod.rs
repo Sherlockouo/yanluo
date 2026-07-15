@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
@@ -653,6 +652,7 @@ pub(crate) fn finalize_successful_result(
     let source = AsrEngine::session_mode(app);
     let is_transcribe = source == "transcribe";
     let is_translate = source == "translate";
+    let is_agent = source == "agent";
 
     let config = app
         .state::<AsrEngine>()
@@ -678,10 +678,23 @@ pub(crate) fn finalize_successful_result(
         return None;
     }
 
+    // Agent voice: no paste, no history — stay on floating HUD for text edit + dispatch.
+    if is_agent {
+        let partial = PartialResult::display(result.text.clone());
+        let _ = app.emit("partial-result", &partial);
+        let _ = app.emit_to("floating", "partial-result", &partial);
+        let snapshot = result.clone();
+        emit_floating_status(app, true, "editing", &result.text, 0.0);
+        let _ = app.emit("agent-transcription-result", &snapshot);
+        let _ = app.emit_to("floating", "agent-transcription-result", &snapshot);
+        let _ = app.emit("agent-voice-status", "editing");
+        let _ = app.emit_to("floating", "agent-voice-status", "editing");
+        return Some(false);
+    }
+
     if is_translate {
-        // Fn/⇧Fn release = accept what's on HUD now. Take stream preview;
-        // bump epoch so late in-flight segment translates are dropped.
-        // No full-document translate_transcript — that was the slow "subsequent op".
+        // Accept stream preview into result; bump epoch so late segment translates drop.
+        // Confirm-then-paste happens after HUD editing (not immediate).
         let preview = peek_translate_out(app);
         emit_floating_status(app, true, "processing", &preview, 0.0);
         let (_src_done, out_done) = take_translate_stream(app);
@@ -697,7 +710,6 @@ pub(crate) fn finalize_successful_result(
                 source_text.chars().count()
             );
         } else {
-            // No streamed preview yet — paste sanitized ASR, no LLM round-trip.
             result.text = source_text;
             eprintln!(
                 "[llm] translate accept ASR fallback chars={} (no stream preview)",
@@ -705,45 +717,23 @@ pub(crate) fn finalize_successful_result(
             );
         }
     }
-    // Fn mode: paste current ASR (+ vocab). No LLM refine — release = accept.
 
     if AsrEngine::finalize_aborted(app, gen) {
         eprintln!("[asr] finalize aborted after prepare (gen={gen})");
         return None;
     }
 
-    // Push text to HUD immediately so the capsule updates before paste / history.
+    // File-tab transcribe: save + history, no HUD paste.
     if is_transcribe {
         emit_floating_status(app, false, "processing", &result.text, 0.0);
-    } else {
-        emit_floating_status(app, true, "processing", &result.text, 0.0);
-        let _ = app.emit(
-            "partial-result",
-            PartialResult::display(result.text.clone()),
-        );
-        match inject_text_via_paste_on_main(app, &result.text) {
-            Ok(()) => {
-                eprintln!("[paste] injected {} chars", result.text.chars().count());
-            }
-            Err(e) => {
-                eprintln!("[paste] injection failed: {e}");
-                let _ = app.emit(
-                    "partial-error",
-                    format!("已写入剪切板，但粘贴失败（请检查辅助功能权限）: {e}"),
-                );
-            }
+
+        if AsrEngine::finalize_aborted(app, gen) {
+            eprintln!("[asr] finalize aborted after paste (gen={gen}) — keeping pasted text");
+            emit_floating_status(app, false, "idle", "", 0.0);
+            return None;
         }
-    }
 
-    if AsrEngine::finalize_aborted(app, gen) {
-        // Already pasted — keep text; skip history rewrite / result emit.
-        eprintln!("[asr] finalize aborted after paste (gen={gen}) — keeping pasted text");
-        emit_floating_status(app, false, "idle", "", 0.0);
-        return None;
-    }
-
-    let audio_path = if is_transcribe {
-        if audio_path_override.is_some() {
+        let audio_path = if audio_path_override.is_some() {
             audio_path_override
         } else {
             samples.and_then(|s| {
@@ -762,52 +752,77 @@ pub(crate) fn finalize_successful_result(
                     }
                 }
             })
-        }
-    } else {
-        None
-    };
+        };
 
-    // If vocab changed text after alignment, drop stale timings.
-    // Transcribe tab keeps 逐字稿 (word/char highlight) — never strip timings.
-    if !is_transcribe
-        && result.refined
-        && !result.segments.is_empty()
-        && result.text != result.raw_text
-    {
-        result.segments.clear();
-        result.alignment = None;
-    }
+        append_history(app, result, &source, audio_path, media_kind);
 
-    append_history(app, result, &source, audio_path, media_kind);
-
-    if AsrEngine::finalize_aborted(app, gen) {
-        eprintln!("[asr] finalize aborted after history (gen={gen})");
-        emit_floating_status(app, false, "idle", "", 0.0);
-        return None;
-    }
-
-    // Fn/translate: hold green success on the capsule, then hide.
-    // Some(true) = caller must NOT emit idle immediately.
-    if !is_transcribe {
-        if !result.text.trim().is_empty() {
-            schedule_floating_idle(app, 700);
-        } else {
+        if AsrEngine::finalize_aborted(app, gen) {
+            eprintln!("[asr] finalize aborted after history (gen={gen})");
             emit_floating_status(app, false, "idle", "", 0.0);
+            return None;
         }
-        return Some(true);
+        return Some(false);
     }
-    Some(false)
+
+    // Fn / ⇧Fn: hold editable text on HUD — paste + history on confirm.
+    // Ensure raw_text stays ASR for learn compare (fn: pre-vocab already in raw if set).
+    if source == "fn" && result.raw_text.trim().is_empty() {
+        result.raw_text = result.text.clone();
+    }
+    let asr_text = result.text.clone();
+    AsrEngine::set_pending_hud_confirm(
+        app,
+        Some(crate::state::PendingHudConfirm {
+            mode: source.clone(),
+            asr_text: asr_text.clone(),
+            result: result.clone(),
+            gen,
+            media_kind: media_kind.to_string(),
+        }),
+    );
+    let partial = PartialResult::display(result.text.clone());
+    let _ = app.emit("partial-result", &partial);
+    let _ = app.emit_to("floating", "partial-result", &partial);
+    emit_floating_status(app, true, "editing", &result.text, 0.0);
+    let _ = app.emit(
+        "hud-edit-ready",
+        serde_json::json!({
+            "mode": source,
+            "asr_text": asr_text,
+            "text": result.text,
+        }),
+    );
+    let _ = app.emit_to(
+        "floating",
+        "hud-edit-ready",
+        serde_json::json!({
+            "mode": source,
+            "asr_text": asr_text,
+            "text": result.text,
+        }),
+    );
+    eprintln!(
+        "[asr] hud confirm-wait mode={source} chars={}",
+        result.text.chars().count()
+    );
+    // Some(true) = caller must NOT emit idle (HUD stays editing).
+    Some(true)
 }
 
-/// Hide the HUD after `delay_ms`, unless a new recording/refine session started.
+/// Hide the HUD after `delay_ms`, unless a new recording/refine/edit session started.
+#[allow(dead_code)]
 pub(crate) fn schedule_floating_idle(app: &AppHandle, delay_ms: u64) {
     let app2 = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         if let Ok(slot) = floating_status_slot(&app2).lock() {
-            if slot.state == "recording" || slot.state == "refining" {
+            if slot.state == "recording" || slot.state == "refining" || slot.state == "editing"
+            {
                 return;
             }
+        }
+        if AsrEngine::has_pending_hud_confirm(&app2) {
+            return;
         }
         emit_floating_status(&app2, false, "idle", "", 0.0);
     });
@@ -898,143 +913,82 @@ pub(crate) fn transcribe_with_elevenlabs(config: &AppConfig, samples: &[f32]) ->
 }
 
 #[cfg(target_os = "macos")]
-pub(crate) fn transcribe_with_apple_speech(config: &AppConfig, samples: &[f32]) -> Result<TranscriptionResult, String> {
+mod apple_speech_ffi {
+    use std::ffi::{CStr, CString};
+    use std::os::raw::c_char;
+
+    unsafe extern "C" {
+        fn asr_speech_recognize_file(
+            path: *const c_char,
+            locale: *const c_char,
+            out_buf: *mut c_char,
+            out_len: usize,
+            err_buf: *mut c_char,
+            err_len: usize,
+        ) -> i32;
+    }
+
+    pub(crate) fn recognize(path: &str, locale: &str) -> Result<String, String> {
+        let path_c = CString::new(path).map_err(|_| "audio path contains NUL".to_string())?;
+        let locale_c = CString::new(locale).map_err(|_| "locale contains NUL".to_string())?;
+        let mut out = vec![0u8; 64 * 1024];
+        let mut err = vec![0u8; 2048];
+        let rc = unsafe {
+            asr_speech_recognize_file(
+                path_c.as_ptr(),
+                locale_c.as_ptr(),
+                out.as_mut_ptr().cast(),
+                out.len(),
+                err.as_mut_ptr().cast(),
+                err.len(),
+            )
+        };
+        if rc == 0 {
+            let text = unsafe { CStr::from_ptr(out.as_ptr().cast()) }
+                .to_string_lossy()
+                .into_owned();
+            Ok(text)
+        } else {
+            let msg = unsafe { CStr::from_ptr(err.as_ptr().cast()) }
+                .to_string_lossy()
+                .into_owned();
+            Err(if msg.is_empty() {
+                format!("Apple Speech failed (code {rc})")
+            } else {
+                msg
+            })
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn transcribe_with_apple_speech(
+    config: &AppConfig,
+    samples: &[f32],
+) -> Result<TranscriptionResult, String> {
     let mut audio_file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
     audio_file
         .write_all(&samples_to_wav_bytes(samples)?)
         .map_err(|e| e.to_string())?;
     let audio_path = audio_file.path().to_string_lossy().to_string();
-    let mut script_file = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
-    script_file
-        .write_all(APPLE_SPEECH_SWIFT.as_bytes())
-        .map_err(|e| e.to_string())?;
-    let output = Command::new("/usr/bin/swift")
-        .arg(script_file.path())
-        .arg(&audio_path)
-        .arg(language_for_apple(&config.language))
-        .output()
-        .map_err(|e| format!("Apple Speech bridge failed to start: {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            "Apple Speech bridge failed".into()
-        } else {
-            stderr
-        });
-    }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let locale = language_for_apple(&config.language);
+    eprintln!(
+        "[asr] apple speech in-process: locale={locale} path={}",
+        audio_file.path().display()
+    );
+    let text = apple_speech_ffi::recognize(&audio_path, &locale)?;
     Ok(TranscriptionResult {
-                        text: text.clone(),
-                        raw_text: text,
-                        llm_text: None,
-                        language: config.language.clone(),
-                        duration_seconds: samples.len() as f64 / 16_000.0,
-                        refined: false,
-                        error: None,
-                        segments: Vec::new(),
-                        alignment: None,
-                    })
+        text: text.clone(),
+        raw_text: text,
+        llm_text: None,
+        language: config.language.clone(),
+        duration_seconds: samples.len() as f64 / 16_000.0,
+        refined: false,
+        error: None,
+        segments: Vec::new(),
+        alignment: None,
+    })
 }
-
-#[cfg(target_os = "macos")]
-pub(crate) const APPLE_SPEECH_SWIFT: &str = r#"
-import Foundation
-import Speech
-
-let args = CommandLine.arguments
-guard args.count >= 3 else {
-  fputs("usage: apple_speech.swift <audio-path> <locale>\n", stderr)
-  exit(2)
-}
-
-let audioURL = URL(fileURLWithPath: args[1])
-let requestedLocale = args[2]
-let candidates = Array(NSOrderedSet(array: [
-  requestedLocale,
-  requestedLocale.replacingOccurrences(of: "_", with: "-"),
-  "zh-CN",
-  "en-US",
-]).array as! [String])
-
-let semaphore = DispatchSemaphore(value: 0)
-var finalText = ""
-var finalError: String?
-
-func authorizeAndRecognize(localeId: String) {
-  guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeId)),
-        recognizer.isAvailable else {
-    return
-  }
-
-  let request = SFSpeechURLRecognitionRequest(url: audioURL)
-  request.shouldReportPartialResults = false
-  if #available(macOS 13.0, *) {
-    request.addsPunctuation = true
-  }
-
-  recognizer.recognitionTask(with: request) { result, error in
-    if let result = result {
-      finalText = result.bestTranscription.formattedString
-      if result.isFinal {
-        semaphore.signal()
-      }
-      return
-    }
-    if let error = error {
-      finalError = error.localizedDescription
-      semaphore.signal()
-    }
-  }
-}
-
-SFSpeechRecognizer.requestAuthorization { status in
-  guard status == .authorized else {
-    let hint: String
-    switch status {
-    case .denied:
-      hint = "denied — enable Speech Recognition for ASR Workshop in System Settings → Privacy & Security"
-    case .restricted:
-      hint = "restricted by system policy"
-    case .notDetermined:
-      hint = "not determined — permission prompt may have been blocked"
-    default:
-      hint = "status=\(status.rawValue)"
-    }
-    finalError = "Speech recognition permission \(hint)"
-    semaphore.signal()
-    return
-  }
-
-  var started = false
-  for localeId in candidates {
-    if let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeId)),
-       recognizer.isAvailable {
-      authorizeAndRecognize(localeId: localeId)
-      started = true
-      break
-    }
-  }
-  if !started {
-    finalError = "Speech recognizer unavailable for locales: \(candidates.joined(separator: ", "))"
-    semaphore.signal()
-  }
-}
-
-let waitResult = semaphore.wait(timeout: .now() + 60)
-if waitResult == .timedOut {
-  fputs("Apple Speech timed out after 60s\n", stderr)
-  exit(1)
-}
-if let finalError = finalError {
-  fputs(finalError + "\n", stderr)
-  exit(1)
-}
-if finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-  fputs("Apple Speech returned empty transcript (no speech detected or unsupported audio)\n", stderr)
-  exit(1)
-}
-print(finalText)
-"#;
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn transcribe_with_apple_speech(
@@ -2362,11 +2316,20 @@ pub(crate) fn mlx_worker(
                             eprintln!("[mlx-worker] finalize aborted — suppress transcription-result");
                             continue;
                         }
-                        Some(false) => emit_floating_status(&app, false, "idle", "", 0.0),
+                        Some(false) => {
+                            // Agent editing keeps HUD visible; others go idle.
+                            if AsrEngine::session_mode(&app) != "agent" {
+                                emit_floating_status(&app, false, "idle", "", 0.0);
+                            }
+                        }
                         Some(true) => {}
                     }
                 } else {
                     emit_floating_status(&app, false, "idle", "", 0.0);
+                    if AsrEngine::session_mode(&app) == "agent" {
+                        let _ = app.emit("agent-transcription-result", &result);
+                        let _ = app.emit_to("floating", "agent-transcription-result", &result);
+                    }
                 }
 
                 if AsrEngine::finalize_aborted(&app, finalize_gen) {
@@ -2379,7 +2342,12 @@ pub(crate) fn mlx_worker(
                     result.text.len(),
                     result.error
                 );
-                let _ = app.emit("transcription-result", &result);
+                if AsrEngine::session_mode(&app) != "agent" {
+                    // Fn/translate confirm-wait: toast/paste happens on confirm, not here.
+                    if !AsrEngine::has_pending_hud_confirm(&app) {
+                        let _ = app.emit("transcription-result", &result);
+                    }
+                }
             }
 
             WorkerCommand::TranscribeFile { path, media_kind: kind_override } => {

@@ -2,7 +2,8 @@
 //!
 //! macOS only lists an app in Privacy panes **after** it requests that permission
 //! **from this process**. Opening System Settings alone does not register the binary.
-//! Mic / Speech must be requested in-process (see `macos_tcc.m`) — never via `swift -e`.
+//! Mic / Speech must be requested **and recognized** in-process (see
+//! `macos_tcc.m` / `macos_speech.m`) — never via `/usr/bin/swift` (TCC aborts).
 //!
 //! UX rules:
 //! - Never stack an OS prompt **and** `open` System Settings for the same click.

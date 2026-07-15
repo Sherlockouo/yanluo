@@ -10,7 +10,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use crate::hud::{
-    close_floating_lang_menu, floating_lang_menu_is_open, floating_status_slot,
+    close_floating_lang_menu, emit_floating_status, floating_lang_menu_is_open,
+    floating_status_slot,
 };
 use crate::state::*;
 use crate::config::*;
@@ -22,6 +23,7 @@ pub(crate) enum HotkeyCaptureSlot {
     Transcribe,
     Translate,
     Cancel,
+    Agent,
 }
 
 impl HotkeyCaptureSlot {
@@ -30,6 +32,7 @@ impl HotkeyCaptureSlot {
             "transcribe" => Self::Transcribe,
             "translate" => Self::Translate,
             "cancel" => Self::Cancel,
+            "agent" => Self::Agent,
             _ => Self::None,
         }
     }
@@ -40,6 +43,7 @@ impl HotkeyCaptureSlot {
             Self::Transcribe => "transcribe",
             Self::Translate => "translate",
             Self::Cancel => "cancel",
+            Self::Agent => "agent",
         }
     }
 }
@@ -62,7 +66,7 @@ fn merge_mods(peak: &mut Vec<String>, current: &[String]) {
     peak.sort();
 }
 
-/// True while cancel hotkey should be consumed (recording / processing HUD).
+/// True while cancel hotkey should be consumed (recording / processing / HUD confirm).
 fn cancel_hotkey_is_actionable(app: &AppHandle) -> bool {
     if let Some(engine) = app.try_state::<AsrEngine>() {
         if engine.inner().recording.load(Ordering::Acquire) {
@@ -77,6 +81,9 @@ fn cancel_hotkey_is_actionable(app: &AppHandle) -> bool {
         {
             return true;
         }
+        if AsrEngine::has_pending_hud_confirm(app) {
+            return true;
+        }
     }
     floating_status_slot(app)
         .lock()
@@ -84,10 +91,23 @@ fn cancel_hotkey_is_actionable(app: &AppHandle) -> bool {
             s.visible
                 && matches!(
                     s.state.as_str(),
-                    "recording" | "processing" | "refining"
+                    "recording" | "processing" | "refining" | "editing"
                 )
+                && s.intention.as_deref() != Some("agent")
         })
         .unwrap_or(false)
+}
+
+fn hud_confirm_editing(app: &AppHandle) -> bool {
+    AsrEngine::has_pending_hud_confirm(app)
+        || floating_status_slot(app)
+            .lock()
+            .map(|s| {
+                s.visible
+                    && s.state == "editing"
+                    && s.intention.as_deref() != Some("agent")
+            })
+            .unwrap_or(false)
 }
 
 pub(crate) fn start_fn_event_tap(app: AppHandle) {
@@ -134,7 +154,9 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
             mods
         }
 
-        fn read_hotkeys(app: &AppHandle) -> (HotkeyBinding, HotkeyBinding, HotkeyBinding) {
+        fn read_hotkeys(
+            app: &AppHandle,
+        ) -> (HotkeyBinding, HotkeyBinding, HotkeyBinding, HotkeyBinding) {
             app.try_state::<AsrEngine>()
                 .and_then(|engine| {
                     engine
@@ -147,6 +169,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                 c.hotkey_transcribe.clone(),
                                 c.hotkey_translate.clone(),
                                 c.hotkey_cancel.clone(),
+                                c.hotkey_agent.clone(),
                             )
                         })
                 })
@@ -155,6 +178,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                         default_hotkey_transcribe(),
                         default_hotkey_translate(),
                         default_hotkey_cancel(),
+                        default_hotkey_agent(),
                     )
                 })
         }
@@ -188,6 +212,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                         HotkeyCaptureSlot::Transcribe => config.hotkey_transcribe = binding.clone(),
                         HotkeyCaptureSlot::Translate => config.hotkey_translate = binding.clone(),
                         HotkeyCaptureSlot::Cancel => config.hotkey_cancel = binding.clone(),
+                        HotkeyCaptureSlot::Agent => config.hotkey_agent = binding.clone(),
                         HotkeyCaptureSlot::None => {}
                     }
                     let snapshot = config.clone();
@@ -213,10 +238,13 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
 
                 let fn_down = Arc::new(AtomicBool::new(false));
                 let fn_down_cb = fn_down.clone();
+                let suppress_fn_release = Arc::new(AtomicBool::new(false));
+                let suppress_fn_release_cb = suppress_fn_release.clone();
                 let chord = Arc::new(Mutex::new(CaptureChord::default()));
                 let chord_cb = chord.clone();
                 let app_cb = app.clone();
                 let escape_keycode = KeyCode::ESCAPE as i64;
+                let space_keycode = 49i64;
                 let installed = CGEventTap::with_enabled(
                     CGEventTapLocation::HID,
                     CGEventTapPlacement::HeadInsertEventTap,
@@ -244,6 +272,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                             } else {
                                 keycode.to_string()
                             };
+                            let fn_held = fn_down_cb.load(Ordering::Acquire);
 
                             if is_capturing {
                                 // Esc aborts (unless recording the cancel slot itself).
@@ -259,30 +288,110 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                     return CallbackResult::Drop;
                                 }
                                 // Regular key + any modifiers (⌃⌥⇧⌘+Key) — commit now.
-                                // Modifiers alone never arrive as KeyDown.
+                                // Fn+key (e.g. Fn+Space for agent): include pseudo "fn" mod.
                                 if let Ok(mut c) = chord_cb.lock() {
                                     *c = CaptureChord::default();
                                 }
-                                let binding = binding_from_event(&key, mods);
+                                let mut capture_mods = mods.clone();
+                                if fn_held && !capture_mods.iter().any(|m| m == "fn") {
+                                    capture_mods.push("fn".into());
+                                    capture_mods.sort();
+                                }
+                                let binding = binding_from_event(&key, capture_mods);
                                 apply_captured(&app_cb, &capturing, binding);
                                 return CallbackResult::Drop;
                             }
 
-                            let (hk_transcribe, hk_translate, hk_cancel) = read_hotkeys(&app_cb);
+                            let (hk_transcribe, hk_translate, hk_cancel, hk_agent) =
+                                read_hotkeys(&app_cb);
 
-                            // Lang menu Esc close is independent of the cancel hotkey binding.
-                            if key == "escape"
-                                && mods.is_empty()
-                                && floating_lang_menu_is_open()
+                            // Lang / agent picker Esc close (outside-HUD menus).
+                            if key == "escape" && mods.is_empty() {
+                                if floating_lang_menu_is_open() {
+                                    close_floating_lang_menu(&app_cb);
+                                    return CallbackResult::Drop;
+                                }
+                                if crate::hud::floating_agent_menu_is_open() {
+                                    crate::hud::close_floating_agent_menu(&app_cb);
+                                    return CallbackResult::Drop;
+                                }
+                            }
+
+                            // Agent mode Esc: cancel / dismiss.
+                            if key == "escape" && mods.is_empty() {
+                                let agent_open = floating_status_slot(&app_cb)
+                                    .lock()
+                                    .map(|s| {
+                                        s.visible && s.intention.as_deref() == Some("agent")
+                                    })
+                                    .unwrap_or(false);
+                                if agent_open {
+                                    let hud_state = floating_status_slot(&app_cb)
+                                        .lock()
+                                        .map(|s| s.state.clone())
+                                        .unwrap_or_default();
+                                    let recording = app_cb
+                                        .try_state::<AsrEngine>()
+                                        .map(|e| e.inner().recording.load(Ordering::Acquire))
+                                        .unwrap_or(false);
+                                    if recording
+                                        || matches!(
+                                            hud_state.as_str(),
+                                            "recording" | "processing" | "refining"
+                                        )
+                                    {
+                                        eprintln!("[asr] agent Esc → cancel ({hud_state})");
+                                        if let Some(engine) = app_cb.try_state::<AsrEngine>() {
+                                            crate::commands::cancel_recording_with_reason(
+                                                &app_cb,
+                                                engine.inner(),
+                                                "agent-esc",
+                                            );
+                                        }
+                                        let _ = app_cb.emit_to("floating", "agent-voice-cancel", ());
+                                    } else {
+                                        emit_floating_status(&app_cb, false, "idle", "", 0.0);
+                                    }
+                                    return CallbackResult::Drop;
+                                }
+                            }
+
+                            // Agent summon: Fn held + Space (default), or configured binding.
+                            if fn_held {
+                                let mut agent_mods = mods.clone();
+                                if !agent_mods.iter().any(|m| m == "fn") {
+                                    agent_mods.push("fn".into());
+                                }
+                                if binding_matches(&hk_agent, &key, &agent_mods)
+                                    || (hk_agent.key == "49"
+                                        && keycode == space_keycode
+                                        && hk_agent.modifiers.iter().any(|m| m == "fn")
+                                        && mods.is_empty())
+                                {
+                                    suppress_fn_release_cb.store(true, Ordering::Release);
+                                    if let Ok(mut c) = chord_cb.lock() {
+                                        *c = CaptureChord::default();
+                                    }
+                                    let _ = app_cb.emit("agent-summon", ());
+                                    return CallbackResult::Drop;
+                                }
+                            }
+                            if !hk_agent.modifiers.iter().any(|m| m == "fn")
+                                && binding_matches(&hk_agent, &key, &mods)
                             {
-                                close_floating_lang_menu(&app_cb);
+                                let _ = app_cb.emit("agent-summon", ());
                                 return CallbackResult::Drop;
                             }
 
                             if binding_matches(&hk_cancel, &key, &mods) {
                                 // Never swallow cancel when idle — other apps need the key.
                                 if cancel_hotkey_is_actionable(&app_cb) {
-                                    let _ = app_cb.emit("escape-key-down", ());
+                                    if hud_confirm_editing(&app_cb) {
+                                        let _ = app_cb.emit_to("floating", "hud-cancel-request", ());
+                                        let _ = app_cb.emit("hud-cancel-request", ());
+                                    } else {
+                                        let _ = app_cb.emit("escape-key-down", ());
+                                    }
                                     return CallbackResult::Drop;
                                 }
                                 return CallbackResult::Keep;
@@ -292,6 +401,10 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                             if !binding_is_fn(&hk_translate)
                                 && binding_matches(&hk_translate, &key, &mods)
                             {
+                                if hud_confirm_editing(&app_cb) {
+                                    let _ = app_cb.emit_to("floating", "hud-confirm-request", ());
+                                    return CallbackResult::Drop;
+                                }
                                 let _ = app_cb.emit(
                                     "fn-key-down",
                                     HotkeyPayload {
@@ -304,6 +417,10 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                             if !binding_is_fn(&hk_transcribe)
                                 && binding_matches(&hk_transcribe, &key, &mods)
                             {
+                                if hud_confirm_editing(&app_cb) {
+                                    let _ = app_cb.emit_to("floating", "hud-confirm-request", ());
+                                    return CallbackResult::Drop;
+                                }
                                 let _ = app_cb.emit(
                                     "fn-key-down",
                                     HotkeyPayload {
@@ -382,12 +499,21 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                 *c = CaptureChord::default();
                                 drop(c);
 
-                                let (hk_transcribe, hk_translate, _hk_cancel) =
+                                // Fn+Space already handled on KeyDown — skip transcribe.
+                                if suppress_fn_release_cb.swap(false, Ordering::AcqRel) {
+                                    return CallbackResult::Drop;
+                                }
+
+                                let (hk_transcribe, hk_translate, _hk_cancel, _hk_agent) =
                                     read_hotkeys(&app_cb);
 
                                 if binding_is_fn(&hk_translate)
                                     && binding_matches(&hk_translate, "fn", &final_mods)
                                 {
+                                    if hud_confirm_editing(&app_cb) {
+                                        let _ = app_cb.emit_to("floating", "hud-confirm-request", ());
+                                        return CallbackResult::Drop;
+                                    }
                                     let _ = app_cb.emit(
                                         "fn-key-down",
                                         HotkeyPayload {
@@ -400,6 +526,10 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                 if binding_is_fn(&hk_transcribe)
                                     && binding_matches(&hk_transcribe, "fn", &final_mods)
                                 {
+                                    if hud_confirm_editing(&app_cb) {
+                                        let _ = app_cb.emit_to("floating", "hud-confirm-request", ());
+                                        return CallbackResult::Drop;
+                                    }
                                     let _ = app_cb.emit(
                                         "fn-key-down",
                                         HotkeyPayload {
