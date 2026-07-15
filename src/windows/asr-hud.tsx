@@ -9,12 +9,15 @@ import {
 } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { AnimatePresence, motion } from "framer-motion";
+import { Button, TextArea, TextField } from "@heroui/react";
 import {
   AtSign,
   ChevronUp,
+  FileText,
+  FolderOpen,
   Paperclip,
   Send,
   Square,
@@ -36,10 +39,8 @@ import { cn } from "@/lib/cn";
 const CAPSULE_W = 400;
 const CAPSULE_H = 56;
 const AGENT_W = 520;
-/** Pills row above + capsule row. */
+/** Pills row above + capsule row (attachments inline — no extra strip). */
 const AGENT_BASE_H = 88;
-const AGENT_ATTACH_H = 34;
-const AGENT_PREVIEW_H = 148;
 
 type Attachment = AgentPathInfo & { at: boolean };
 
@@ -85,7 +86,6 @@ export function AsrHud() {
   const [cwdHistory, setCwdHistory] = useState<string[]>([]);
   const [editText, setEditText] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [preview, setPreview] = useState<Attachment | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickerMode, setPickerMode] = useState<"" | "agent" | "cwd">("");
@@ -130,31 +130,26 @@ export function AsrHud() {
     profiles.find((p) => p.id === profileId)?.name ??
     (agent === "claude" ? "Claude" : "Codex");
 
-  const resize = useCallback(
-    (agentMode: boolean, hasAttach: boolean, hasPreview: boolean) => {
-      if (!agentMode) {
-        void invoke("resize_floating_hud", {
-          width: CAPSULE_W,
-          height: CAPSULE_H,
-        }).catch(() => {});
-        return;
-      }
-      let h = AGENT_BASE_H;
-      if (hasAttach) h += AGENT_ATTACH_H;
-      if (hasPreview) h += AGENT_PREVIEW_H;
-      void invoke("resize_floating_hud", { width: AGENT_W, height: h }).catch(
-        () => {},
-      );
-      void getCurrentWindow()
-        .setSize(new LogicalSize(AGENT_W, h))
-        .catch(() => {});
-    },
-    [],
-  );
+  const resize = useCallback((agentMode: boolean) => {
+    if (!agentMode) {
+      void invoke("resize_floating_hud", {
+        width: CAPSULE_W,
+        height: CAPSULE_H,
+      }).catch(() => {});
+      return;
+    }
+    void invoke("resize_floating_hud", {
+      width: AGENT_W,
+      height: AGENT_BASE_H,
+    }).catch(() => {});
+    void getCurrentWindow()
+      .setSize(new LogicalSize(AGENT_W, AGENT_BASE_H))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
-    resize(isAgent, attachments.length > 0, Boolean(preview));
-  }, [isAgent, attachments.length, preview, resize]);
+    resize(isAgent);
+  }, [isAgent, resize]);
 
   useEffect(() => {
     if (!editing) return;
@@ -258,7 +253,6 @@ export function AsrHud() {
     }
     setEditText("");
     setAttachments([]);
-    setPreview(null);
     setPickerMode("");
   }, []);
 
@@ -283,7 +277,6 @@ export function AsrHud() {
       });
       setEditText("");
       setAttachments([]);
-      setPreview(null);
       setPickerMode("");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -310,7 +303,7 @@ export function AsrHud() {
       }
       return merged;
     });
-    if (next.length === 1) setPreview(next[0]);
+    // Don't auto-open — user clicks chip → system default app.
   }, []);
 
   const pasteClipboard = useCallback(async () => {
@@ -441,6 +434,17 @@ export function AsrHud() {
           setAgent(event.payload.agent);
         }
         if (event.payload.cwd != null) setCwd(event.payload.cwd || "");
+        if (!event.payload.visible || event.payload.state === "idle") {
+          setPickerMode("");
+          void invoke("set_agent_picker", { mode: "", itemCount: 1 }).catch(
+            () => {},
+          );
+        } else if (
+          event.payload.visible &&
+          event.payload.intention === "agent"
+        ) {
+          void invoke("restore_floating_interaction").catch(() => {});
+        }
       }),
     );
     add(
@@ -499,7 +503,6 @@ export function AsrHud() {
         // Rust already cancelled; clear local agent UI only.
         setEditText("");
         setAttachments([]);
-        setPreview(null);
         setPickerMode("");
       }),
     );
@@ -578,18 +581,33 @@ export function AsrHud() {
   }, [startVoice, stopVoice, cancelVoice, confirmTranscript, cancelTranscript]);
 
   const addAttach = async (asDir: boolean) => {
-    const selected = await open(
-      asDir
-        ? {
-            directory: true,
-            multiple: false,
-            defaultPath: cwd || undefined,
-          }
-        : {
-            multiple: true,
-            defaultPath: cwd || undefined,
-          },
-    ).catch(() => null);
+    // Defer past HeroUI/RAC press end — sync openDialog swallows pointerup and
+    // leaves the HUD dead after ESC-cancel / reopen.
+    await new Promise<void>((r) => {
+      window.setTimeout(r, 0);
+    });
+    let selected: string | string[] | null = null;
+    try {
+      selected = await openDialog(
+        asDir
+          ? {
+              directory: true,
+              multiple: false,
+              defaultPath: cwd || undefined,
+            }
+          : {
+              multiple: true,
+              defaultPath: cwd || undefined,
+            },
+      );
+    } catch {
+      selected = null;
+    } finally {
+      await invoke("restore_floating_interaction").catch(() => {});
+      requestAnimationFrame(() => {
+        editRef.current?.focus();
+      });
+    }
     const paths = Array.isArray(selected)
       ? selected
       : typeof selected === "string"
@@ -598,6 +616,12 @@ export function AsrHud() {
     if (!paths.length) return;
     await mergeAttachments(paths, asDir);
   };
+
+  const openAttach = useCallback((a: Attachment) => {
+    void invoke("open_path_in_system", { path: a.path }).catch((e) => {
+      console.error("[hud] open attach failed", e);
+    });
+  }, []);
 
   const toggleMenu = useCallback(
     (mode: "agent" | "cwd") => {
@@ -619,6 +643,7 @@ export function AsrHud() {
   );
 
   const onEditKey = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (pickerModeRef.current) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -711,7 +736,6 @@ export function AsrHud() {
                 error={error}
                 editRef={editRef}
                 attachments={attachments}
-                preview={preview}
                 onToggleAgent={() => toggleMenu("agent")}
                 onToggleCwd={() => toggleMenu("cwd")}
                 onStop={() => void stopVoice()}
@@ -720,12 +744,10 @@ export function AsrHud() {
                 onSend={() => void dispatch(editText)}
                 onAddFile={() => void addAttach(false)}
                 onAddDir={() => void addAttach(true)}
-                onSelectAttach={setPreview}
+                onSelectAttach={openAttach}
                 onRemoveAttach={(path) => {
                   setAttachments((prev) => prev.filter((x) => x.path !== path));
-                  setPreview((p) => (p?.path === path ? null : p));
                 }}
-                onClosePreview={() => setPreview(null)}
               />
             ) : (
               <FloatingCapsule
@@ -757,7 +779,6 @@ function AgentCapsule({
   error,
   editRef,
   attachments,
-  preview,
   onToggleAgent,
   onToggleCwd,
   onStop,
@@ -768,7 +789,6 @@ function AgentCapsule({
   onAddDir,
   onSelectAttach,
   onRemoveAttach,
-  onClosePreview,
 }: {
   payload: FloatingPayload;
   agentLabel: string;
@@ -780,7 +800,6 @@ function AgentCapsule({
   error: string | null;
   editRef: RefObject<HTMLTextAreaElement | null>;
   attachments: Attachment[];
-  preview: Attachment | null;
   onToggleAgent: () => void;
   onToggleCwd: () => void;
   onStop: () => void;
@@ -791,7 +810,6 @@ function AgentCapsule({
   onAddDir: () => void;
   onSelectAttach: (a: Attachment) => void;
   onRemoveAttach: (path: string) => void;
-  onClosePreview: () => void;
 }) {
   const recording = payload.state === "recording";
   const processing = payload.state === "processing";
@@ -818,31 +836,37 @@ function AgentCapsule({
     <div className="hud-agent" data-no-drag>
       <div className="hud-agent-rail">
         <div className="hud-agent-pills">
-          <button
-            type="button"
+          <Button
+            variant="ghost"
             className={cn(
-              "hud-agent-pill",
+              "hud-agent-pill h-auto min-h-0 gap-1 px-1.5 py-0.5 text-[11px] font-semibold shadow-none",
+              "data-[pressed=true]:scale-100 data-[hovered=true]:bg-transparent",
               pickerMode === "agent" && "is-open",
             )}
             aria-haspopup="listbox"
             aria-expanded={pickerMode === "agent"}
-            title="⌘. 选择 Agent"
-            onClick={onToggleAgent}
+            aria-label="选择 Agent · ⌘."
+            onPress={onToggleAgent}
           >
             <span>{agentLabel}</span>
-            <ChevronUp size={12} strokeWidth={2.4} className="opacity-70" />
-          </button>
-          <button
-            type="button"
-            className={cn("hud-agent-pill", pickerMode === "cwd" && "is-open")}
+            <ChevronUp size={10} strokeWidth={2.4} className="opacity-70" />
+          </Button>
+          <Button
+            variant="ghost"
+            className={cn(
+              "hud-agent-pill h-auto min-h-0 gap-1 px-1.5 py-0.5 text-[11px] font-semibold shadow-none",
+              "data-[pressed=true]:scale-100 data-[hovered=true]:bg-transparent",
+              pickerMode === "cwd" && "is-open",
+            )}
             aria-haspopup="listbox"
             aria-expanded={pickerMode === "cwd"}
-            title={cwd || "工作目录 · ⌘/"}
-            onClick={onToggleCwd}
+            aria-label={cwd ? `${cwd} · ⌘/` : "工作目录 · ⌘/"}
+            onPress={onToggleCwd}
           >
+            <FolderOpen size={11} strokeWidth={2.2} className="shrink-0 opacity-75" />
             <span className="truncate">{cwd ? cwdLabel(cwd) : "工作目录"}</span>
-            <ChevronUp size={12} strokeWidth={2.4} className="opacity-70" />
-          </button>
+            <ChevronUp size={10} strokeWidth={2.4} className="opacity-70" />
+          </Button>
         </div>
       </div>
 
@@ -853,17 +877,73 @@ function AgentCapsule({
           <AudioBars rms={smoothed} bands={payload.bands} active />
         ) : null}
 
+        {attachments.length > 0 ? (
+          <div className="hud-agent-inline-attach">
+            {attachments.map((a) => (
+              <div
+                key={a.path}
+                className="hud-agent-chip hud-agent-attach-chip inline-flex max-w-28 items-center gap-1"
+              >
+                <Button
+                  variant="ghost"
+                  className="h-auto min-h-0 min-w-0 flex-1 justify-start gap-1 rounded-none bg-transparent px-0 py-0 shadow-none data-[hovered=true]:bg-transparent data-[pressed=true]:scale-100"
+                  aria-label={
+                    a.at || a.kind === "dir"
+                      ? `@${shortName(a.name, 8)}`
+                      : shortName(a.name, 8)
+                  }
+                  onPress={() => onSelectAttach(a)}
+                >
+                  {a.kind === "image" ? (
+                    <img
+                      src={convertFileSrc(a.path)}
+                      alt=""
+                      className="hud-agent-thumb"
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).style.display = "none";
+                      }}
+                    />
+                  ) : a.at || a.kind === "dir" ? (
+                    <FolderOpen size={12} />
+                  ) : (
+                    <FileText size={12} />
+                  )}
+                  <span className="truncate">
+                    {a.at || a.kind === "dir"
+                      ? `@${shortName(a.name, 8)}`
+                      : shortName(a.name, 8)}
+                  </span>
+                </Button>
+                <Button
+                  isIconOnly
+                  variant="ghost"
+                  aria-label="移除"
+                  className="hud-agent-chip-x h-auto min-h-0 w-auto min-w-0 p-0 shadow-none data-[pressed=true]:scale-100"
+                  onPress={() => onRemoveAttach(a.path)}
+                >
+                  <X size={10} />
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         {editing ? (
-          <textarea
-            ref={editRef}
+          <TextField
+            aria-label={hint}
             value={editText}
-            onChange={(e) => onEditChange(e.target.value)}
-            onKeyDown={onEditKey}
-            rows={1}
-            disabled={busy}
-            placeholder={hint}
-            className="hud-agent-input"
-          />
+            onChange={onEditChange}
+            isDisabled={busy}
+            className="min-w-0 flex-1"
+          >
+            <TextArea
+              ref={editRef}
+              rows={1}
+              placeholder={hint}
+              className="hud-agent-input"
+              onKeyDown={onEditKey}
+            />
+          </TextField>
         ) : (
           <div className="hud-text-viewport min-w-0 flex-1">
             <span className="hud-text-scroll">
@@ -875,116 +955,51 @@ function AgentCapsule({
         )}
 
         <div className="hud-agent-tools">
-          <button
-            type="button"
+          <Button
+            isIconOnly
+            variant="ghost"
+            size="sm"
             className="hud-agent-icon-btn"
-            title="@ 目录"
-            onClick={onAddDir}
+            aria-label="@ 目录"
+            onPress={onAddDir}
           >
             <AtSign size={15} strokeWidth={2.25} />
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            isIconOnly
+            variant="ghost"
+            size="sm"
             className="hud-agent-icon-btn"
-            title="附件 · ⌘V 粘贴"
-            onClick={onAddFile}
+            aria-label="附件 · ⌘V 粘贴"
+            onPress={onAddFile}
           >
             <Paperclip size={15} strokeWidth={2.25} />
-          </button>
+          </Button>
           {recording ? (
-            <button
-              type="button"
+            <Button
+              isIconOnly
+              variant="ghost"
+              size="sm"
               className="hud-agent-icon-btn is-danger"
-              title="停止"
-              onClick={onStop}
+              aria-label="停止"
+              onPress={onStop}
             >
               <Square size={12} fill="currentColor" />
-            </button>
+            </Button>
           ) : null}
           {editing ? (
-            <button
-              type="button"
+            <Button
+              isIconOnly
               className="hud-agent-send"
-              title="派发 Enter"
-              disabled={busy}
-              onClick={onSend}
+              aria-label="派发 Enter"
+              isDisabled={busy}
+              onPress={onSend}
             >
               <Send size={14} strokeWidth={2.4} />
-            </button>
+            </Button>
           ) : null}
         </div>
       </div>
-
-      {attachments.length > 0 ? (
-        <div className="hud-agent-attach">
-          {attachments.map((a) => (
-            <button
-              key={a.path}
-              type="button"
-              title={a.path}
-              className={cn(
-                "hud-agent-chip",
-                preview?.path === a.path && "is-active",
-              )}
-              onClick={() => onSelectAttach(a)}
-            >
-              {a.at || a.kind === "dir" ? (
-                <AtSign size={11} className="shrink-0 opacity-70" />
-              ) : (
-                <Paperclip size={11} className="shrink-0 opacity-70" />
-              )}
-              <span className="truncate">
-                {a.at || a.kind === "dir"
-                  ? `@${shortName(a.name)}`
-                  : shortName(a.name)}
-              </span>
-              <span
-                role="button"
-                tabIndex={0}
-                className="hud-agent-chip-x"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemoveAttach(a.path);
-                }}
-              >
-                <X size={11} />
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {preview ? (
-        <div className="hud-agent-preview">
-          <div className="hud-agent-preview-head">
-            <span className="min-w-0 flex-1 truncate font-medium">
-              {preview.at || preview.kind === "dir"
-                ? `@${preview.name}`
-                : preview.name}
-            </span>
-            <button
-              type="button"
-              className="hud-agent-icon-btn"
-              onClick={onClosePreview}
-            >
-              <X size={13} />
-            </button>
-          </div>
-          <div className="hud-agent-preview-body">
-            {preview.kind === "image" ? (
-              <img
-                src={convertFileSrc(preview.path)}
-                alt={preview.name}
-                className="max-h-24 rounded object-contain"
-              />
-            ) : preview.preview ? (
-              <pre className="hud-agent-preview-text">{preview.preview}</pre>
-            ) : (
-              <p className="hud-agent-hint">{preview.path}</p>
-            )}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -1088,17 +1103,22 @@ function FloatingCapsule({
           :
         </span>
         {editing ? (
-          <textarea
-            ref={editRef}
+          <TextField
+            aria-label={hint || "确认或修改后按 Fn / Enter"}
             value={editText}
-            onChange={(e) => onEditChange(e.target.value)}
-            onKeyDown={onEditKey}
-            rows={1}
-            disabled={busy}
-            placeholder={hint || "确认或修改后按 Fn / Enter"}
-            className="hud-agent-input"
-            data-no-drag
-          />
+            onChange={onEditChange}
+            isDisabled={busy}
+            className="min-w-0 flex-1"
+          >
+            <TextArea
+              ref={editRef}
+              rows={1}
+              placeholder={hint || "确认或修改后按 Fn / Enter"}
+              className="hud-agent-input flex"
+              data-no-drag
+              onKeyDown={onEditKey}
+            />
+          </TextField>
         ) : (
           <div
             ref={textViewportRef}

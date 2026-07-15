@@ -3,7 +3,9 @@ import { useSearchParams } from "react-router-dom";
 import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
 import {
   Button,
+  Checkbox,
   Input,
+  InputGroup,
   Kbd,
   Label,
   ListBox,
@@ -14,6 +16,7 @@ import {
 } from "@heroui/react";
 import {
   CheckCircle2,
+  ChevronDown,
   CircleAlert,
   Download,
   Ear,
@@ -22,6 +25,7 @@ import {
   Keyboard,
   Mic,
   Monitor,
+  Plus,
   RefreshCw,
   Save,
   Shield,
@@ -35,18 +39,29 @@ import {
   CollapseTrigger,
   PageHeader,
   PageShell,
+  Reveal,
   SectionCard,
   SoftCollapse,
 } from "@/components/shared/page-shell";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/app-context";
 import {
+  agentModelsFor,
+  defaultConfig,
   hotkeySegments,
   LLM_PROVIDER_PRESETS,
   LANGUAGES,
+  QWEN_ASR_MODELS,
+  resolveLlmCreds,
 } from "@/lib/constants";
 import { navIndicatorTransition, useFade } from "@/lib/motion";
-import type { AsrProvider, HotkeyBinding, LlmProvider } from "@/types";
+import type {
+  AgentKind,
+  AgentProfile,
+  AsrProvider,
+  HotkeyBinding,
+  LlmProvider,
+} from "@/types";
 import {
   APP_RELEASES_URL,
   APP_REPO_URL,
@@ -56,9 +71,9 @@ import {
 
 type SettingsTab =
   | "general"
-  | "agent"
   | "asr"
   | "llm"
+  | "agent"
   | "hotkeys"
   | "permissions"
   | "updates";
@@ -134,9 +149,9 @@ type DownloadInstallResult = {
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "常规" },
-  { id: "agent", label: "Agent" },
   { id: "asr", label: "ASR" },
   { id: "llm", label: "LLM" },
+  { id: "agent", label: "Agent" },
   { id: "hotkeys", label: "快捷键" },
   { id: "permissions", label: "权限" },
   { id: "updates", label: "更新" },
@@ -217,20 +232,20 @@ export function SettingsPage() {
       <PageHeader title="设置" status="常规 · 快捷键 · 权限" />
 
       <LayoutGroup id="settings-tabs">
-        <div className="settings-tabs max-w-2xl" role="tablist">
+        <div className="settings-tabs max-w-2xl">
           {TABS.map((item) => {
             const active = tab === item.id;
             return (
-              <button
+              <Button
                 key={item.id}
-                type="button"
-                role="tab"
-                aria-selected={active}
+                variant="ghost"
+                data-selected={active || undefined}
+                aria-current={active ? "true" : undefined}
                 className={cn(
-                  "settings-tab",
+                  "settings-tab h-auto min-h-0 shadow-none data-[pressed=true]:scale-100",
                   active && "settings-tab-active",
                 )}
-                onClick={() => selectTab(item.id)}
+                onPress={() => selectTab(item.id)}
               >
                 {active && !reduce ? (
                   <motion.span
@@ -242,7 +257,7 @@ export function SettingsPage() {
                   <span className="settings-tab-indicator" />
                 ) : null}
                 <span className="relative z-10">{item.label}</span>
-              </button>
+              </Button>
             );
           })}
         </div>
@@ -256,9 +271,9 @@ export function SettingsPage() {
         style={{ willChange: "opacity" }}
       >
         {tab === "general" ? <GeneralPanel /> : null}
-        {tab === "agent" ? <AgentProfilesPanel /> : null}
         {tab === "asr" ? <AsrProviderPanel /> : null}
         {tab === "llm" ? <LlmProviderPanel /> : null}
+        {tab === "agent" ? <AgentPanel /> : null}
         {tab === "hotkeys" ? <HotkeysPanel /> : null}
         {tab === "permissions" ? <PermissionsPanel /> : null}
         {tab === "updates" ? <UpdatesPanel /> : null}
@@ -267,9 +282,33 @@ export function SettingsPage() {
   );
 }
 
+type ModelStatus = {
+  model_id: string;
+  path: string;
+  installed: boolean;
+  needs_download: boolean;
+  has_tokenizer: boolean;
+};
+
+type ModelDownloadProgress = {
+  model_id: string;
+  file: string;
+  downloaded: number;
+  total: number | null;
+  file_index: number;
+  file_count: number;
+  percent: number | null;
+};
+
 function AsrProviderPanel() {
-  const { config, updateConfig, saveConfig } = useApp();
+  const { config, updateConfig, saveConfig, chooseModelDir, loadModel } =
+    useApp();
   const [appleAvailable, setAppleAvailable] = useState(true);
+  const [status, setStatus] = useState<ModelStatus | null>(null);
+  const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
+  const [downloadAligner, setDownloadAligner] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
     void invoke<{ apple_speech_available?: boolean; platform?: string }>(
@@ -286,14 +325,65 @@ function AsrProviderPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const refreshStatus = useCallback(async () => {
+    try {
+      const next = await invoke<ModelStatus>("get_model_status", {
+        modelId: config.asr_model_id || "Qwen3-ASR-0.6B",
+      });
+      setStatus(next);
+    } catch {
+      /* ignore */
+    }
+  }, [config.asr_model_id]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<ModelDownloadProgress>("model-download-progress", (event) => {
+      setProgress(event.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
+
+  useEffect(() => {
+    if (config.asr_provider === "qwen") void refreshStatus();
+  }, [config.asr_provider, config.asr_model_dir, refreshStatus]);
+
   const selectProvider = (next: AsrProvider) => {
     if (next === "apple" && !appleAvailable) return;
     updateConfig("asr_provider", next);
   };
 
+  const startDownload = async () => {
+    const modelId = config.asr_model_id || "Qwen3-ASR-0.6B";
+    setDownloading(true);
+    setProgress(null);
+    try {
+      const path = await invoke<string>("download_qwen_asr_model", {
+        modelId,
+        downloadAligner,
+      });
+      updateConfig("asr_model_dir", path);
+      updateConfig("asr_model_id", modelId);
+      toast.success("模型已下载，正在加载…");
+      await refreshStatus();
+      await loadModel();
+    } catch (error) {
+      toast.danger(
+        `下载失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const alignReady = Boolean(config.align_model_dir?.trim());
+
   return (
-    <>
-      <SectionCard className="max-w-2xl flex flex-col gap-5" title="ASR 引擎">
+    <div className="flex max-w-2xl flex-col gap-4">
+      <Reveal index={0}>
+      <SectionCard className="flex flex-col gap-5" title="ASR 引擎">
         <Select
           className="w-full flex"
           selectedKey={config.asr_provider}
@@ -331,49 +421,431 @@ function AsrProviderPanel() {
           <Link to="/asr" className="text-accent hover:underline">
             ASR 页
           </Link>
-          {" · 型号与 VAD"}
+          {" · 选择型号 / 对齐开关"}
         </p>
 
         {config.asr_provider === "elevenlabs" ? (
-          <div className="flex flex-col gap-4">
+          <TextField
+            fullWidth
+            variant="secondary"
+            type="password"
+            value={config.elevenlabs_api_key}
+            onChange={(value) => updateConfig("elevenlabs_api_key", value)}
+          >
+            <Label>API Key</Label>
+            <Input />
+          </TextField>
+        ) : null}
+
+        {config.asr_provider === "apple" ? (
+          <p className="type-meta">系统语音识别，无需额外配置。</p>
+        ) : null}
+      </SectionCard>
+      </Reveal>
+
+      {config.asr_provider === "qwen" ? (
+        <Reveal index={1}>
+        <SectionCard className="flex flex-col gap-5" title="Qwen 模型与对齐">
+          <Select
+            className="w-full flex"
+            selectedKey={config.asr_model_id || "Qwen3-ASR-0.6B"}
+            onSelectionChange={(key) => {
+              if (key == null) return;
+              updateConfig("asr_model_id", String(key));
+            }}
+          >
+            <Label>型号</Label>
+            <Select.Trigger className="flex items-center justify-between p-4">
+              <Select.Value />
+              <Select.Indicator />
+            </Select.Trigger>
+            <Select.Popover>
+              <ListBox className="gap-2 p-2">
+                {QWEN_ASR_MODELS.map((m) => (
+                  <ListBox.Item key={m.id} id={m.id} textValue={m.label}>
+                    {m.label}
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                ))}
+              </ListBox>
+            </Select.Popover>
+          </Select>
+
+          {status?.installed ? (
+            <p className="truncate type-meta">已安装 · {status.path}</p>
+          ) : null}
+
+          {downloading && progress ? (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between type-meta">
+                <span>
+                  {progress.file}（{progress.file_index}/{progress.file_count}）
+                </span>
+                <span>
+                  {progress.percent != null
+                    ? `${progress.percent.toFixed(0)}%`
+                    : formatBytes(progress.downloaded)}
+                  {progress.total ? ` / ${formatBytes(progress.total)}` : ""}
+                </span>
+              </div>
+              <div className="update-progress-track">
+                <div
+                  className="update-progress-bar"
+                  style={{
+                    width:
+                      progress.percent != null
+                        ? `${Math.min(100, Math.max(0, progress.percent))}%`
+                        : "30%",
+                  }}
+                />
+              </div>
+            </div>
+          ) : null}
+
+          <TextField
+            fullWidth
+            variant="secondary"
+            value={config.asr_model_dir}
+            onChange={(value) => updateConfig("asr_model_dir", value)}
+          >
+            <Label>模型目录</Label>
+            <div className="flex gap-2">
+              <Input className="min-w-0 flex items-center font-mono text-[13px]" />
+              <Button variant="secondary" onPress={() => void chooseModelDir()}>
+                <FolderOpen size={16} />
+                浏览
+              </Button>
+            </div>
+          </TextField>
+
+          <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface-secondary/40 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="type-ui">对齐模型（ForcedAligner）</div>
+              <span
+                className={cn(
+                  "type-micro rounded-md px-1.5 py-0.5",
+                  alignReady
+                    ? "bg-success/10 text-success"
+                    : "bg-default/50 text-muted",
+                )}
+              >
+                {alignReady ? "已配置" : "未配置"}
+              </span>
+            </div>
+            <Checkbox
+              isSelected={downloadAligner}
+              onChange={setDownloadAligner}
+            >
+              <Checkbox.Content className="flex items-center gap-2 type-meta">
+                <Checkbox.Control>
+                  <Checkbox.Indicator />
+                </Checkbox.Control>
+                下载时一并获取 ForcedAligner
+              </Checkbox.Content>
+            </Checkbox>
             <TextField
               fullWidth
               variant="secondary"
-              type="password"
-              value={config.elevenlabs_api_key}
-              onChange={(value) => updateConfig("elevenlabs_api_key", value)}
+              value={config.align_model_dir ?? ""}
+              onChange={(value) => updateConfig("align_model_dir", value)}
             >
-              <Label>API Key</Label>
-              <Input />
+              <Label>对齐模型目录</Label>
+              <Input className="min-w-0 flex items-center font-mono text-[13px]" />
             </TextField>
+            <p className="type-meta">
+              配置后可在 ASR 页开启逐字对齐；留空则对齐开关不可用。
+            </p>
           </div>
-        ) : null}
 
-        <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
-          <Save size={16} />
-          保存
-        </Button>
-      </SectionCard>
-    </>
+          <CollapseTrigger
+            open={advancedOpen}
+            onToggle={() => setAdvancedOpen((v) => !v)}
+            className="rounded-xl border border-border/60 px-3"
+          >
+            高级 · VAD / 流式
+          </CollapseTrigger>
+          <SoftCollapse open={advancedOpen}>
+            <VadAdvancedFields config={config} updateConfig={updateConfig} />
+          </SoftCollapse>
+
+          <div className="form-actions">
+            <div className="form-actions-secondary">
+              <Button
+                size="sm"
+                variant="secondary"
+                isPending={downloading}
+                onPress={() => void startDownload()}
+              >
+                <Download size={14} />
+                {status?.needs_download ?? true ? "下载模型" : "重新下载"}
+              </Button>
+            </div>
+            <Button
+              className="form-actions-primary btn-press"
+              fullWidth
+              variant="primary"
+              onPress={() => void saveConfig()}
+            >
+              <Save size={16} />
+              保存
+            </Button>
+          </div>
+        </SectionCard>
+        </Reveal>
+      ) : (
+        <Reveal index={1}>
+        <SectionCard>
+          <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
+            <Save size={16} />
+            保存
+          </Button>
+        </SectionCard>
+        </Reveal>
+      )}
+    </div>
+  );
+}
+
+function VadAdvancedFields({
+  config,
+  updateConfig,
+}: {
+  config: ReturnType<typeof useApp>["config"];
+  updateConfig: ReturnType<typeof useApp>["updateConfig"];
+}) {
+  return (
+    <div className="flex flex-col gap-3 pt-1">
+      <div className="grid grid-cols-2 gap-3">
+        <TextField
+          fullWidth
+          variant="secondary"
+          type="number"
+          value={String(config.chunk_size_sec ?? 1.5)}
+          onChange={(value) => {
+            const n = Number(value);
+            if (!Number.isFinite(n)) return;
+            updateConfig("chunk_size_sec", Math.max(0.2, Math.min(5, n)));
+          }}
+        >
+          <Label>分片秒数</Label>
+          <Input className="font-mono text-[13px]" />
+        </TextField>
+        <TextField
+          fullWidth
+          variant="secondary"
+          type="number"
+          value={String(config.unfixed_token_num ?? 5)}
+          onChange={(value) => {
+            const n = Number.parseInt(value, 10);
+            if (!Number.isFinite(n)) return;
+            updateConfig("unfixed_token_num", Math.max(1, Math.min(32, n)));
+          }}
+        >
+          <Label>未固定 token</Label>
+          <Input className="font-mono text-[13px]" />
+        </TextField>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Select
+          className="w-full flex"
+          selectedKey={
+            config.vad_backend === "energy"
+              ? "energy"
+              : config.vad_backend === "silero"
+                ? "silero"
+                : "webrtc"
+          }
+          onSelectionChange={(key) => {
+            if (key == null) return;
+            updateConfig("vad_backend", String(key));
+          }}
+        >
+          <Label>VAD 后端</Label>
+          <Select.Trigger className="flex items-center justify-between p-3">
+            <Select.Value />
+            <Select.Indicator />
+          </Select.Trigger>
+          <Select.Popover>
+            <ListBox className="gap-2 p-2">
+              <ListBox.Item id="webrtc" textValue="WebRTC">
+                WebRTC
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+              <ListBox.Item id="silero" textValue="Silero">
+                Silero
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+              <ListBox.Item id="energy" textValue="Energy">
+                Energy
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+            </ListBox>
+          </Select.Popover>
+        </Select>
+        <TextField
+          fullWidth
+          variant="secondary"
+          type="number"
+          value={String(config.vad_aggression ?? 2)}
+          onChange={(value) => {
+            const n = Number.parseInt(value, 10);
+            if (!Number.isFinite(n)) return;
+            updateConfig("vad_aggression", Math.max(0, Math.min(3, n)));
+          }}
+        >
+          <Label>灵敏度</Label>
+          <Input className="font-mono text-[13px]" />
+        </TextField>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <TextField
+          fullWidth
+          variant="secondary"
+          type="number"
+          value={String(config.vad_min_silence_ms ?? 900)}
+          onChange={(value) => {
+            const n = Number.parseInt(value, 10);
+            if (!Number.isFinite(n)) return;
+            updateConfig("vad_min_silence_ms", Math.max(400, n));
+          }}
+        >
+          <Label>最短静音 ms</Label>
+          <Input className="font-mono text-[13px]" />
+        </TextField>
+        <TextField
+          fullWidth
+          variant="secondary"
+          type="number"
+          value={String(config.vad_commit_hold_ms ?? 500)}
+          onChange={(value) => {
+            const n = Number.parseInt(value, 10);
+            if (!Number.isFinite(n)) return;
+            updateConfig("vad_commit_hold_ms", Math.max(200, n));
+          }}
+        >
+          <Label>提交等待 ms</Label>
+          <Input className="font-mono text-[13px]" />
+        </TextField>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <TextField
+          fullWidth
+          variant="secondary"
+          type="number"
+          value={String(config.vad_min_segment_ms ?? 2500)}
+          onChange={(value) => {
+            const n = Number.parseInt(value, 10);
+            if (!Number.isFinite(n)) return;
+            updateConfig("vad_min_segment_ms", Math.max(1000, n));
+          }}
+        >
+          <Label>最短段 ms</Label>
+          <Input className="font-mono text-[13px]" />
+        </TextField>
+        <TextField
+          fullWidth
+          variant="secondary"
+          type="number"
+          value={String(config.vad_max_segment_sec ?? 90)}
+          onChange={(value) => {
+            const n = Number(value);
+            if (!Number.isFinite(n)) return;
+            updateConfig("vad_max_segment_sec", Math.max(10, Math.min(180, n)));
+          }}
+        >
+          <Label>最长段 秒</Label>
+          <Input className="font-mono text-[13px]" />
+        </TextField>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <TextField
+          fullWidth
+          variant="secondary"
+          type="number"
+          value={String(config.vad_overlap_ms ?? 500)}
+          onChange={(value) => {
+            const n = Number.parseInt(value, 10);
+            if (!Number.isFinite(n)) return;
+            updateConfig("vad_overlap_ms", Math.max(200, n));
+          }}
+        >
+          <Label>重叠 ms</Label>
+          <Input className="font-mono text-[13px]" />
+        </TextField>
+        <TextField
+          fullWidth
+          variant="secondary"
+          type="number"
+          value={String(config.cross_segment_prefix_tokens ?? 64)}
+          onChange={(value) => {
+            const n = Number.parseInt(value, 10);
+            if (!Number.isFinite(n)) return;
+            updateConfig(
+              "cross_segment_prefix_tokens",
+              Math.max(0, Math.min(256, n)),
+            );
+          }}
+        >
+          <Label>跨段前缀</Label>
+          <Input className="font-mono text-[13px]" />
+        </TextField>
+      </div>
+
+      {config.vad_backend === "energy" ? (
+        <TextField
+          fullWidth
+          variant="secondary"
+          type="number"
+          value={String(config.vad_energy_threshold ?? 0.01)}
+          onChange={(value) => {
+            const n = Number(value);
+            if (!Number.isFinite(n)) return;
+            updateConfig(
+              "vad_energy_threshold",
+              Math.max(0.001, Math.min(0.05, n)),
+            );
+          }}
+        >
+          <Label>能量阈值</Label>
+          <Input className="font-mono text-[13px]" />
+        </TextField>
+      ) : null}
+    </div>
   );
 }
 
 function LlmProviderPanel() {
   const { config, updateConfig, saveConfig } = useApp();
+  const [editProvider, setEditProvider] = useState<LlmProvider>(
+    config.llm_provider,
+  );
 
-  const selectProvider = (id: LlmProvider) => {
-    const preset = LLM_PROVIDER_PRESETS.find((p) => p.id === id);
-    updateConfig("llm_provider", id);
-    if (preset && id !== "custom" && preset.baseUrl) {
-      updateConfig("llm_api_base_url", preset.baseUrl);
-      if (preset.models[0] && !config.llm_model.trim()) {
-        updateConfig("llm_model", preset.models[0]);
+  const creds = resolveLlmCreds(config, editProvider);
+  const isActive = editProvider === config.llm_provider;
+
+  const patchCreds = (patch: Partial<typeof creds>) => {
+    const nextCred = { ...resolveLlmCreds(config, editProvider), ...patch };
+    updateConfig("llm_credentials", {
+      ...config.llm_credentials,
+      [editProvider]: nextCred,
+    });
+    // Mirror into flat fields the backend reads when editing the active provider.
+    if (isActive) {
+      if (patch.api_base_url !== undefined) {
+        updateConfig("llm_api_base_url", nextCred.api_base_url);
+      }
+      if (patch.api_key !== undefined) {
+        updateConfig("llm_api_key", nextCred.api_key);
       }
     }
   };
 
   return (
-    <SectionCard className="max-w-2xl flex flex-col gap-5" title="LLM Provider">
+    <SectionCard className="max-w-2xl flex flex-col gap-5" title="LLM 凭证">
       <div className="rounded-2xl border border-border bg-surface-secondary/50 px-3 py-2">
         <Switch
           isSelected={config.llm_enabled}
@@ -394,13 +866,13 @@ function LlmProviderPanel() {
 
       <Select
         className="w-full flex"
-        selectedKey={config.llm_provider}
+        selectedKey={editProvider}
         onSelectionChange={(key) => {
           if (key == null) return;
-          selectProvider(String(key) as LlmProvider);
+          setEditProvider(String(key) as LlmProvider);
         }}
       >
-        <Label>Provider</Label>
+        <Label>配置哪个 Provider</Label>
         <Select.Trigger className="flex items-center justify-between p-4">
           <Select.Value />
           <Select.Indicator />
@@ -410,6 +882,7 @@ function LlmProviderPanel() {
             {LLM_PROVIDER_PRESETS.map((p) => (
               <ListBox.Item key={p.id} id={p.id} textValue={p.label}>
                 {p.label}
+                {p.id === config.llm_provider ? " · 当前" : ""}
                 <ListBox.ItemIndicator />
               </ListBox.Item>
             ))}
@@ -420,8 +893,8 @@ function LlmProviderPanel() {
       <TextField
         fullWidth
         variant="secondary"
-        value={config.llm_api_base_url}
-        onChange={(value) => updateConfig("llm_api_base_url", value)}
+        value={creds.api_base_url}
+        onChange={(value) => patchCreds({ api_base_url: value })}
       >
         <Label>API Base URL</Label>
         <Input placeholder="https://api.openai.com/v1" />
@@ -431,251 +904,22 @@ function LlmProviderPanel() {
         fullWidth
         variant="secondary"
         type="password"
-        value={config.llm_api_key}
-        onChange={(value) => updateConfig("llm_api_key", value)}
+        value={creds.api_key}
+        onChange={(value) => patchCreds({ api_key: value })}
       >
         <Label>API Key</Label>
         <Input placeholder="可留空（Ollama 等本地服务）" />
       </TextField>
 
       <p className="text-[12px] text-muted">
-        <Link to="/llm" className="text-accent hover:underline">
-          LLM 页
-        </Link>
-        {" · 模型与 Prompt"}
+        在 <Link to="/llm" className="text-accent hover:underline">LLM 页</Link>
+        {" 或 "}
+        <Link to="/translate" className="text-accent hover:underline">翻译页</Link>
+        {" 选择 Provider 与模型。"}
       </p>
 
       <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
         <Save size={16} />
-        保存
-      </Button>
-    </SectionCard>
-  );
-}
-
-function AgentProfilesPanel() {
-  const { config, saveConfig } = useApp();
-  const profiles = config.agent_profiles?.length
-    ? config.agent_profiles
-    : [
-        { id: "claude", name: "Claude", kind: "claude" as const, bin: "" },
-        { id: "codex", name: "Codex", kind: "codex" as const, bin: "" },
-        { id: "pi", name: "Pi", kind: "pi" as const, bin: "" },
-      ];
-  const [draft, setDraft] = useState(profiles);
-  const [selected, setSelected] = useState(config.agent_profile_id || "claude");
-  const [detected, setDetected] = useState<{
-    claude: string | null;
-    codex: string | null;
-    pi: string | null;
-  }>({ claude: null, codex: null, pi: null });
-
-  useEffect(() => {
-    setDraft(
-      config.agent_profiles?.length
-        ? config.agent_profiles
-        : [
-            { id: "claude", name: "Claude", kind: "claude", bin: "" },
-            { id: "codex", name: "Codex", kind: "codex", bin: "" },
-            { id: "pi", name: "Pi", kind: "pi", bin: "" },
-          ],
-    );
-    setSelected(config.agent_profile_id || "claude");
-  }, [config.agent_profiles, config.agent_profile_id]);
-
-  useEffect(() => {
-    void invoke<{
-      claude: string | null;
-      codex: string | null;
-      pi: string | null;
-    }>("detect_agent_bins")
-      .then(setDetected)
-      .catch(() => {});
-  }, []);
-
-  const persist = async (next: typeof draft, profileId = selected) => {
-    const kind =
-      next.find((p) => p.id === profileId)?.kind ?? ("claude" as const);
-    try {
-      await saveConfig(
-        {
-          ...config,
-          agent_profiles: next,
-          agent_profile_id: profileId,
-          agent_kind: kind,
-        },
-        { silent: true },
-      );
-      toast.success("已保存");
-    } catch (e) {
-      toast.danger(`保存失败: ${e}`);
-    }
-  };
-
-  const addProfile = () => {
-    const id = `agent-${Date.now().toString(36)}`;
-    const next = [
-      ...draft,
-      { id, name: "新 Agent", kind: "claude" as const, bin: "" },
-    ];
-    setDraft(next);
-    setSelected(id);
-  };
-
-  const removeProfile = (id: string) => {
-    if (draft.length <= 1) {
-      toast.warning("至少保留一个 Agent");
-      return;
-    }
-    const next = draft.filter((p) => p.id !== id);
-    const nextSel = selected === id ? next[0].id : selected;
-    setDraft(next);
-    setSelected(nextSel);
-    void persist(next, nextSel);
-  };
-
-  const updateRow = (
-    id: string,
-    patch: Partial<(typeof draft)[number]>,
-  ) => {
-    setDraft((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, ...patch } : p)),
-    );
-  };
-
-  return (
-    <SectionCard className="max-w-2xl flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-2">
-        <p className="type-meta">
-          HUD 下拉读此列表；名称 / CLI / 模型 / 路径
-        </p>
-        <Button size="sm" variant="secondary" onPress={addProfile}>
-          添加
-        </Button>
-      </div>
-      <ul className="flex flex-col gap-3">
-        {draft.map((p) => {
-          const hit =
-            p.kind === "codex"
-              ? detected.codex
-              : p.kind === "pi"
-                ? detected.pi
-                : detected.claude;
-          return (
-            <li
-              key={p.id}
-              className={cn(
-                "rounded-xl border px-3 py-2.5",
-                selected === p.id ? "border-accent/40" : "border-border",
-              )}
-            >
-              <div className="mb-2 flex items-center gap-2">
-                <button
-                  type="button"
-                  className={cn(
-                    "rounded-md px-2 py-0.5 text-xs font-medium",
-                    selected === p.id
-                      ? "bg-accent/15 text-accent"
-                      : "bg-default/40 text-muted",
-                  )}
-                  onClick={() => setSelected(p.id)}
-                >
-                  默认
-                </button>
-                <span className="type-meta truncate">{p.id}</span>
-                <button
-                  type="button"
-                  className="ml-auto rounded-md p-1 text-muted hover:bg-default/50 hover:text-foreground"
-                  title="删除"
-                  onClick={() => removeProfile(p.id)}
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-2">
-                <TextField
-                  value={p.name}
-                  onChange={(v) => updateRow(p.id, { name: v })}
-                >
-                  <Label>名称</Label>
-                  <Input />
-                </TextField>
-                <Select
-                  selectedKey={p.kind}
-                  onSelectionChange={(key) => {
-                    if (key !== "claude" && key !== "codex" && key !== "pi") {
-                      return;
-                    }
-                    updateRow(p.id, {
-                      kind: key,
-                      model: key === "claude" ? "sonnet" : "",
-                    });
-                  }}
-                >
-                  <Label>CLI</Label>
-                  <Select.Trigger>
-                    <Select.Value />
-                    <Select.Indicator />
-                  </Select.Trigger>
-                  <Select.Popover>
-                    <ListBox>
-                      <ListBox.Item id="claude" textValue="Claude">
-                        Claude
-                        <ListBox.ItemIndicator />
-                      </ListBox.Item>
-                      <ListBox.Item id="codex" textValue="Codex">
-                        Codex
-                        <ListBox.ItemIndicator />
-                      </ListBox.Item>
-                      <ListBox.Item id="pi" textValue="Pi">
-                        Pi
-                        <ListBox.ItemIndicator />
-                      </ListBox.Item>
-                    </ListBox>
-                  </Select.Popover>
-                </Select>
-                <TextField
-                  value={p.model ?? ""}
-                  onChange={(v) => updateRow(p.id, { model: v })}
-                >
-                  <Label>模型</Label>
-                  <Input
-                    placeholder={
-                      p.kind === "claude"
-                        ? "sonnet / opus / haiku"
-                        : p.kind === "pi"
-                          ? "空=默认 · provider/id"
-                          : "空=默认 · o3 / gpt-5.1"
-                    }
-                  />
-                </TextField>
-                <TextField
-                  value={p.bin ?? ""}
-                  onChange={(v) => updateRow(p.id, { bin: v })}
-                >
-                  <Label>路径（空=which）</Label>
-                  <Input
-                    placeholder={hit ?? `which ${p.kind}`}
-                    className="font-mono text-[12px]"
-                  />
-                </TextField>
-              </div>
-              {hit ? (
-                <div className="type-meta mt-1.5 truncate">探测 {hit}</div>
-              ) : (
-                <div className="type-meta mt-1.5 text-warning">
-                  未找到 {p.kind}
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-      <Button
-        className="self-start"
-        onPress={() => void persist(draft, selected)}
-      >
-        <Save size={14} />
         保存
       </Button>
     </SectionCard>
@@ -725,19 +969,19 @@ function GeneralPanel() {
             const active =
               (config.audio_capture_mode ?? "external") === item.id;
             return (
-              <button
+              <Button
                 key={item.id}
-                type="button"
+                variant="ghost"
                 className={cn(
-                  "flex items-center rounded-xl border px-3.5 py-3 text-left text-sm font-medium transition-colors",
+                  "h-auto min-h-0 justify-start rounded-xl border px-3.5 py-3 text-left text-sm font-medium shadow-none transition-colors data-[pressed=true]:scale-100",
                   active
                     ? "border-foreground/20 bg-default text-foreground"
-                    : "border-border bg-transparent text-muted hover:bg-default/50",
+                    : "border-border bg-transparent text-muted hover:bg-default/50 data-[hovered=true]:bg-default/50",
                 )}
-                onClick={() => updateConfig("audio_capture_mode", item.id)}
+                onPress={() => updateConfig("audio_capture_mode", item.id)}
               >
                 {item.title}
-              </button>
+              </Button>
             );
           })}
         </div>
@@ -874,11 +1118,12 @@ function HotkeysPanel() {
                       </Button>
                     </>
                   ) : (
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground transition hover:border-foreground/25 hover:bg-default"
-                      onClick={() => void startCapture(row.slot)}
-                      title="修改快捷键"
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="inline-flex h-auto min-h-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground shadow-none transition hover:border-foreground/25 hover:bg-default data-[hovered=true]:border-foreground/25 data-[hovered=true]:bg-default"
+                      aria-label={`修改快捷键：${row.title}`}
+                      onPress={() => void startCapture(row.slot)}
                     >
                       {hotkeySegments(row.binding.label).map((part, i) => (
                         <span key={`${row.slot}-${part}-${i}`} className="inline-flex items-center gap-1">
@@ -886,7 +1131,7 @@ function HotkeysPanel() {
                           <Kbd>{part}</Kbd>
                         </span>
                       ))}
-                    </button>
+                    </Button>
                   )}
                 </div>
               </div>
@@ -1318,6 +1563,321 @@ function UpdatesPanel() {
         </div>
       </SectionCard>
     </>
+  );
+}
+
+type DetectedBins = {
+  claude: string | null;
+  codex: string | null;
+  pi: string | null;
+};
+
+function detectedForKind(
+  detected: DetectedBins,
+  kind: AgentKind,
+): string | null {
+  if (kind === "codex") return detected.codex;
+  if (kind === "pi") return detected.pi;
+  return detected.claude;
+}
+
+function defaultModelForKind(kind: AgentKind): string {
+  return kind === "claude" ? "sonnet" : "";
+}
+
+function shortBin(path: string): string {
+  if (!path) return "未设置";
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 3) return path;
+  return `…/${parts.slice(-3).join("/")}`;
+}
+
+function AgentPanel() {
+  const { config, updateConfig, saveConfig, agentModels, refreshAgentModels } =
+    useApp();
+  const [detected, setDetected] = useState<DetectedBins>({
+    claude: null,
+    codex: null,
+    pi: null,
+  });
+  const [detecting, setDetecting] = useState(false);
+  const [modelsRefreshing, setModelsRefreshing] = useState(false);
+
+  const profiles = config.agent_profiles?.length
+    ? config.agent_profiles
+    : defaultConfig.agent_profiles;
+
+  useEffect(() => {
+    void refreshDetect();
+    void refreshAgentModels(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const refreshDetect = async () => {
+    setDetecting(true);
+    try {
+      setDetected(await invoke<DetectedBins>("detect_agent_bins"));
+    } catch {
+      /* ignore */
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  const whichBin = async (id: string, kind: AgentKind) => {
+    setDetecting(true);
+    try {
+      const bins = await invoke<DetectedBins>("detect_agent_bins");
+      setDetected(bins);
+      const hit = detectedForKind(bins, kind);
+      if (hit) {
+        patchProfile(id, { bin: hit });
+      } else {
+        toast.warning(`未找到 ${kind}`);
+      }
+    } catch (e) {
+      toast.danger(`which 失败: ${e}`);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  const refreshModels = async () => {
+    setModelsRefreshing(true);
+    try {
+      await refreshAgentModels(true);
+      toast.success("模型列表已刷新");
+    } catch (e) {
+      toast.danger(`刷新失败: ${e}`);
+    } finally {
+      setModelsRefreshing(false);
+    }
+  };
+
+  const persistProfiles = (next: AgentProfile[]) => {
+    updateConfig("agent_profiles", next);
+    void saveConfig({ ...config, agent_profiles: next }, { silent: true });
+  };
+
+  const addProfile = () => {
+    const id = `agent-${Date.now().toString(36)}`;
+    persistProfiles([
+      ...profiles,
+      { id, name: "新 Agent", kind: "claude", bin: "", model: "sonnet" },
+    ]);
+  };
+
+  const removeProfile = (id: string) => {
+    if (profiles.length <= 1) {
+      toast.warning("至少保留一个");
+      return;
+    }
+    persistProfiles(profiles.filter((p) => p.id !== id));
+  };
+
+  const patchProfile = (id: string, patch: Partial<AgentProfile>) => {
+    persistProfiles(profiles.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  };
+
+  return (
+    <div className="flex max-w-2xl flex-col gap-4">
+      <Reveal index={0}>
+      <SectionCard className="flex flex-col gap-4" title="Agent 类型">
+        <div className="flex items-center justify-end">
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-7 min-h-7 gap-1 px-2 text-[12px]"
+            onPress={addProfile}
+          >
+            <Plus size={12} />
+            添加
+          </Button>
+        </div>
+
+        <ul className="flex flex-col gap-2">
+          {profiles.map((p) => {
+            const hit = detectedForKind(detected, p.kind);
+            const models = agentModelsFor(p.kind, agentModels);
+            const modelKey = models.some((m) => m.id === (p.model ?? ""))
+              ? p.model || "__default__"
+              : p.model
+                ? p.model
+                : "__default__";
+            return (
+              <li key={p.id} className="rounded-xl bg-default/25 px-3 py-2.5">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="type-micro rounded-md bg-default/50 px-2 py-0.5 text-muted">
+                    {p.kind}
+                  </span>
+                  <Button
+                    isIconOnly
+                    variant="ghost"
+                    className="ml-auto h-6 w-6 min-h-6 min-w-6 rounded-md p-0 text-muted shadow-none hover:bg-default/50 hover:text-danger data-[hovered=true]:bg-default/50 data-[hovered=true]:text-danger data-[pressed=true]:scale-100"
+                    aria-label={`删除 ${p.name || p.kind}`}
+                    onPress={() => removeProfile(p.id)}
+                  >
+                    <Trash2 size={12} aria-hidden />
+                  </Button>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <TextField
+                    value={p.name}
+                    onChange={(v) => patchProfile(p.id, { name: v })}
+                  >
+                    <Label>名称</Label>
+                    <Input />
+                  </TextField>
+
+                  <div className="flex items-end gap-1">
+                    <Select
+                      className="min-w-0 flex-1"
+                      selectedKey={modelKey}
+                      onSelectionChange={(key) => {
+                        if (key == null) return;
+                        const model =
+                          String(key) === "__default__" ? "" : String(key);
+                        patchProfile(p.id, { model });
+                      }}
+                    >
+                      <Label>模型</Label>
+                      <Select.Trigger className="flex items-center justify-between">
+                        <Select.Value>
+                          {() => {
+                            const cur = p.model ?? "";
+                            const opt = models.find((m) => m.id === cur);
+                            return (
+                              <span className="truncate">
+                                {opt?.label ?? (cur || "默认")}
+                              </span>
+                            );
+                          }}
+                        </Select.Value>
+                        <ChevronDown size={12} className="shrink-0 opacity-50" />
+                      </Select.Trigger>
+                      <Select.Popover className="min-w-40">
+                        <ListBox>
+                          {models.map((m) => (
+                            <ListBox.Item
+                              key={m.id || "__default__"}
+                              id={m.id || "__default__"}
+                              textValue={m.label}
+                            >
+                              <span>{m.label}</span>
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                          ))}
+                          {p.model &&
+                          !models.some((m) => m.id === p.model) ? (
+                            <ListBox.Item id={p.model} textValue={p.model}>
+                              <span>{p.model}</span>
+                              <ListBox.ItemIndicator />
+                            </ListBox.Item>
+                          ) : null}
+                        </ListBox>
+                      </Select.Popover>
+                    </Select>
+                    <Button
+                      isIconOnly
+                      variant="secondary"
+                      className="mb-0.5 h-8 w-8 min-h-8 min-w-8 shrink-0"
+                      aria-label="刷新模型列表"
+                      isDisabled={modelsRefreshing}
+                      onPress={() => void refreshModels()}
+                    >
+                      <RefreshCw
+                        size={13}
+                        className={modelsRefreshing ? "animate-spin" : ""}
+                      />
+                    </Button>
+                  </div>
+
+                  <TextField
+                    value={p.bin ?? ""}
+                    onChange={(v) => patchProfile(p.id, { bin: v })}
+                  >
+                    <Label>路径</Label>
+                    <InputGroup>
+                      <InputGroup.Prefix className="pl-0">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 min-h-7 gap-1 rounded-md px-2 text-[11px] font-medium"
+                          isDisabled={detecting}
+                          onPress={() => void whichBin(p.id, p.kind)}
+                        >
+                          <RefreshCw
+                            size={11}
+                            className={detecting ? "animate-spin" : ""}
+                          />
+                          which
+                        </Button>
+                      </InputGroup.Prefix>
+                      <InputGroup.Input
+                        placeholder={hit ?? `which ${p.kind}`}
+                        className="p-2 font-mono text-[12px]"
+                      />
+                    </InputGroup>
+                  </TextField>
+                </div>
+                {!hit && !(p.bin ?? "").trim() ? (
+                  <div className="type-meta mt-1.5 text-warning">
+                    未找到 {p.kind}
+                  </div>
+                ) : hit && (p.bin ?? "").trim() !== hit ? (
+                  <div className="type-meta mt-1.5 truncate">
+                    which → {shortBin(hit)}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      </SectionCard>
+      </Reveal>
+
+
+      {config.agent_trusted_dirs.length > 0 ? (
+        <Reveal index={2}>
+        <SectionCard className="flex flex-col gap-2" title="Codex 信任目录">
+          {config.agent_trusted_dirs.map((dir) => (
+            <div
+              key={dir}
+              className="flex items-center justify-between gap-2 rounded-lg border border-border bg-default/25 px-3 py-2"
+            >
+              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">
+                {dir}
+              </span>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                className="h-auto min-h-0 rounded-md p-1 text-muted shadow-none hover:bg-default/50 hover:text-danger data-[hovered=true]:bg-default/50 data-[hovered=true]:text-danger"
+                aria-label={`移除信任目录 ${dir}`}
+                onPress={() =>
+                  updateConfig(
+                    "agent_trusted_dirs",
+                    config.agent_trusted_dirs.filter((d) => d !== dir),
+                  )
+                }
+              >
+                <Trash2 size={12} aria-hidden />
+              </Button>
+            </div>
+          ))}
+        </SectionCard>
+        </Reveal>
+      ) : null}
+
+      <Reveal index={2}>
+      <SectionCard>
+        <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
+          <Save size={16} />
+          保存
+        </Button>
+      </SectionCard>
+      </Reveal>
+    </div>
   );
 }
 

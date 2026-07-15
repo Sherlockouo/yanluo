@@ -17,7 +17,11 @@ import { AgentPage } from "@/views/agent-page";
 import { AgentJobPage } from "@/views/agent-job-page";
 import { SettingsPage } from "@/views/settings-page";
 
-function resolveFloatingKind(): "hud" | "lang" | "agent-menu" | null {
+function resolveFloatingKind():
+  | "hud"
+  | "lang"
+  | "agent-menu"
+  | null {
   if (typeof window === "undefined") return null;
   const w = window as Window & {
     __ASR_FLOATING__?: boolean;

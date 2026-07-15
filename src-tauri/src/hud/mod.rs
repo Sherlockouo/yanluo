@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -372,7 +372,7 @@ pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     configure_floating_hud_panel(&window, FLOATING_HUD_CORNER_RADIUS);
 
-    // Persist user-dragged position across sessions; keep lang chip glued on.
+    // Persist user-dragged position across sessions; keep lang chip + agent menu glued on.
     let win_for_move = window.clone();
     let app_for_move = app.clone();
     window.on_window_event(move |event| {
@@ -384,6 +384,12 @@ pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
                 .unwrap_or(false);
             if show_lang {
                 position_floating_lang_chip(&app_for_move);
+            }
+            if floating_agent_menu_is_open() {
+                position_floating_agent_menu(
+                    &app_for_move,
+                    agent_picker_item_count(),
+                );
             }
         }
     });
@@ -723,12 +729,25 @@ pub(crate) fn set_floating_theme(theme: String, app: AppHandle) {
 // —— Agent picker menu (separate window above HUD, like floating-lang) ——
 
 pub(crate) const FLOATING_AGENT_MENU_W: f64 = 200.0;
-pub(crate) const FLOATING_AGENT_MENU_ROW: f64 = 30.0;
-pub(crate) const FLOATING_AGENT_MENU_PAD: f64 = 10.0;
+pub(crate) const FLOATING_AGENT_MENU_ROW: f64 = 32.0;
+pub(crate) const FLOATING_AGENT_MENU_PAD: f64 = 8.0;
+/// Room around panel so radius + CSS shadow aren't clipped (dark fringe).
+pub(crate) const FLOATING_AGENT_MENU_INSET: f64 = 12.0;
 
 fn agent_picker_mode_slot() -> &'static Mutex<String> {
     static MODE: std::sync::OnceLock<Mutex<String>> = std::sync::OnceLock::new();
     MODE.get_or_init(|| Mutex::new(String::new()))
+}
+
+fn agent_picker_item_count_slot() -> &'static AtomicUsize {
+    static COUNT: AtomicUsize = AtomicUsize::new(1);
+    &COUNT
+}
+
+fn agent_picker_item_count() -> usize {
+    agent_picker_item_count_slot()
+        .load(Ordering::Acquire)
+        .max(1)
 }
 
 pub(crate) fn agent_picker_mode() -> String {
@@ -753,7 +772,7 @@ fn create_floating_agent_menu_window(app: &AppHandle) -> Result<(), String> {
         WebviewUrl::App("index.html".into()),
     )
     .title("ASR Agent Menu")
-    .inner_size(FLOATING_AGENT_MENU_W, FLOATING_AGENT_MENU_ROW + FLOATING_AGENT_MENU_PAD)
+    .inner_size(agent_menu_width(), agent_menu_height(1))
     .position(x, y - 40.0)
     .decorations(false)
     .transparent(true)
@@ -791,7 +810,8 @@ fn create_floating_agent_menu_window(app: &AppHandle) -> Result<(), String> {
             unsafe {
                 let ns_window = &*(ns_ptr as *const NSWindow);
                 ns_window.setMovableByWindowBackground(false);
-                ns_window.setHasShadow(true);
+                // CSS shadow only — native shadow + radius on clear window = dark fringe.
+                ns_window.setHasShadow(false);
             }
         }
         let _ = window.hide();
@@ -803,7 +823,13 @@ fn create_floating_agent_menu_window(app: &AppHandle) -> Result<(), String> {
 
 fn agent_menu_height(item_count: usize) -> f64 {
     let n = item_count.max(1) as f64;
-    FLOATING_AGENT_MENU_PAD + n * FLOATING_AGENT_MENU_ROW + 4.0
+    FLOATING_AGENT_MENU_INSET * 2.0
+        + FLOATING_AGENT_MENU_PAD
+        + n * FLOATING_AGENT_MENU_ROW
+}
+
+fn agent_menu_width() -> f64 {
+    FLOATING_AGENT_MENU_W + FLOATING_AGENT_MENU_INSET * 2.0
 }
 
 fn position_floating_agent_menu(app: &AppHandle, item_count: usize) {
@@ -822,11 +848,11 @@ fn position_floating_agent_menu(app: &AppHandle, item_count: usize) {
     };
     let mode = agent_picker_mode();
     let h = agent_menu_height(item_count);
-    let w = FLOATING_AGENT_MENU_W;
-    // Above HUD top-left; cwd menu slightly inset.
-    let x_off = if mode == "cwd" { 110.0 } else { 10.0 };
-    let x = pos.x as f64 / scale + x_off;
-    let y = pos.y as f64 / scale - h - 6.0;
+    let w = agent_menu_width();
+    // Above HUD top-left; cwd menu slightly inset. Gap clears shadow bleed.
+    let x_off = if mode == "cwd" { 110.0 } else { 8.0 };
+    let x = pos.x as f64 / scale + x_off - FLOATING_AGENT_MENU_INSET;
+    let y = pos.y as f64 / scale - h - 4.0;
     let _ = menu.set_size(tauri::LogicalSize::new(w, h));
     let _ = menu.set_position(tauri::LogicalPosition::new(x, y.max(8.0)));
     let _ = menu.set_always_on_top(true);
@@ -854,6 +880,7 @@ fn apply_agent_picker_open(app: &AppHandle, mode: &str, item_count: usize) {
     if let Ok(mut slot) = agent_picker_mode_slot().lock() {
         *slot = mode.to_string();
     }
+    agent_picker_item_count_slot().store(item_count.max(1), Ordering::Release);
     position_floating_agent_menu(app, item_count);
     // Raise without set_focus — focus steal caused double-click-to-toggle.
     #[cfg(target_os = "macos")]
@@ -886,6 +913,7 @@ pub(crate) fn resize_floating_agent_menu(
     if agent_picker_mode().is_empty() {
         return Ok(());
     }
+    agent_picker_item_count_slot().store(count, Ordering::Release);
     let app_clone = app.clone();
     app_clone
         .run_on_main_thread(move || {
@@ -924,4 +952,29 @@ pub(crate) fn close_floating_agent_menu(app: &AppHandle) {
     let _ = app.clone().run_on_main_thread(move || {
         apply_agent_picker_open(&app, "", 1);
     });
+}
+
+/// After native file dialog (or ESC cancel), AppKit / React Aria can leave the
+/// floating HUD unable to receive clicks/keys. Re-assert keyable + order front.
+#[tauri::command]
+pub(crate) fn restore_floating_interaction(app: AppHandle) -> Result<(), String> {
+    let (visible, state, intention) = floating_status_slot(&app)
+        .lock()
+        .map(|s| (s.visible, s.state.clone(), s.intention.clone()))
+        .unwrap_or((false, String::new(), None));
+    if !visible {
+        return Ok(());
+    }
+    let keyable = state == "editing" || intention.as_deref() == Some("agent");
+    crate::platform::set_floating_hud_keyable(&app, keyable);
+    let app2 = app.clone();
+    let _ = app2.clone().run_on_main_thread(move || {
+        if let Some(window) = app2.get_webview_window("floating") {
+            let _ = window.set_always_on_top(true);
+            #[cfg(target_os = "macos")]
+            crate::platform::raise_floating_hud_level(&window, true);
+            let _ = window.set_focus();
+        }
+    });
+    Ok(())
 }

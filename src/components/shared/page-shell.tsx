@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
+import { Button } from "@heroui/react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
@@ -156,13 +157,15 @@ export function CollapseTrigger({
   trailing?: ReactNode;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       className={cn(
-        "flex w-full items-center gap-2 rounded-xl px-1 py-2 text-left transition hover:bg-default/60",
+        "h-auto min-h-0 w-full items-center justify-start gap-2 rounded-xl px-1 py-2 text-left font-normal shadow-none",
+        "hover:bg-default/60 data-[hovered=true]:bg-default/60",
+        "data-[pressed=true]:scale-100",
         className,
       )}
-      onClick={onToggle}
+      onPress={onToggle}
       aria-expanded={open}
     >
       <span className="type-ui min-w-0 flex-1">{children}</span>
@@ -174,7 +177,7 @@ export function CollapseTrigger({
       >
         <ChevronDown size={16} aria-hidden />
       </motion.span>
-    </button>
+    </Button>
   );
 }
 

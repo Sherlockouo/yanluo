@@ -713,30 +713,32 @@ function UploadPhase({
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
       <div className="flex gap-1 rounded-xl border border-border p-1 self-start">
-        <button
-          type="button"
+        <Button
+          size="sm"
+          variant="ghost"
           className={cn(
-            "rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition",
+            "h-auto min-h-0 rounded-lg px-3.5 py-1.5 text-[13px] font-medium shadow-none data-[pressed=true]:scale-100",
             source === "file"
-              ? "bg-default text-foreground"
-              : "text-muted hover:text-foreground",
+              ? "bg-default text-foreground data-[hovered=true]:bg-default"
+              : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
           )}
-          onClick={() => setSource("file")}
+          onPress={() => setSource("file")}
         >
           文件
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
           className={cn(
-            "rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition",
+            "h-auto min-h-0 rounded-lg px-3.5 py-1.5 text-[13px] font-medium shadow-none data-[pressed=true]:scale-100",
             source === "link"
-              ? "bg-default text-foreground"
-              : "text-muted hover:text-foreground",
+              ? "bg-default text-foreground data-[hovered=true]:bg-default"
+              : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
           )}
-          onClick={() => setSource("link")}
+          onPress={() => setSource("link")}
         >
           链接
-        </button>
+        </Button>
       </div>
 
       <ModeSwitch modeKey={source}>
@@ -748,14 +750,15 @@ function UploadPhase({
               </div>
             ) : null}
 
-            <button
-              type="button"
-              onClick={onPick}
+            <Button
+              variant="ghost"
+              aria-label={selectedPath ? "更换文件" : "选择文件"}
+              onPress={onPick}
               className={cn(
-                "flex min-h-[180px] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-8 text-center transition",
+                "flex h-auto min-h-[180px] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-8 text-center font-normal shadow-none data-[pressed=true]:scale-100",
                 dragOver
-                  ? "border-accent/50 bg-accent/10"
-                  : "border-border bg-surface-secondary/40 hover:border-foreground/25 hover:bg-surface-secondary/60",
+                  ? "border-accent/50 bg-accent/10 data-[hovered=true]:bg-accent/10"
+                  : "border-border bg-surface-secondary/40 hover:border-foreground/25 hover:bg-surface-secondary/60 data-[hovered=true]:border-foreground/25 data-[hovered=true]:bg-surface-secondary/60",
               )}
             >
               {selectedPath ? (
@@ -773,10 +776,10 @@ function UploadPhase({
                       aria-hidden
                     />
                   )}
-                  <div className="max-w-full truncate text-sm font-medium text-foreground">
+                  <span className="max-w-full truncate text-sm font-medium text-foreground">
                     {fileName(selectedPath)}
-                  </div>
-                  <p className="text-[12px] text-muted">点击更换</p>
+                  </span>
+                  <span className="text-[12px] text-muted">点击更换</span>
                 </>
               ) : (
                 <>
@@ -785,15 +788,15 @@ function UploadPhase({
                     size={28}
                     aria-hidden
                   />
-                  <div className="text-sm font-medium text-foreground">
+                  <span className="text-sm font-medium text-foreground">
                     {dragOver ? "松开以添加" : "拖拽或点击选择"}
-                  </div>
-                  <p className="max-w-md text-[12px] text-muted">
+                  </span>
+                  <span className="max-w-md text-[12px] text-muted">
                     {TRANSCRIBE_FORMAT_HINT}
-                  </p>
+                  </span>
                 </>
               )}
-            </button>
+            </Button>
 
             <Button
               fullWidth
@@ -814,30 +817,32 @@ function UploadPhase({
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-[12px] text-muted">{provider}</p>
               <div className="flex shrink-0 gap-1 rounded-xl border border-border p-1">
-                <button
-                  type="button"
+                <Button
+                  size="sm"
+                  variant="ghost"
                   className={cn(
-                    "rounded-lg px-3 py-1.5 text-[12px] font-medium transition",
+                    "h-auto min-h-0 rounded-lg px-3 py-1.5 text-[12px] font-medium shadow-none data-[pressed=true]:scale-100",
                     urlMode === "audio"
-                      ? "bg-default text-foreground"
-                      : "text-muted hover:text-foreground",
+                      ? "bg-default text-foreground data-[hovered=true]:bg-default"
+                      : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
                   )}
-                  onClick={() => onUrlModeChange("audio")}
+                  onPress={() => onUrlModeChange("audio")}
                 >
                   音频
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
                   className={cn(
-                    "rounded-lg px-3 py-1.5 text-[12px] font-medium transition",
+                    "h-auto min-h-0 rounded-lg px-3 py-1.5 text-[12px] font-medium shadow-none data-[pressed=true]:scale-100",
                     urlMode === "video"
-                      ? "bg-default text-foreground"
-                      : "text-muted hover:text-foreground",
+                      ? "bg-default text-foreground data-[hovered=true]:bg-default"
+                      : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
                   )}
-                  onClick={() => onUrlModeChange("video")}
+                  onPress={() => onUrlModeChange("video")}
                 >
                   视频
-                </button>
+                </Button>
               </div>
             </div>
 
@@ -1130,37 +1135,38 @@ const HistoryRow = memo(function HistoryRow({
           : "border-border bg-surface-secondary/30 hover:bg-surface-secondary/60"
         }`}
     >
-      <div
-        onClick={onSelect}
-        className="min-w-0 flex-1 text-left cursor-pointer"
-      >
-        <div className="flex items-center justify-between gap-2 text-[11px] text-muted">
-          <span className="inline-flex items-center gap-2">
-            <span>{new Date(entry.created_at).toLocaleString()}</span>
-            <div className=" inline-flex items-center gap-1 text-foreground/80">
-              {isVideo ? (
-                <FileVideo size={11} aria-hidden />
-              ) : (
-                <FileAudio size={11} aria-hidden />
-               )}
-              {isVideo ? "视频" : "音频"}
-            </div>
-          </span>
-          <span>{entry.duration_seconds.toFixed(1)}s</span>
-        </div>
-        <p className="mt-1 line-clamp-2 text-sm leading-snug text-foreground">
-          {preview}
-        </p>
-      </div>
       <Button
-        type="button"
         variant="ghost"
-        className="mt-0.5 shrink-0 rounded-lg p-1.5 text-muted transition hover:bg-danger/10 hover:text-danger"
+        onPress={onSelect}
+        className="h-auto min-h-0 min-w-0 flex-1 items-start justify-start rounded-none bg-transparent px-0 py-0 text-left font-normal shadow-none hover:bg-transparent data-[hovered=true]:bg-transparent data-[pressed=true]:scale-100 data-[pressed=true]:bg-transparent"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2 text-[11px] text-muted">
+            <span className="inline-flex items-center gap-2">
+              <span>{new Date(entry.created_at).toLocaleString()}</span>
+              <span className="inline-flex items-center gap-1 text-foreground/80">
+                {isVideo ? (
+                  <FileVideo size={11} aria-hidden />
+                ) : (
+                  <FileAudio size={11} aria-hidden />
+                )}
+                {isVideo ? "视频" : "音频"}
+              </span>
+            </span>
+            <span>{entry.duration_seconds.toFixed(1)}s</span>
+          </div>
+          <p className="mt-1 line-clamp-2 text-sm leading-snug text-foreground">
+            {preview}
+          </p>
+        </div>
+      </Button>
+      <Button
+        isIconOnly
+        size="sm"
+        variant="ghost"
+        className="mt-0.5 shrink-0 text-muted hover:bg-danger/10 hover:text-danger data-[hovered=true]:bg-danger/10 data-[hovered=true]:text-danger"
         aria-label="删除"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
+        onPress={onDelete}
       >
         <Trash2 size={14} aria-hidden />
       </Button>

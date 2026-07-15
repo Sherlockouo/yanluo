@@ -3,6 +3,7 @@ import type {
   AppConfig,
   AsrProvider,
   HotkeyBinding,
+  LlmCredential,
   LlmProvider,
   Page,
   RecState,
@@ -109,6 +110,72 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
   },
 ];
 
+/** Preset for a provider, falling back to the "custom" entry. */
+export function llmPreset(provider: LlmProvider): LlmProviderPreset {
+  return (
+    LLM_PROVIDER_PRESETS.find((p) => p.id === provider) ??
+    LLM_PROVIDER_PRESETS[LLM_PROVIDER_PRESETS.length - 1]
+  );
+}
+
+/**
+ * Resolve stored credentials for a provider, backfilling base URL / model from
+ * the preset so a freshly picked provider is usable without extra typing.
+ */
+export function resolveLlmCreds(
+  config: Pick<AppConfig, "llm_credentials">,
+  provider: LlmProvider,
+): LlmCredential {
+  const preset = llmPreset(provider);
+  const stored = config.llm_credentials?.[provider];
+  return {
+    api_base_url: stored?.api_base_url?.trim()
+      ? stored.api_base_url
+      : preset.baseUrl,
+    api_key: stored?.api_key ?? "",
+    model: stored?.model?.trim() ? stored.model : (preset.models[0] ?? ""),
+  };
+}
+
+/**
+ * Fields to write when activating a provider: mirror its stored creds into the
+ * flat llm_* fields (which the backend reads) plus llm_provider.
+ */
+export function activateLlmProviderPatch(
+  config: Pick<AppConfig, "llm_credentials">,
+  provider: LlmProvider,
+): Pick<
+  AppConfig,
+  "llm_provider" | "llm_api_base_url" | "llm_api_key" | "llm_model"
+> {
+  const creds = resolveLlmCreds(config, provider);
+  return {
+    llm_provider: provider,
+    llm_api_base_url: creds.api_base_url,
+    llm_api_key: creds.api_key,
+    llm_model: creds.model,
+  };
+}
+
+/**
+ * One-time migration: if no per-provider map exists yet, seed the active
+ * provider from the flat llm_* fields so upgrades keep working.
+ */
+export function seedLlmCredentials(
+  config: AppConfig,
+): Partial<Record<LlmProvider, LlmCredential>> {
+  const existing = config.llm_credentials ?? {};
+  if (Object.keys(existing).length > 0) return existing;
+  const provider = config.llm_provider || "openai";
+  return {
+    [provider]: {
+      api_base_url: config.llm_api_base_url ?? "",
+      api_key: config.llm_api_key ?? "",
+      model: config.llm_model ?? "",
+    },
+  };
+}
+
 export const QWEN_ASR_MODELS = [
   { id: "Qwen3-ASR-0.6B", label: "Qwen3-ASR-0.6B（推荐，约 2GB）", downloadable: true },
   { id: "Qwen3-ASR-1.7B", label: "Qwen3-ASR-1.7B（更大）", downloadable: true },
@@ -117,6 +184,7 @@ export const QWEN_ASR_MODELS = [
 export const defaultConfig: AppConfig = {
   asr_model_dir: "",
   align_model_dir: "",
+  align_enabled: true,
   asr_model_id: "Qwen3-ASR-0.6B",
   // Apple Speech is macOS-only; non-macOS remaps to elevenlabs at runtime.
   asr_provider: "apple",
@@ -159,12 +227,13 @@ export const defaultConfig: AppConfig = {
   llm_api_base_url: "https://api.openai.com/v1",
   llm_api_key: "",
   llm_model: "gpt-4o-mini",
+  llm_credentials: {},
   llm_refine_prompt: "",
   llm_translate_prompt: "",
   vocabulary: [],
 };
 
-/** CLI model aliases for agent spawn (`--model` / `-m`). */
+/** CLI model aliases — fallback until dynamic cache fills. */
 export const AGENT_MODELS: Record<AgentKind, { id: string; label: string }[]> = {
   claude: [
     { id: "sonnet", label: "Sonnet" },
@@ -174,21 +243,30 @@ export const AGENT_MODELS: Record<AgentKind, { id: string; label: string }[]> = 
   ],
   codex: [
     { id: "", label: "默认" },
-    { id: "o3", label: "o3" },
-    { id: "o4-mini", label: "o4-mini" },
-    { id: "gpt-5.1", label: "GPT-5.1" },
+    { id: "gpt-5.4", label: "GPT-5.4" },
     { id: "gpt-5.2", label: "GPT-5.2" },
+    { id: "o3", label: "o3" },
   ],
   pi: [
     { id: "", label: "默认" },
-    { id: "anthropic/claude-sonnet-4-5", label: "Sonnet 4.5" },
-    { id: "anthropic/claude-opus-4-5", label: "Opus 4.5" },
-    { id: "openai/gpt-5.2", label: "GPT-5.2" },
-    { id: "google/gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+    { id: "openai/gpt-5.4", label: "openai · gpt-5.4" },
+    { id: "anthropic/claude-sonnet-4-5", label: "anthropic · claude-sonnet-4-5" },
   ],
 };
 
-export function agentModelsFor(kind: AgentKind) {
+export type AgentModelsCache = {
+  fetched_at: number;
+  claude: { id: string; label: string }[];
+  codex: { id: string; label: string }[];
+  pi: { id: string; label: string }[];
+};
+
+export function agentModelsFor(
+  kind: AgentKind,
+  cache?: AgentModelsCache | null,
+) {
+  const list = cache?.[kind];
+  if (list && list.length > 0) return list;
   return AGENT_MODELS[kind] ?? AGENT_MODELS.claude;
 }
 

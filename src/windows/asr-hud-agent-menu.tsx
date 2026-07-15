@@ -2,10 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Plus } from "lucide-react";
+import { ListBox } from "@heroui/react";
+import { FolderOpen, Plus } from "lucide-react";
 import type { AgentKind, AgentProfile, AppConfig } from "@/types";
 import { defaultConfig } from "@/lib/constants";
-import { cn } from "@/lib/cn";
 
 function applyHudTheme(theme: "light" | "dark") {
   const root = document.documentElement;
@@ -28,7 +28,7 @@ function normalizeProfiles(list: AgentProfile[] | undefined): AgentProfile[] {
 }
 
 /**
- * Outside-HUD picker window. Solid CSS panel (no vibrancy).
+ * Outside-HUD picker window. HeroUI ListBox — single selection only.
  * Mode via agent-picker event + get_agent_picker — never set_focus from Rust.
  */
 export function AsrHudAgentMenu() {
@@ -39,7 +39,6 @@ export function AsrHudAgentMenu() {
   const [profileId, setProfileId] = useState(defaultConfig.agent_profile_id);
   const [cwd, setCwd] = useState("");
   const [cwdHistory, setCwdHistory] = useState<string[]>([]);
-  const [hi, setHi] = useState(0);
 
   const applyCfg = useCallback((cfg: AppConfig) => {
     setProfiles(normalizeProfiles(cfg.agent_profiles));
@@ -58,7 +57,6 @@ export function AsrHudAgentMenu() {
     (raw: string) => {
       if (raw === "agent" || raw === "cwd") {
         setMode(raw);
-        setHi(0);
         loadCfg();
       } else {
         setMode("");
@@ -111,7 +109,6 @@ export function AsrHudAgentMenu() {
       }),
     );
 
-    // Poll briefly after mount — catches raise-before-listen race.
     const t0 = window.setTimeout(() => {
       void invoke<string>("get_agent_picker").then(applyMode).catch(() => {});
     }, 80);
@@ -142,7 +139,6 @@ export function AsrHudAgentMenu() {
         ? Math.max(1 + cwdOptions.length, 1)
         : 0;
 
-  // Resize only — never re-open via set_agent_picker (focus/loop bugs).
   useEffect(() => {
     if (!mode || itemCount < 1) return;
     void invoke("resize_floating_agent_menu", {
@@ -156,7 +152,9 @@ export function AsrHudAgentMenu() {
   }, []);
 
   const pickProfile = useCallback(
-    (p: AgentProfile) => {
+    (id: string) => {
+      const p = agentItems.find((x) => x.id === id);
+      if (!p) return;
       const kind = (
         p.kind === "codex" || p.kind === "pi" || p.kind === "claude"
           ? p.kind
@@ -169,7 +167,7 @@ export function AsrHudAgentMenu() {
       }).catch(() => {});
       close();
     },
-    [close],
+    [agentItems, close],
   );
 
   const pickCwd = useCallback(
@@ -193,43 +191,17 @@ export function AsrHudAgentMenu() {
     pickCwd(path);
   }, [cwd, pickCwd]);
 
-  const pickIndex = useCallback(
-    (idx: number) => {
-      if (mode === "agent") {
-        const p = agentItems[idx];
-        if (p) pickProfile(p);
-      } else if (mode === "cwd") {
-        if (idx === 0) void addCwd();
-        else {
-          const path = cwdOptions[idx - 1];
-          if (path) pickCwd(path);
-        }
-      }
-    },
-    [mode, agentItems, cwdOptions, pickProfile, pickCwd, addCwd],
-  );
-
   useEffect(() => {
     if (!mode) return;
     const onKey = (e: KeyboardEvent) => {
-      const n = Math.max(itemCount, 1);
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setHi((i) => (i + 1) % n);
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setHi((i) => (i - 1 + n) % n);
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        pickIndex(hi);
-      } else if (e.key === "Escape") {
+      if (e.key === "Escape") {
         e.preventDefault();
         close();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mode, itemCount, hi, pickIndex, close]);
+  }, [mode, close]);
 
   if (!mode) {
     return <div className="hud-agent-menu-root is-empty" />;
@@ -237,56 +209,67 @@ export function AsrHudAgentMenu() {
 
   return (
     <div className="hud-agent-menu-root" data-no-drag>
-      <div className="hud-agent-menu-ext" role="listbox">
-        {mode === "agent"
-          ? agentItems.map((p, i) => (
-              <button
+      <div className="hud-agent-menu-ext">
+        {mode === "agent" ? (
+          <ListBox
+            aria-label="选择 Agent"
+            selectionMode="single"
+            selectedKeys={new Set([profileId])}
+            onSelectionChange={(keys) => {
+              const id = [...keys][0];
+              if (typeof id === "string") pickProfile(id);
+            }}
+            className="hud-agent-listbox w-full"
+          >
+            {agentItems.map((p) => (
+              <ListBox.Item
                 key={p.id}
-                type="button"
-                role="option"
-                aria-selected={hi === i || p.id === profileId}
-                className={cn(
-                  "hud-agent-menu-item",
-                  (hi === i || p.id === profileId) && "is-active",
-                )}
-                onMouseEnter={() => setHi(i)}
-                onClick={() => pickProfile(p)}
+                id={p.id}
+                textValue={p.name || p.id}
+                className="hud-agent-menu-item"
               >
                 {p.name || p.id}
-              </button>
-            ))
-          : null}
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+            ))}
+          </ListBox>
+        ) : null}
         {mode === "cwd" ? (
-          <>
-            <button
-              type="button"
-              role="option"
-              aria-selected={hi === 0}
-              className={cn("hud-agent-menu-item", hi === 0 && "is-active")}
-              onMouseEnter={() => setHi(0)}
-              onClick={() => void addCwd()}
+          <ListBox
+            aria-label="工作目录"
+            selectionMode="single"
+            selectedKeys={cwd ? new Set([cwd]) : new Set()}
+            onSelectionChange={(keys) => {
+              const id = [...keys][0];
+              if (id === "__add__") {
+                void addCwd();
+                return;
+              }
+              if (typeof id === "string") pickCwd(id);
+            }}
+            className="hud-agent-listbox w-full"
+          >
+            <ListBox.Item
+              id="__add__"
+              textValue="添加目录"
+              className="hud-agent-menu-item"
             >
               <Plus size={12} strokeWidth={2.4} />
-              <span>添加目录</span>
-            </button>
-            {cwdOptions.map((path, i) => (
-              <button
+              添加目录
+            </ListBox.Item>
+            {cwdOptions.map((path) => (
+              <ListBox.Item
                 key={path}
-                type="button"
-                role="option"
-                title={path}
-                aria-selected={hi === i + 1}
-                className={cn(
-                  "hud-agent-menu-item",
-                  hi === i + 1 && "is-active",
-                )}
-                onMouseEnter={() => setHi(i + 1)}
-                onClick={() => pickCwd(path)}
+                id={path}
+                textValue={cwdLabel(path)}
+                className="hud-agent-menu-item"
               >
+                <FolderOpen size={12} className="shrink-0 opacity-70" />
                 <span className="truncate">{cwdLabel(path)}</span>
-              </button>
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
             ))}
-          </>
+          </ListBox>
         ) : null}
       </div>
     </div>

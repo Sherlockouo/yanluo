@@ -1659,7 +1659,6 @@ fn is_text_ext(ext: &str) -> bool {
             | "yaml"
             | "yml"
             | "css"
-            | "html"
             | "py"
             | "go"
             | "swift"
@@ -1689,6 +1688,31 @@ fn is_image_ext(ext: &str) -> bool {
     )
 }
 
+fn is_html_ext(ext: &str) -> bool {
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "html" | "htm" | "xhtml"
+    )
+}
+
+fn is_pdf_ext(ext: &str) -> bool {
+    ext.eq_ignore_ascii_case("pdf")
+}
+
+fn is_video_ext(ext: &str) -> bool {
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "mp4" | "webm" | "mov" | "m4v" | "mkv" | "avi" | "ogv"
+    )
+}
+
+fn is_audio_ext(ext: &str) -> bool {
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "mp3" | "wav" | "m4a" | "aac" | "ogg" | "flac" | "opus" | "aiff" | "aif"
+    )
+}
+
 #[tauri::command]
 pub(crate) fn read_clipboard_attachments() -> Result<Vec<String>, String> {
     read_clipboard_attachment_paths()
@@ -1709,17 +1733,28 @@ pub(crate) fn get_path_info(path: String) -> Result<PathInfo, String> {
         .extension()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
-    let kind = if meta.is_dir() {
+    let kind: String = if meta.is_dir() {
         "dir".into()
     } else if is_image_ext(&ext) {
         "image".into()
+    } else if is_pdf_ext(&ext) {
+        "pdf".into()
+    } else if is_html_ext(&ext) {
+        "html".into()
+    } else if is_video_ext(&ext) {
+        "video".into()
+    } else if is_audio_ext(&ext) {
+        "audio".into()
     } else if is_text_ext(&ext) || ext.is_empty() && meta.len() < 512_000 {
         "text".into()
     } else {
         "file".into()
     };
     let mut preview = String::new();
-    let previewable = kind == "text" || kind == "image" || kind == "dir";
+    let previewable = matches!(
+        kind.as_str(),
+        "text" | "image" | "dir" | "pdf" | "html" | "video" | "audio"
+    );
     if kind == "text" && meta.len() < 512_000 {
         if let Ok(data) = fs::read_to_string(p) {
             preview = data.chars().take(4000).collect();
@@ -1903,8 +1938,394 @@ pub(crate) fn show_agent_hud(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub(crate) fn hide_agent_hud(app: AppHandle) -> Result<(), String> {
+    crate::hud::close_floating_agent_menu(&app);
     emit_floating_status(&app, false, "idle", "", 0.0);
     Ok(())
+}
+
+// ── Agent model catalog (disk cache + background refresh) ──────────────
+
+const AGENT_MODELS_TTL_SECS: u64 = 6 * 3600;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct AgentModelOpt {
+    pub(crate) id: String,
+    pub(crate) label: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(crate) struct AgentModelsCache {
+    /// Unix secs when last successfully refreshed.
+    #[serde(default)]
+    pub(crate) fetched_at: u64,
+    #[serde(default)]
+    pub(crate) claude: Vec<AgentModelOpt>,
+    #[serde(default)]
+    pub(crate) codex: Vec<AgentModelOpt>,
+    #[serde(default)]
+    pub(crate) pi: Vec<AgentModelOpt>,
+}
+
+fn agent_models_path() -> PathBuf {
+    app_data_dir().join("agent-models.json")
+}
+
+fn static_claude_models() -> Vec<AgentModelOpt> {
+    vec![
+        AgentModelOpt {
+            id: "sonnet".into(),
+            label: "Sonnet".into(),
+        },
+        AgentModelOpt {
+            id: "opus".into(),
+            label: "Opus".into(),
+        },
+        AgentModelOpt {
+            id: "haiku".into(),
+            label: "Haiku".into(),
+        },
+        AgentModelOpt {
+            id: "fable".into(),
+            label: "Fable".into(),
+        },
+    ]
+}
+
+fn static_codex_models() -> Vec<AgentModelOpt> {
+    vec![
+        AgentModelOpt {
+            id: String::new(),
+            label: "默认".into(),
+        },
+        AgentModelOpt {
+            id: "gpt-5.4".into(),
+            label: "GPT-5.4".into(),
+        },
+        AgentModelOpt {
+            id: "gpt-5.2".into(),
+            label: "GPT-5.2".into(),
+        },
+        AgentModelOpt {
+            id: "o3".into(),
+            label: "o3".into(),
+        },
+    ]
+}
+
+fn static_pi_models() -> Vec<AgentModelOpt> {
+    vec![
+        AgentModelOpt {
+            id: String::new(),
+            label: "默认".into(),
+        },
+        AgentModelOpt {
+            id: "openai/gpt-5.4".into(),
+            label: "openai · gpt-5.4".into(),
+        },
+        AgentModelOpt {
+            id: "anthropic/claude-sonnet-4-5".into(),
+            label: "anthropic · claude-sonnet-4-5".into(),
+        },
+    ]
+}
+
+fn fallback_models_cache() -> AgentModelsCache {
+    AgentModelsCache {
+        fetched_at: 0,
+        claude: static_claude_models(),
+        codex: static_codex_models(),
+        pi: static_pi_models(),
+    }
+}
+
+fn load_models_cache() -> AgentModelsCache {
+    let Ok(data) = fs::read_to_string(agent_models_path()) else {
+        return fallback_models_cache();
+    };
+    serde_json::from_str(&data).unwrap_or_else(|_| fallback_models_cache())
+}
+
+fn save_models_cache(cache: &AgentModelsCache) {
+    let _ = fs::create_dir_all(app_data_dir());
+    if let Ok(data) = serde_json::to_string_pretty(cache) {
+        let _ = fs::write(agent_models_path(), data);
+    }
+}
+
+fn models_cache_fresh(cache: &AgentModelsCache) -> bool {
+    if cache.fetched_at == 0 {
+        return false;
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    now.saturating_sub(cache.fetched_at) < AGENT_MODELS_TTL_SECS
+        && !cache.claude.is_empty()
+        && !cache.codex.is_empty()
+        && !cache.pi.is_empty()
+}
+
+fn parse_pi_list_models(stdout: &str) -> Vec<AgentModelOpt> {
+    let mut out = vec![AgentModelOpt {
+        id: String::new(),
+        label: "默认".into(),
+    }];
+    let mut rows: Vec<(String, String, String)> = Vec::new();
+    for line in stdout.lines().skip(1) {
+        let line = line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        // provider model context max-out thinking images  (≥6 cols; model has no spaces)
+        if parts.len() < 6 {
+            continue;
+        }
+        let thinking = parts[parts.len() - 2];
+        let images = parts[parts.len() - 1];
+        if !matches!(thinking, "yes" | "no") || !matches!(images, "yes" | "no") {
+            continue;
+        }
+        let provider = parts[0];
+        let model = parts[1];
+        if provider == "provider" || model == "model" {
+            continue;
+        }
+        let id = format!("{provider}/{model}");
+        let label = format!("{provider} · {model}");
+        rows.push((provider.to_string(), id, label));
+    }
+    let priority = |p: &str| -> u8 {
+        match p {
+            "anthropic" => 0,
+            "openai" => 1,
+            "google" => 2,
+            "merouter" => 3,
+            _ => 9,
+        }
+    };
+    rows.sort_by(|a, b| {
+        priority(&a.0)
+            .cmp(&priority(&b.0))
+            .then_with(|| a.1.cmp(&b.1))
+    });
+    for (_, id, label) in rows {
+        out.push(AgentModelOpt { id, label });
+    }
+    out
+}
+
+fn fetch_codex_models() -> Vec<AgentModelOpt> {
+    let mut out = vec![AgentModelOpt {
+        id: String::new(),
+        label: "默认".into(),
+    }];
+    let home = match std::env::var("HOME") {
+        Ok(h) => h,
+        Err(_) => return static_codex_models(),
+    };
+    let path = PathBuf::from(home).join(".codex/models_cache.json");
+    let Ok(data) = fs::read_to_string(&path) else {
+        return static_codex_models();
+    };
+    let Ok(v) = serde_json::from_str::<Value>(&data) else {
+        return static_codex_models();
+    };
+    let Some(arr) = v.get("models").and_then(|m| m.as_array()) else {
+        return static_codex_models();
+    };
+    let mut seen = std::collections::HashSet::new();
+    for m in arr {
+        let slug = m
+            .get("slug")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim();
+        if slug.is_empty() || !seen.insert(slug.to_string()) {
+            continue;
+        }
+        let label = m
+            .get("display_name")
+            .and_then(|x| x.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| slug.to_string());
+        out.push(AgentModelOpt {
+            id: slug.to_string(),
+            label,
+        });
+    }
+    if out.len() == 1 {
+        return static_codex_models();
+    }
+    out
+}
+
+fn fetch_pi_models(configured_bin: &str) -> Vec<AgentModelOpt> {
+    let bin = match resolve_agent_bin(configured_bin, "pi") {
+        Ok(p) => p,
+        Err(_) => return static_pi_models(),
+    };
+    let mut cmd = Command::new(&bin);
+    cmd.arg("--list-models")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    if let Ok(mut path_env) = std::env::var("PATH") {
+        if let Ok(home) = std::env::var("HOME") {
+            for prefix in [
+                format!("{home}/.bun/bin"),
+                format!("{home}/.local/bin"),
+                "/opt/homebrew/bin".into(),
+                "/usr/local/bin".into(),
+            ] {
+                if !path_env.split(':').any(|p| p == prefix) {
+                    path_env = format!("{prefix}:{path_env}");
+                }
+            }
+        }
+        cmd.env("PATH", path_env);
+    }
+    let Ok(out) = cmd.output() else {
+        return static_pi_models();
+    };
+    if !out.status.success() {
+        return static_pi_models();
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let parsed = parse_pi_list_models(&text);
+    if parsed.len() <= 1 {
+        return static_pi_models();
+    }
+    parsed
+}
+
+fn fetch_all_models(app: Option<&AppHandle>) -> AgentModelsCache {
+    let (claude_bin, codex_bin, pi_bin) = app
+        .and_then(|a| a.try_state::<AsrEngine>())
+        .and_then(|e| e.inner().config.lock().ok())
+        .map(|c| {
+            let profile_bin = |kind: &str| {
+                c.agent_profiles
+                    .iter()
+                    .find(|p| p.kind == kind && !p.bin.trim().is_empty())
+                    .map(|p| p.bin.trim().to_string())
+                    .unwrap_or_default()
+            };
+            (
+                {
+                    let b = profile_bin("claude");
+                    if b.is_empty() {
+                        c.agent_claude_bin.clone()
+                    } else {
+                        b
+                    }
+                },
+                {
+                    let b = profile_bin("codex");
+                    if b.is_empty() {
+                        c.agent_codex_bin.clone()
+                    } else {
+                        b
+                    }
+                },
+                {
+                    let b = profile_bin("pi");
+                    if b.is_empty() {
+                        c.agent_pi_bin.clone()
+                    } else {
+                        b
+                    }
+                },
+            )
+        })
+        .unwrap_or_default();
+    let _ = (claude_bin, codex_bin); // claude has no list CLI
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    AgentModelsCache {
+        fetched_at: now,
+        claude: static_claude_models(),
+        codex: fetch_codex_models(),
+        pi: fetch_pi_models(&pi_bin),
+    }
+}
+
+fn models_refresh_lock() -> &'static Mutex<bool> {
+    static LOCK: std::sync::OnceLock<Mutex<bool>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(false))
+}
+
+/// Kick background refresh if stale (or `force`). Returns current cache immediately.
+pub(crate) fn kick_agent_models_refresh(app: &AppHandle, force: bool) {
+    let cache = load_models_cache();
+    if !force && models_cache_fresh(&cache) {
+        return;
+    }
+    {
+        let Ok(mut busy) = models_refresh_lock().lock() else {
+            return;
+        };
+        if *busy {
+            return;
+        }
+        *busy = true;
+    }
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        let next = fetch_all_models(Some(&app2));
+        save_models_cache(&next);
+        let _ = app2.emit("agent-models-updated", &next);
+        if let Ok(mut busy) = models_refresh_lock().lock() {
+            *busy = false;
+        }
+    });
+}
+
+/// Schedule deferred background refresh after app launch (local-first: don't block UI).
+pub(crate) fn schedule_agent_models_refresh(app: &AppHandle) {
+    let app2 = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(2500));
+        kick_agent_models_refresh(&app2, false);
+    });
+}
+
+#[tauri::command]
+pub(crate) fn get_agent_models() -> AgentModelsCache {
+    let cache = load_models_cache();
+    if cache.claude.is_empty() && cache.codex.is_empty() && cache.pi.is_empty() {
+        return fallback_models_cache();
+    }
+    // Fill missing kinds from static so UI never blank.
+    let mut c = cache;
+    if c.claude.is_empty() {
+        c.claude = static_claude_models();
+    }
+    if c.codex.is_empty() {
+        c.codex = static_codex_models();
+    }
+    if c.pi.is_empty() {
+        c.pi = static_pi_models();
+    }
+    c
+}
+
+#[tauri::command]
+pub(crate) fn refresh_agent_models(app: AppHandle, force: Option<bool>) -> AgentModelsCache {
+    let force = force.unwrap_or(false);
+    if force {
+        // Sync path for explicit UI refresh — wait for CLI list.
+        let next = fetch_all_models(Some(&app));
+        save_models_cache(&next);
+        let _ = app.emit("agent-models-updated", &next);
+        return next;
+    }
+    kick_agent_models_refresh(&app, false);
+    get_agent_models()
 }
 
 #[cfg(test)]
@@ -1943,5 +2364,28 @@ mod tests {
         assert!(
             event_from_stream_line(r#"{"type":"message_update","message":{}}"#).is_none()
         );
+    }
+
+    #[test]
+    fn parse_pi_list_models_table() {
+        let sample = "\
+provider       model                                context  max-out  thinking  images
+openai         gpt-5.4                              272K     128K     yes       yes   
+huggingface    deepseek-ai/DeepSeek-R1              64K      32.8K    yes       no    
+merouter       claude-sonnet-4.6                    200K     64K      no        yes   
+";
+        let list = parse_pi_list_models(sample);
+        assert_eq!(list[0].id, "");
+        assert!(list.iter().any(|m| m.id == "openai/gpt-5.4"));
+        assert!(list
+            .iter()
+            .any(|m| m.id == "huggingface/deepseek-ai/DeepSeek-R1"));
+        // anthropic/openai/google/merouter float first — openai before huggingface
+        let oi = list.iter().position(|m| m.id.starts_with("openai/")).unwrap();
+        let hi = list
+            .iter()
+            .position(|m| m.id.starts_with("huggingface/"))
+            .unwrap();
+        assert!(oi < hi);
     }
 }

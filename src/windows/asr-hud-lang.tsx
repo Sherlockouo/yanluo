@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AnimatePresence, motion } from "framer-motion";
+import { Button } from "@heroui/react";
 import { ChevronUp } from "lucide-react";
 import type { FloatingPayload } from "@/types";
 import {
@@ -134,27 +135,33 @@ export function AsrHudLangChip() {
           {TRANSLATE_LANGUAGES.map(([code, label]) => {
             const selected = code === target;
             return (
-              <button
+              <span
                 key={code}
-                type="button"
                 role="option"
+                tabIndex={0}
                 aria-selected={selected}
                 className={cn("hud-lang-option", selected && "is-selected")}
                 onClick={() => pick(code)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    pick(code);
+                  }
+                }}
               >
                 <span className="hud-lang-option-short">
                   {hudTargetShort(code)}
                 </span>
                 <span className="hud-lang-option-label">{label}</span>
                 <span className="hud-lang-option-code">{code}</span>
-              </button>
+              </span>
             );
           })}
         </div>
       ) : null}
 
-      <button
-        type="button"
+      <Button
+        variant="ghost"
         className={cn(
           "hud-lang-chip",
           switching && "hud-target-switching",
@@ -164,8 +171,8 @@ export function AsrHudLangChip() {
         aria-label={`${translateTargetLabel(target) || short}`}
         aria-expanded={menuOpen}
         aria-haspopup="listbox"
-        disabled={busy}
-        onClick={() => {
+        isDisabled={busy}
+        onPress={() => {
           if (menuOpen) closeMenu();
           else openMenu();
         }}
@@ -187,7 +194,7 @@ export function AsrHudLangChip() {
           aria-hidden
           className={cn(menuOpen && "hud-lang-chevron-open")}
         />
-      </button>
+      </Button>
     </div>
   );
 }

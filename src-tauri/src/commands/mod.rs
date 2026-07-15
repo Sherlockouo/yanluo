@@ -23,6 +23,12 @@ pub(crate) fn open_permission_settings(kind: String) -> Result<(), String> {
     permissions::open_permission_settings(&kind)
 }
 
+/// Open local file/dir with system default handler (macOS/Windows/Linux).
+#[tauri::command]
+pub(crate) fn open_path_in_system(path: String) -> Result<(), String> {
+    crate::platform::open_path_in_system(&path)
+}
+
 #[tauri::command]
 pub(crate) fn request_permission(
     kind: String,

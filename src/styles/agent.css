@@ -192,11 +192,13 @@
   color: var(--accent-foreground);
 }
 
-.agent-composer-send.is-accent:hover:not(:disabled) {
+.agent-composer-send.is-accent:hover:not(:disabled):not([aria-disabled="true"]),
+.agent-composer-send.is-accent[data-hovered="true"]:not([aria-disabled="true"]) {
   background: var(--accent-hover);
 }
 
-.agent-composer-send.is-accent:disabled {
+.agent-composer-send.is-accent:disabled,
+.agent-composer-send.is-accent[aria-disabled="true"] {
   opacity: 0.35;
 }
 
@@ -496,42 +498,9 @@
   color: var(--foreground);
 }
 
-.agent-composer-menu {
-  position: absolute;
-  left: 8px;
-  bottom: calc(100% + 8px);
-  z-index: 20;
-  min-width: 220px;
-  padding: 4px;
-  border-radius: 12px;
-  border: 1px solid color-mix(in oklab, var(--border) 85%, transparent);
-  background: var(--surface);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.1);
-}
-
-.agent-composer-menu-label {
-  padding: 6px 10px 4px;
-  font-size: 11px;
-  color: color-mix(in oklab, var(--foreground) 55%, transparent);
-}
-
-.agent-composer-menu-item {
-  display: flex;
+.agent-composer-field {
   width: 100%;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  text-align: left;
-  font-size: 13px;
-  color: var(--foreground);
-  cursor: pointer;
-}
-
-.agent-composer-menu-item:hover {
-  background: color-mix(in oklab, var(--muted) 14%, transparent);
+  gap: 0;
 }
 
 .agent-composer-input {
@@ -542,10 +511,22 @@
   border: 0;
   resize: none;
   background: transparent;
+  box-shadow: none;
   font-size: 0.875rem;
   line-height: 1.4;
   outline: none;
   color: var(--foreground);
+  border-radius: 0;
+}
+
+.agent-composer-input:hover,
+.agent-composer-input:focus,
+.agent-composer-input[data-hovered="true"],
+.agent-composer-input[data-focused="true"],
+.agent-composer-input[data-focus-visible="true"] {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .agent-composer-bar {
@@ -559,8 +540,11 @@
   display: inline-flex;
   height: 28px;
   width: 28px;
+  min-height: 28px;
+  min-width: 28px;
   align-items: center;
   justify-content: center;
+  padding: 0;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -568,7 +552,14 @@
   cursor: pointer;
 }
 
-.agent-composer-icon:hover {
+.agent-composer-icon svg {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.agent-composer-icon:hover,
+.agent-composer-icon[data-hovered="true"] {
   background: color-mix(in oklab, var(--muted) 14%, transparent);
   color: var(--foreground);
 }
@@ -582,17 +573,30 @@
   display: inline-flex;
   height: 28px;
   width: 28px;
+  min-height: 28px;
+  min-width: 28px;
   align-items: center;
   justify-content: center;
   margin-left: auto;
+  padding: 0;
   border: 0;
   border-radius: 999px;
-  background: var(--foreground);
-  color: var(--background, #fff);
   cursor: pointer;
 }
 
-.agent-composer-send:disabled {
+.agent-composer-send:not(.button) {
+  background: var(--foreground);
+  color: var(--background, #fff);
+}
+
+.agent-composer-send svg {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+}
+
+.agent-composer-send:disabled,
+.agent-composer-send[aria-disabled="true"] {
   opacity: 0.35;
   cursor: not-allowed;
 }

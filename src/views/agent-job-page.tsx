@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Button, ListBox, Select, toast } from "@heroui/react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { Button, Dropdown, Label, ListBox, Select, TextArea, TextField, toast } from "@heroui/react";
+import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   ArrowLeft,
   AtSign,
@@ -27,6 +27,7 @@ import {
   SoftCollapse,
 } from "@/components/shared/page-shell";
 import { MarkdownBody } from "@/components/shared/markdown-body";
+import { AttachMediaBody } from "@/components/ui/attach-media-body";
 import {
   toolCallToMarkdown,
   toolResultToMarkdown,
@@ -168,11 +169,11 @@ function EventRow({
     return (
       <article className="agent-chat-row is-tool">
         <div className="agent-tool-card">
-          <button
-            type="button"
-            className="agent-tool-card-head"
+          <Button
+            variant="ghost"
+            className="agent-tool-card-head h-auto min-h-0 min-w-0 justify-start rounded-none px-0 py-0 shadow-none data-[pressed=true]:scale-100"
             aria-expanded={foldOpen}
-            onClick={() => setFoldOpen((v) => !v)}
+            onPress={() => setFoldOpen((v) => !v)}
           >
             <Wrench size={13} strokeWidth={2} className="shrink-0 opacity-50" />
             <span className="agent-tool-card-name">{toolLabel}</span>
@@ -184,7 +185,7 @@ function EventRow({
                 foldOpen && "rotate-180",
               )}
             />
-          </button>
+          </Button>
           <SoftCollapse open={foldOpen && Boolean(body)}>
             <MarkdownBody text={body} className="agent-tool-card-body" />
           </SoftCollapse>
@@ -197,11 +198,11 @@ function EventRow({
     return (
       <article className="agent-chat-row is-tool-result w-full">
         <div className="agent-tool-card w-full">
-          <button
-            type="button"
-            className="agent-tool-card-head"
+          <Button
+            variant="ghost"
+            className="agent-tool-card-head h-auto min-h-0 min-w-0 justify-start rounded-none px-0 py-0 shadow-none data-[pressed=true]:scale-100"
             aria-expanded={foldOpen}
-            onClick={() => setFoldOpen((v) => !v)}
+            onPress={() => setFoldOpen((v) => !v)}
           >
             <FileText size={13} strokeWidth={2} className="shrink-0 opacity-50" />
             <span className="agent-tool-card-name">结果</span>
@@ -213,7 +214,7 @@ function EventRow({
                 foldOpen && "rotate-180",
               )}
             />
-          </button>
+          </Button>
           <SoftCollapse open={foldOpen && Boolean(body)}>
             <MarkdownBody
               text={body}
@@ -253,10 +254,12 @@ function AttachPreview({
 }) {
   const isDir =
     "at" in item ? item.at || item.kind === "dir" : item.kind === "dir";
+  const isImage = item.kind === "image";
+
   return (
     <div className="agent-attach-preview-card">
       <div className="mb-1.5 flex items-center gap-2">
-        {item.kind === "image" ? (
+        {isImage ? (
           <ImageIcon size={12} className="opacity-60" />
         ) : isDir ? (
           <FolderOpen size={12} className="opacity-60" />
@@ -266,34 +269,33 @@ function AttachPreview({
         <span className="min-w-0 flex-1 truncate text-sm font-medium">
           {isDir ? `@${item.name}` : item.name}
         </span>
-        <button
-          type="button"
-          className="rounded p-1 text-muted hover:bg-default/50"
-          onClick={onClose}
+        <Button
+          isIconOnly
+          size="sm"
+          variant="ghost"
+          aria-label="关闭预览"
+          className="rounded p-1 text-muted"
+          onPress={onClose}
         >
           <X size={12} />
-        </button>
+        </Button>
       </div>
-      {item.kind === "image" ? (
-        <img
-          src={convertFileSrc(item.path)}
-          alt={item.name}
-          className="max-h-40 w-full rounded object-contain"
-        />
-      ) : "preview" in item && item.preview ? (
-        <div className="agent-attach-preview max-h-40 overflow-auto">
-          <MarkdownBody
-            text={
-              /\.(md|markdown|mdx)$/i.test(item.name)
-                ? item.preview
-                : toolResultToMarkdown(item.preview)
-            }
-            className="text-[11px] leading-snug"
-          />
-        </div>
-      ) : (
-        <p className="break-all type-meta">{item.path}</p>
-      )}
+      <AttachMediaBody
+        item={item}
+        density="compact"
+        renderText={(preview, name) => (
+          <div className="agent-attach-preview max-h-40 w-full overflow-auto text-left">
+            <MarkdownBody
+              text={
+                /\.(md|markdown|mdx)$/i.test(name)
+                  ? preview
+                  : toolResultToMarkdown(preview)
+              }
+              className="pointer-events-none text-[11px] leading-snug"
+            />
+          </div>
+        )}
+      />
     </div>
   );
 }
@@ -308,6 +310,7 @@ export function AgentJobPage() {
     agentJobs,
     cancelAgentJob,
     continueAgentJob,
+    agentModels,
   } = useApp();
   const job = useMemo(
     () => agentJobs.find((j) => j.id === id) ?? null,
@@ -343,7 +346,6 @@ export function AgentJobPage() {
     }
   });
   const timelineRef = useRef<HTMLDivElement>(null);
-  const composerRef = useRef<HTMLDivElement>(null);
 
   const toggleSide = () => {
     setSideOpen((v) => {
@@ -418,15 +420,6 @@ export function AgentJobPage() {
     el.scrollTop = el.scrollHeight;
   }, [events.length, job?.progress, job?.status]);
 
-  useEffect(() => {
-    if (!addMenu) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!composerRef.current?.contains(e.target as Node)) setAddMenu(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [addMenu]);
-
   const openPreview = async (path: string) => {
     setPreviewBusy(true);
     try {
@@ -462,7 +455,7 @@ export function AgentJobPage() {
 
   const addReplyAttach = async (asDir: boolean) => {
     setAddMenu(false);
-    const selected = await open(
+    const selected = await openDialog(
       asDir
         ? {
             directory: true,
@@ -513,7 +506,7 @@ export function AgentJobPage() {
   const jobKind = (job?.agent ?? activeProfile?.kind ?? "claude") as AgentKind;
   const jobProfile =
     profiles.find((p) => p.kind === jobKind) ?? activeProfile;
-  const modelOptions = agentModelsFor(jobKind);
+  const modelOptions = agentModelsFor(jobKind, agentModels);
   const currentModel = jobProfile?.model ?? "";
   const modelKey =
     modelOptions.some((m) => m.id === currentModel)
@@ -693,40 +686,47 @@ export function AgentJobPage() {
               data-continue-composer
             >
               {canContinue || canDispatchNew ? (
-                <div ref={composerRef} className="flex flex-col gap-2">
+                <div className="flex flex-col gap-2">
                   {replyAttach.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5">
                       {replyAttach.map((a) => (
-                        <button
+                        <div
                           key={a.path}
-                          type="button"
                           title={a.path}
                           className={cn(
-                            "inline-flex max-w-40 items-center gap-1 rounded-full border border-border px-2 py-1 text-[11px] transition hover:bg-default/40",
+                            "inline-flex max-w-40 items-center gap-0.5 rounded-full border border-border py-0.5 pl-1.5 pr-0.5 text-[11px] transition hover:bg-default/40",
                             preview?.path === a.path &&
                               "border-accent/40 bg-accent/10",
                           )}
-                          onClick={() => setPreview(a)}
                         >
-                          {a.at || a.kind === "dir" ? (
-                            <AtSign size={10} className="shrink-0 opacity-70" />
-                          ) : (
-                            <Paperclip
-                              size={10}
-                              className="shrink-0 opacity-70"
-                            />
-                          )}
-                          <span className="min-w-0 truncate">
-                            {a.at || a.kind === "dir"
-                              ? `@${shortName(a.name)}`
-                              : shortName(a.name)}
-                          </span>
-                          <span
-                            role="button"
-                            tabIndex={0}
-                            className="rounded p-0.5 opacity-50 hover:bg-default/50 hover:opacity-100"
-                            onClick={(e) => {
-                              e.stopPropagation();
+                          <Button
+                            variant="ghost"
+                            className="h-auto min-h-0 min-w-0 flex-1 gap-1 rounded-none bg-transparent px-0.5 py-0.5 text-[11px] font-normal shadow-none hover:bg-transparent data-[hovered=true]:bg-transparent data-[pressed=true]:scale-100"
+                            onPress={() => setPreview(a)}
+                          >
+                            {a.at || a.kind === "dir" ? (
+                              <AtSign
+                                size={10}
+                                className="shrink-0 opacity-70"
+                              />
+                            ) : (
+                              <Paperclip
+                                size={10}
+                                className="shrink-0 opacity-70"
+                              />
+                            )}
+                            <span className="min-w-0 truncate">
+                              {a.at || a.kind === "dir"
+                                ? `@${shortName(a.name)}`
+                                : shortName(a.name)}
+                            </span>
+                          </Button>
+                          <Button
+                            isIconOnly
+                            variant="ghost"
+                            aria-label="移除附件"
+                            className="h-auto min-h-0 min-w-0 rounded p-0.5 opacity-50 shadow-none hover:bg-default/50 hover:opacity-100 data-[hovered=true]:bg-default/50 data-[hovered=true]:opacity-100 data-[pressed=true]:scale-100"
+                            onPress={() => {
                               setReplyAttach((prev) =>
                                 prev.filter((x) => x.path !== a.path),
                               );
@@ -736,8 +736,8 @@ export function AgentJobPage() {
                             }}
                           >
                             <X size={10} />
-                          </span>
-                        </button>
+                          </Button>
+                        </div>
                       ))}
                     </div>
                   ) : null}
@@ -751,64 +751,80 @@ export function AgentJobPage() {
                   ) : null}
 
                   <div className="agent-composer">
-
-                    {addMenu ? (
-                      <div className="agent-composer-menu" role="menu">
-                        <div className="agent-composer-menu-label">添加</div>
-                        <button
-                          type="button"
-                          className="agent-composer-menu-item"
-                          role="menuitem"
-                          onClick={() => void addReplyAttach(false)}
-                        >
-                          <Paperclip size={14} className="opacity-60" />
-                          文件和文件夹
-                        </button>
-                        <button
-                          type="button"
-                          className="agent-composer-menu-item"
-                          role="menuitem"
-                          onClick={() => void addReplyAttach(true)}
-                        >
-                          <FolderOpen size={14} className="opacity-60" />
-                          仅文件夹
-                        </button>
-                      </div>
-                    ) : null}
-
-                    <textarea
+                    <TextField
+                      fullWidth
+                      aria-label={canContinue ? "继续对话" : "开新任务"}
                       value={reply}
-                      onChange={(e) => setReply(e.target.value)}
-                      rows={2}
-                      placeholder={
-                        canContinue ? "继续对话…" : "开新任务…"
-                      }
-                      className="agent-composer-input"
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault();
-                          void sendContinue();
+                      onChange={setReply}
+                      isDisabled={sending}
+                      className="agent-composer-field"
+                    >
+                      <TextArea
+                        rows={2}
+                        placeholder={
+                          canContinue ? "继续对话…" : "开新任务…"
                         }
-                        if (e.key === "@" && !replyAttach.length) {
-                          setAddMenu(true);
-                        }
-                        if (e.key === "Escape") setAddMenu(false);
-                      }}
-                      disabled={sending}
-                    />
+                        className="agent-composer-input"
+                        onKeyDown={(e) => {
+                          if (
+                            e.nativeEvent.isComposing ||
+                            e.keyCode === 229
+                          ) {
+                            return;
+                          }
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            void sendContinue();
+                          }
+                          if (e.key === "@" && !replyAttach.length) {
+                            setAddMenu(true);
+                          }
+                          if (e.key === "Escape") setAddMenu(false);
+                        }}
+                      />
+                    </TextField>
                     <div className="agent-composer-bar">
-                      <button
-                        type="button"
-                        title="添加"
-                        className={cn(
-                          "agent-composer-icon",
-                          addMenu && "is-open",
-                        )}
-                        onClick={() => setAddMenu((v) => !v)}
-                        disabled={sending}
+                      <Dropdown
+                        isOpen={addMenu}
+                        onOpenChange={setAddMenu}
                       >
-                        <Plus size={15} strokeWidth={2.25} />
-                      </button>
+                        <Button
+                          isIconOnly
+                          variant="ghost"
+                          aria-label="添加"
+                          className={cn(
+                            "agent-composer-icon h-7 w-7 min-h-7 min-w-7 p-0",
+                            addMenu && "is-open",
+                          )}
+                          isDisabled={sending}
+                        >
+                          <Plus size={15} strokeWidth={2.25} />
+                        </Button>
+                        <Dropdown.Popover
+                          placement="top start"
+                          className="min-w-[220px]"
+                        >
+                          <Dropdown.Menu
+                            aria-label="添加附件"
+                            onAction={(key) => {
+                              if (key === "files") void addReplyAttach(false);
+                              if (key === "dirs") void addReplyAttach(true);
+                            }}
+                          >
+                            <Dropdown.Item
+                              id="files"
+                              textValue="文件和文件夹"
+                            >
+                              <Paperclip size={14} className="opacity-60" />
+                              <Label>文件和文件夹</Label>
+                            </Dropdown.Item>
+                            <Dropdown.Item id="dirs" textValue="仅文件夹">
+                              <FolderOpen size={14} className="opacity-60" />
+                              <Label>仅文件夹</Label>
+                            </Dropdown.Item>
+                          </Dropdown.Menu>
+                        </Dropdown.Popover>
+                      </Dropdown>
 
                       <Select
                         className="inline-flex w-auto"
@@ -862,27 +878,16 @@ export function AgentJobPage() {
                         </Select.Popover>
                       </Select>
 
-                      {canContinue ? (
-                        <span className="type-meta truncate">
-                          {job.session_id
-                            ? job.session_id.slice(0, 8)
-                            : ""}
-                        </span>
-                      ) : (
-                        <span className="type-meta truncate text-accent/80">
-                          新任务
-                        </span>
-                      )}
-
-                      <button
-                        type="button"
-                        title="发送 Enter"
-                        className="agent-composer-send is-accent"
-                        disabled={!canSend}
-                        onClick={() => void sendContinue()}
+                      <Button
+                        isIconOnly
+                        variant="primary"
+                        aria-label="发送 Enter"
+                        className="agent-composer-send h-7 w-7 min-h-7 min-w-7 p-0"
+                        isDisabled={!canSend}
+                        onPress={() => void sendContinue()}
                       >
                         <Send size={13} strokeWidth={2.4} />
-                      </button>
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -902,14 +907,16 @@ export function AgentJobPage() {
             <div className="rounded-xl border border-border bg-surface px-3 py-2.5">
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-sm font-medium">文件</span>
-                <button
-                  type="button"
-                  className="rounded p-1 text-muted hover:bg-default/50 lg:hidden"
+                <Button
+                  isIconOnly
+                  size="sm"
+                  variant="ghost"
+                  className="rounded p-1 text-muted lg:hidden"
                   aria-label="收起侧栏"
-                  onClick={toggleSide}
+                  onPress={toggleSide}
                 >
                   <PanelRightClose size={14} />
-                </button>
+                </Button>
               </div>
               {paths.length === 0 ? (
                 <p className="type-meta">附件与结果路径会出现在这里</p>
@@ -920,15 +927,15 @@ export function AgentJobPage() {
                     const pending = replyAttach.some((a) => a.path === p);
                     return (
                       <li key={p}>
-                        <button
-                          type="button"
-                          title={p}
-                          disabled={previewBusy}
+                        <Button
+                          variant="ghost"
+                          aria-label={p}
+                          isDisabled={previewBusy}
                           className={cn(
-                            "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition hover:bg-default/50",
+                            "h-auto min-h-0 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-normal shadow-none hover:bg-default/50 data-[hovered=true]:bg-default/50 data-[pressed=true]:scale-100",
                             preview?.path === p && "bg-default/40",
                           )}
-                          onClick={() => {
+                          onPress={() => {
                             const local = replyAttach.find((a) => a.path === p);
                             if (local) setPreview(local);
                             else void openPreview(p);
@@ -946,7 +953,7 @@ export function AgentJobPage() {
                             />
                           )}
                           <span className="min-w-0 truncate">{name}</span>
-                        </button>
+                        </Button>
                       </li>
                     );
                   })}

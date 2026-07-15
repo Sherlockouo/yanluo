@@ -2,10 +2,7 @@ import { useMemo, useState } from "react";
 import {
   Button,
   Chip,
-  Input,
   Label,
-  ListBox,
-  Select,
   Switch,
   TextArea,
   TextField,
@@ -21,16 +18,14 @@ import {
   SoftCollapse,
 } from "@/components/shared/page-shell";
 import { hasRefineDiff, RefineDiff } from "@/components/ui/refine-diff";
+import { LlmProviderSelect } from "@/components/ui/llm-provider-select";
 import {
   QualityRateBar,
   type QualityRating,
 } from "@/components/ui/quality-rate-bar";
 import { useApp } from "@/app-context";
 import { cn } from "@/lib/cn";
-import {
-  DEFAULT_LLM_REFINE_PROMPT,
-  LLM_PROVIDER_PRESETS,
-} from "@/lib/constants";
+import { DEFAULT_LLM_REFINE_PROMPT } from "@/lib/constants";
 import type { HistoryEntry } from "@/types";
 import { acceptVocabLine } from "@/lib/learn-from-refine";
 import {
@@ -77,7 +72,6 @@ export function LlmPage() {
     abortPendingLearn,
     removePendingLearnTerm,
   } = useApp();
-  const [customModel, setCustomModel] = useState(false);
   const [distilling, setDistilling] = useState(false);
   const [editDrafts, setEditDrafts] = useState<Record<string, string>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -86,16 +80,6 @@ export function LlmPage() {
     config.llm_api_base_url?.trim() && config.llm_model?.trim(),
   );
   const [configOpen, setConfigOpen] = useState(!llmReady);
-
-  const preset = useMemo(
-    () =>
-      LLM_PROVIDER_PRESETS.find((p) => p.id === config.llm_provider) ??
-      LLM_PROVIDER_PRESETS[LLM_PROVIDER_PRESETS.length - 1],
-    [config.llm_provider],
-  );
-
-  const modelInList = preset.models.includes(config.llm_model);
-  const showCustomField = customModel || !modelInList || preset.models.length === 0;
 
   const learnEntries = useMemo(
     () => history.filter(showLearnEntry).slice(0, 40),
@@ -271,15 +255,11 @@ export function LlmPage() {
       <PageHeader
         title="LLM"
         status={
-          <>
-            {config.llm_enabled ? "纠错开" : "纠错关"}
-            {" · "}
-            {config.llm_model || "未设模型"}
-            {" · "}
-            <Link to="/settings?tab=llm" className="text-accent hover:underline">
-              设置
-            </Link>
-          </>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+            <span>{config.llm_enabled ? "纠错开" : "纠错关"}</span>
+            <span className="text-muted/40">·</span>
+            <LlmProviderSelect />
+          </div>
         }
         action={
           <Button
@@ -310,56 +290,13 @@ export function LlmPage() {
             </Switch>
           </div>
 
-          {preset.models.length > 0 ? (
-            <Select
-              className="w-full flex"
-              selectedKey={
-                showCustomField && !modelInList ? "__custom__" : config.llm_model
-              }
-              onSelectionChange={(key) => {
-                if (key == null) return;
-                const id = String(key);
-                if (id === "__custom__") {
-                  setCustomModel(true);
-                  return;
-                }
-                setCustomModel(false);
-                updateConfig("llm_model", id);
-              }}
-            >
-              <Label>Model（{preset.label}）</Label>
-              <Select.Trigger className="flex items-center justify-between p-4">
-                <Select.Value />
-                <Select.Indicator />
-              </Select.Trigger>
-              <Select.Popover>
-                <ListBox className="gap-2 p-2">
-                  {preset.models.map((m) => (
-                    <ListBox.Item key={m} id={m} textValue={m}>
-                      {m}
-                      <ListBox.ItemIndicator />
-                    </ListBox.Item>
-                  ))}
-                  <ListBox.Item id="__custom__" textValue="自定义">
-                    自定义…
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                </ListBox>
-              </Select.Popover>
-            </Select>
-          ) : null}
-
-          {showCustomField ? (
-            <TextField
-              fullWidth
-              variant="secondary"
-              value={config.llm_model}
-              onChange={(value) => updateConfig("llm_model", value)}
-            >
-              <Label>自定义 Model</Label>
-              <Input placeholder="qwen3:1.7b" />
-            </TextField>
-          ) : null}
+          <p className="type-meta">
+            Provider 与模型在标题栏选择，凭证在{" "}
+            <Link to="/settings?tab=llm" className="text-accent hover:underline">
+              设置
+            </Link>
+            {" 配置。"}
+          </p>
 
           <TextField
             fullWidth
@@ -443,18 +380,19 @@ export function LlmPage() {
             </div>
             <div className="flex flex-wrap gap-1.5">
               {pendingLearn.terms.map((c) => (
-                <button
+                <Button
                   key={c.term}
-                  type="button"
-                  title="点击移除"
-                  onClick={() => void removePendingLearnTerm(c.term)}
+                  variant="ghost"
+                  className="h-auto min-h-0 p-0 shadow-none data-[pressed=true]:scale-100"
+                  aria-label={`移除 ${c.kind === "pair" ? `${c.from} → ${c.to}` : c.term}`}
+                  onPress={() => void removePendingLearnTerm(c.term)}
                 >
                   <Chip size="sm" variant="soft" color="accent">
                     <Chip.Label className="font-mono type-micro !normal-case !tracking-normal">
                       {c.kind === "pair" ? `${c.from} → ${c.to}` : c.term}
                     </Chip.Label>
                   </Chip>
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -561,20 +499,21 @@ export function LlmPage() {
                         className="!border-0 !pt-0"
                         onRate={(next) => void setRating(entry.id, next)}
                       />
-                      <button
-                        type="button"
+                      <Button
+                        size="sm"
+                        variant="ghost"
                         className={cn(
-                          "type-meta transition-colors hover:text-foreground",
+                          "h-auto min-h-0 px-1.5 py-0.5 type-meta shadow-none transition-colors hover:text-foreground data-[hovered=true]:bg-transparent",
                           editing ? "text-accent" : "text-muted",
                         )}
-                        onClick={() =>
+                        onPress={() =>
                           setEditingId((id) =>
                             id === entry.id ? null : entry.id,
                           )
                         }
                       >
                         {editing ? "收起" : "修正"}
-                      </button>
+                      </Button>
                     </div>
 
                     <SoftCollapse open={editing}>

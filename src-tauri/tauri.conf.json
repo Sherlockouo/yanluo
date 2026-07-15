@@ -27,7 +27,11 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/**", "$HOME/Library/Application Support/ASR Workshop/**"]
+        "scope": [
+          "$APPDATA/**",
+          "$HOME/**",
+          "$HOME/Library/Application Support/ASR Workshop/**"
+        ]
       }
     }
   },

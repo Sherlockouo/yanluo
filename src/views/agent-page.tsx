@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Button,
-  Input,
   Kbd,
-  Label,
   ListBox,
   Select,
+  TextArea,
   TextField,
   toast,
 } from "@heroui/react";
@@ -16,18 +15,12 @@ import {
   ChevronDown,
   Clipboard,
   Mic,
-  Plus,
-  RefreshCw,
   Send,
+  Settings2,
   Square,
   Trash2,
 } from "lucide-react";
-import {
-  EmptyState,
-  PageHeader,
-  PageShell,
-  SoftCollapse,
-} from "@/components/shared/page-shell";
+import { EmptyState, PageHeader, PageShell } from "@/components/shared/page-shell";
 import { defaultConfig, hotkeySegments, agentModelsFor } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import type { AgentJob, AgentKind, AgentProfile } from "@/types";
@@ -67,13 +60,6 @@ function isActive(status: AgentJob["status"]) {
   return status === "queued" || status === "running";
 }
 
-function shortBin(path: string): string {
-  if (!path) return "未设置";
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length <= 3) return path;
-  return `…/${parts.slice(-3).join("/")}`;
-}
-
 function normalizeProfiles(list: AgentProfile[] | undefined): AgentProfile[] {
   return list?.length ? list : defaultConfig.agent_profiles;
 }
@@ -103,10 +89,15 @@ function AgentJobCard({
         job.status === "done" && "is-done",
       )}
     >
-      <button
-        type="button"
-        className="flex min-w-0 flex-1 items-start gap-2.5 text-left"
-        onClick={onOpen}
+      <Button
+        variant="ghost"
+        className={cn(
+          "h-auto min-h-0 min-w-0 flex-1 items-start justify-start gap-2.5 rounded-none",
+          "bg-transparent px-0 py-0 text-left font-normal shadow-none",
+          "hover:bg-transparent data-[hovered=true]:bg-transparent",
+          "data-[pressed=true]:bg-transparent data-[pressed=true]:scale-100",
+        )}
+        onPress={onOpen}
       >
         <span
           className={cn(
@@ -149,60 +140,46 @@ function AgentJobCard({
             </div>
           ) : null}
         </div>
-      </button>
+      </Button>
 
-      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
         {active ? (
-          <button
-            type="button"
-            className="rounded-md p-1.5 text-muted transition hover:bg-default/50 hover:text-foreground"
-            title="取消"
-            onClick={onCancel}
+          <Button
+            size="sm"
+            isIconOnly
+            variant="ghost"
+            className="btn-press text-muted"
+            aria-label="取消"
+            onPress={onCancel}
           >
             <Square size={12} fill="currentColor" />
-          </button>
+          </Button>
         ) : null}
         {(job.result || job.error) && !active ? (
-          <button
-            type="button"
-            className="rounded-md p-1.5 text-muted transition hover:bg-default/50 hover:text-foreground"
-            title="复制结果"
-            onClick={onCopy}
+          <Button
+            size="sm"
+            isIconOnly
+            variant="ghost"
+            className="btn-press text-muted"
+            aria-label="复制结果"
+            onPress={onCopy}
           >
             <Clipboard size={12} />
-          </button>
+          </Button>
         ) : null}
-        <button
-          type="button"
-          className="rounded-md p-1.5 text-muted transition hover:bg-default/50 hover:text-danger"
-          title="删除"
-          onClick={onDelete}
+        <Button
+          size="sm"
+          isIconOnly
+          variant="ghost"
+          className="btn-press text-muted hover:text-danger data-[hovered=true]:text-danger"
+          aria-label="删除"
+          onPress={onDelete}
         >
           <Trash2 size={12} />
-        </button>
+        </Button>
       </div>
     </div>
   );
-}
-
-type DetectedBins = {
-  claude: string | null;
-  codex: string | null;
-  pi: string | null;
-};
-
-function detectedForKind(
-  detected: DetectedBins,
-  kind: AgentKind,
-): string | null {
-  if (kind === "codex") return detected.codex;
-  if (kind === "pi") return detected.pi;
-  return detected.claude;
-}
-
-function defaultModelForKind(kind: AgentKind): string {
-  if (kind === "claude") return "sonnet";
-  return "";
 }
 
 export function AgentPage() {
@@ -214,14 +191,8 @@ export function AgentPage() {
     agentJobs,
     cancelAgentJob,
     deleteAgentJob,
+    agentModels,
   } = useApp();
-  const [configOpen, setConfigOpen] = useState(false);
-  const [detected, setDetected] = useState<DetectedBins>({
-    claude: null,
-    codex: null,
-    pi: null,
-  });
-  const [detecting, setDetecting] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -233,29 +204,11 @@ export function AgentPage() {
     profiles.find((p) => p.id === config.agent_profile_id)?.id ??
     profiles[0]?.id ??
     "claude";
-  const activeProfile =
-    profiles.find((p) => p.id === profileId) ?? profiles[0];
+  const activeProfile = profiles.find((p) => p.id === profileId) ?? profiles[0];
 
   const activeCount = agentJobs.filter((j) => isActive(j.status)).length;
   const finishedCount = agentJobs.length - activeCount;
   const canSend = Boolean(prompt.trim()) && !sending;
-
-  useEffect(() => {
-    void refreshDetect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const refreshDetect = async () => {
-    setDetecting(true);
-    try {
-      const next = await invoke<DetectedBins>("detect_agent_bins");
-      setDetected(next);
-    } catch {
-      /* ignore */
-    } finally {
-      setDetecting(false);
-    }
-  };
 
   const selectProfile = (id: string) => {
     const p = profiles.find((x) => x.id === id);
@@ -274,69 +227,19 @@ export function AgentPage() {
       p.id === profileId ? { ...p, model } : p,
     );
     updateConfig("agent_profiles", next);
-    void saveConfig(
-      { ...config, agent_profiles: next },
-      { silent: true },
-    );
-  };
-
-  const persistProfiles = (next: AgentProfile[], sel?: string) => {
-    const profileIdNext = sel ?? profileId;
-    const kind =
-      next.find((p) => p.id === profileIdNext)?.kind ?? ("claude" as AgentKind);
-    updateConfig("agent_profiles", next);
-    updateConfig("agent_profile_id", profileIdNext);
-    updateConfig("agent_kind", kind);
-    void saveConfig(
-      {
-        ...config,
-        agent_profiles: next,
-        agent_profile_id: profileIdNext,
-        agent_kind: kind,
-      },
-      { silent: true },
-    );
-  };
-
-  const addAgentProfile = () => {
-    const id = `agent-${Date.now().toString(36)}`;
-    const next: AgentProfile[] = [
-      ...profiles,
-      {
-        id,
-        name: "新 Agent",
-        kind: "claude",
-        bin: "",
-        model: "sonnet",
-      },
-    ];
-    persistProfiles(next, id);
-  };
-
-  const removeAgentProfile = (id: string) => {
-    if (profiles.length <= 1) {
-      toast.warning("至少保留一个");
-      return;
-    }
-    const next = profiles.filter((p) => p.id !== id);
-    persistProfiles(next, profileId === id ? next[0].id : profileId);
-  };
-
-  const patchProfile = (id: string, patch: Partial<AgentProfile>) => {
-    const next = profiles.map((p) => (p.id === id ? { ...p, ...patch } : p));
-    persistProfiles(next);
+    void saveConfig({ ...config, agent_profiles: next }, { silent: true });
   };
 
   const modelOptions = agentModelsFor(
     (activeProfile?.kind ?? "claude") as AgentKind,
+    agentModels,
   );
   const currentModel = activeProfile?.model ?? "";
-  const modelKey =
-    modelOptions.some((m) => m.id === currentModel)
-      ? currentModel || "__default__"
-      : currentModel
-        ? currentModel
-        : "__default__";
+  const modelKey = modelOptions.some((m) => m.id === currentModel)
+    ? currentModel || "__default__"
+    : currentModel
+      ? currentModel
+      : "__default__";
   const modelLabel =
     modelOptions.find((m) => m.id === currentModel)?.label ??
     (currentModel || "默认");
@@ -381,7 +284,7 @@ export function AgentPage() {
   };
 
   return (
-    <PageShell className="agent-list-shell max-w-2xl h-full min-h-0 gap-3 pb-0">
+    <PageShell className="agent-list-shell max-w-4xl h-full min-h-0 gap-3 pb-0">
       <PageHeader
         title="Agent"
         status={
@@ -400,182 +303,17 @@ export function AgentPage() {
           )
         }
         action={
-          <div className="flex items-center gap-1.5">
-            <Button
-              size="sm"
-              variant={configOpen ? "primary" : "ghost"}
-              onPress={() => setConfigOpen((v) => !v)}
-            >
-              配置
-            </Button>
-            <Button
-              size="sm"
-              variant="primary"
-              className="btn-press"
-              onPress={() => void invoke("show_agent_hud")}
-            >
-              <Mic size={14} />
-              召唤
-            </Button>
-
-          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            className="btn-press"
+            onPress={() => navigate("/settings?tab=agent")}
+          >
+            <Settings2 size={13} />
+            能力
+          </Button>
         }
       />
-
-      <SoftCollapse open={configOpen}>
-        <div className="surface-card mb-1 flex flex-col gap-4 p-4">
-          <div className="flex items-center justify-between gap-2">
-            <div className="type-ui">Agent 类型</div>
-            <div className="flex items-center gap-1.5">
-              <Button
-                size="sm"
-                variant="secondary"
-                isDisabled={detecting}
-                onPress={() => void refreshDetect()}
-              >
-                <RefreshCw
-                  size={13}
-                  className={detecting ? "animate-spin" : ""}
-                />
-                which
-              </Button>
-              <Button size="sm" variant="secondary" onPress={addAgentProfile}>
-                <Plus size={13} />
-                添加
-              </Button>
-            </div>
-          </div>
-          <ul className="flex flex-col gap-2">
-            {profiles.map((p) => {
-              const hit = detectedForKind(detected, p.kind);
-              return (
-                <li
-                  key={p.id}
-                  className={cn(
-                    "rounded-xl px-3 py-2.5",
-                    p.id === profileId
-                      ? "bg-accent/8 ring-1 ring-accent/25"
-                      : "bg-default/25",
-                  )}
-                >
-                  <div className="mb-2 flex items-center gap-2">
-                    <button
-                      type="button"
-                      className={cn(
-                        "rounded-md px-2 py-0.5 text-[11px] font-medium",
-                        p.id === profileId
-                          ? "bg-accent text-accent-foreground"
-                          : "bg-default/50 text-muted hover:text-foreground",
-                      )}
-                      onClick={() => selectProfile(p.id)}
-                    >
-                      {p.id === profileId ? "当前" : "选用"}
-                    </button>
-                    <button
-                      type="button"
-                      className="ml-auto rounded-md p-1 text-muted hover:bg-default/50 hover:text-danger"
-                      title="删除"
-                      onClick={() => removeAgentProfile(p.id)}
-                    >
-                      <Trash2 size={12} />
-                    </button>
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <TextField
-                      value={p.name}
-                      onChange={(v) => patchProfile(p.id, { name: v })}
-                    >
-                      <Label>名称</Label>
-                      <Input />
-                    </TextField>
-                    <Select
-                      selectedKey={p.kind}
-                      onSelectionChange={(key) => {
-                        if (
-                          key !== "claude" &&
-                          key !== "codex" &&
-                          key !== "pi"
-                        ) {
-                          return;
-                        }
-                        patchProfile(p.id, {
-                          kind: key,
-                          model: defaultModelForKind(key),
-                        });
-                      }}
-                    >
-                      <Label>CLI</Label>
-                      <Select.Trigger>
-                        <Select.Value />
-                        <Select.Indicator />
-                      </Select.Trigger>
-                      <Select.Popover>
-                        <ListBox>
-                          <ListBox.Item id="claude" textValue="Claude">
-                            Claude
-                            <ListBox.ItemIndicator />
-                          </ListBox.Item>
-                          <ListBox.Item id="codex" textValue="Codex">
-                            Codex
-                            <ListBox.ItemIndicator />
-                          </ListBox.Item>
-                          <ListBox.Item id="pi" textValue="Pi">
-                            Pi
-                            <ListBox.ItemIndicator />
-                          </ListBox.Item>
-                        </ListBox>
-                      </Select.Popover>
-                    </Select>
-                    <TextField
-                      value={p.model ?? ""}
-                      onChange={(v) => patchProfile(p.id, { model: v })}
-                    >
-                      <Label>模型</Label>
-                      <Input
-                        placeholder={
-                          p.kind === "claude"
-                            ? "sonnet"
-                            : p.kind === "pi"
-                              ? "空=默认 · provider/id"
-                              : "空=默认"
-                        }
-                      />
-                    </TextField>
-                    <TextField
-                      value={p.bin ?? ""}
-                      onChange={(v) => patchProfile(p.id, { bin: v })}
-                    >
-                      <Label>路径</Label>
-                      <Input
-                        placeholder={hit ?? `which ${p.kind}`}
-                        className="font-mono text-[12px]"
-                      />
-                    </TextField>
-                  </div>
-                  {hit ? (
-                    <div className="type-meta mt-1.5 truncate">
-                      探测 {shortBin(hit)}
-                    </div>
-                  ) : (
-                    <div className="type-meta mt-1.5 text-warning">
-                      未找到 {p.kind}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          <div className="form-actions">
-            <Button
-              size="sm"
-              variant="primary"
-              onPress={() => void saveConfig()}
-            >
-              保存
-            </Button>
-          </div>
-        </div>
-      </SoftCollapse>
 
       <div className="agent-list-body min-h-0 flex-1 overflow-auto">
         {agentJobs.length === 0 ? (
@@ -601,21 +339,28 @@ export function AgentPage() {
       </div>
 
       <div className="agent-list-composer shrink-0 pt-1">
-        <div className="agent-composer">
-          <textarea
+        <div className="agent-composer p-2">
+          <TextField
+            fullWidth
+            aria-label="派给 Agent"
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={2}
-            placeholder="派给 Agent…"
-            className="agent-composer-input"
-            disabled={sending}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void dispatch();
-              }
-            }}
-          />
+            onChange={setPrompt}
+            isDisabled={sending}
+            className="agent-composer-field"
+          >
+            <TextArea
+              rows={2}
+              placeholder="派给 Agent…"
+              className="agent-composer-input"
+              onKeyDown={(e) => {
+                if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void dispatch();
+                }
+              }}
+            />
+          </TextField>
           <div className="agent-composer-bar">
             <Select
               className="inline-flex min-w-24"
@@ -640,7 +385,12 @@ export function AgentPage() {
               <Select.Popover className="min-w-36">
                 <ListBox>
                   {profiles.map((p) => (
-                    <ListBox.Item className="flex items-center justify-start gap-1" key={p.id} id={p.id} textValue={p.name}>
+                    <ListBox.Item
+                      className="flex items-center justify-start gap-1"
+                      key={p.id}
+                      id={p.id}
+                      textValue={p.name}
+                    >
                       <div>{p.name}</div>
                       <div>{p.kind}</div>
                       <ListBox.ItemIndicator />
@@ -660,9 +410,7 @@ export function AgentPage() {
               }}
             >
               <Select.Trigger className="agent-model-trigger">
-                <Select.Value>
-                  {() => <span>{modelLabel}</span>}
-                </Select.Value>
+                <Select.Value>{() => <span>{modelLabel}</span>}</Select.Value>
                 <ChevronDown size={12} className="shrink-0 opacity-50" />
               </Select.Trigger>
               <Select.Popover className="min-w-36">
@@ -679,10 +427,7 @@ export function AgentPage() {
                   ))}
                   {currentModel &&
                   !modelOptions.some((m) => m.id === currentModel) ? (
-                    <ListBox.Item
-                      id={currentModel}
-                      textValue={currentModel}
-                    >
+                    <ListBox.Item id={currentModel} textValue={currentModel}>
                       <span>{currentModel}</span>
                       <ListBox.ItemIndicator />
                     </ListBox.Item>
@@ -691,24 +436,26 @@ export function AgentPage() {
               </Select.Popover>
             </Select>
 
-            <button
-              type="button"
-              title="语音召唤"
-              className="agent-composer-icon"
-              onClick={() => void invoke("show_agent_hud")}
+            <Button
+              isIconOnly
+              variant="ghost"
+              aria-label="语音召唤"
+              className="agent-composer-icon btn-press h-7 w-7 min-h-7 min-w-7 p-0"
+              onPress={() => void invoke("show_agent_hud")}
             >
               <Mic size={14} />
-            </button>
+            </Button>
 
-            <button
-              type="button"
-              title="发送 Enter"
-              className="agent-composer-send is-accent"
-              disabled={!canSend}
-              onClick={() => void dispatch()}
+            <Button
+              isIconOnly
+              variant="primary"
+              aria-label="发送 Enter"
+              className="agent-composer-send btn-press h-7 w-7 min-h-7 min-w-7 p-0"
+              isDisabled={!canSend}
+              onPress={() => void dispatch()}
             >
               <Send size={13} strokeWidth={2.4} />
-            </button>
+            </Button>
           </div>
         </div>
       </div>

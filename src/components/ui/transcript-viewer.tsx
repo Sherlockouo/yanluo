@@ -539,32 +539,36 @@ function TranscriptModeToggle({ className }: { className?: string }) {
         {mode === "focus" ? "专注模式 · 跟随当前一句" : "全文模式 · 可滚动阅读"}
       </p>
       <div className="flex overflow-hidden rounded-full border border-border bg-surface">
-        <button
-          type="button"
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-pressed={mode === "focus"}
           className={cn(
-            "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] transition",
+            "inline-flex h-auto min-h-0 items-center gap-1 rounded-none px-2.5 py-1 text-[11px] shadow-none data-[pressed=true]:scale-100",
             mode === "focus"
-              ? "bg-accent/15 font-medium text-accent"
-              : "text-muted hover:text-foreground",
+              ? "bg-accent/15 font-medium text-accent data-[hovered=true]:bg-accent/15"
+              : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
           )}
-          onClick={() => setMode("focus")}
+          onPress={() => setMode("focus")}
         >
           <Focus size={12} aria-hidden />
           专注
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-pressed={mode === "read"}
           className={cn(
-            "inline-flex items-center gap-1 px-2.5 py-1 text-[11px] transition",
+            "inline-flex h-auto min-h-0 items-center gap-1 rounded-none px-2.5 py-1 text-[11px] shadow-none data-[pressed=true]:scale-100",
             mode === "read"
-              ? "bg-accent/15 font-medium text-accent"
-              : "text-muted hover:text-foreground",
+              ? "bg-accent/15 font-medium text-accent data-[hovered=true]:bg-accent/15"
+              : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
           )}
-          onClick={() => setMode("read")}
+          onPress={() => setMode("read")}
         >
           <List size={12} aria-hidden />
           全文
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -675,19 +679,20 @@ function TranscriptContent({
                     mode === "focus" &&
                       isActive &&
                       "bg-accent/[0.07] px-4 py-3.5 ring-1 ring-accent/15",
-                    mode === "read" && isActive && "border-l-2 border-accent/50 pl-3",
+
                     mode === "read" && !isActive && "pl-3.5",
                     dim && isPast && "opacity-[0.38]",
                     dim && isFuture && "opacity-[0.26]",
                   )}
                 >
-                  <button
-                    type="button"
-                    className="mb-1.5 block font-mono text-[10px] tabular-nums tracking-wider text-muted/70 transition hover:text-accent"
-                    onClick={() => seekToParagraph(para)}
+                  <Button
+                    variant="ghost"
+                    aria-label={`跳转到 ${formatClock(para.startTime)}`}
+                    className="mb-1.5 h-auto min-h-0 justify-start rounded-none px-0 py-0 font-mono text-[10px] font-normal tabular-nums tracking-wider text-muted/70 shadow-none hover:text-accent data-[hovered=true]:bg-transparent data-[hovered=true]:text-accent data-[pressed=true]:scale-100 data-[pressed=true]:bg-transparent"
+                    onPress={() => seekToParagraph(para)}
                   >
                     {formatClock(para.startTime)}
-                  </button>
+                  </Button>
                   <p
                     className={cn(
                       "text-pretty break-words",
@@ -705,21 +710,28 @@ function TranscriptContent({
                       return (
                         <span key={`w-${word.segmentIndex}`}>
                           {needSpace ? " " : null}
-                          <button
-                            type="button"
+                          <span
+                            role="button"
+                            tabIndex={0}
                             data-status={status}
-                            title={`${formatClock(word.startTime)}`}
+                            aria-label={`${word.text}, ${formatClock(word.startTime)}`}
                             className={cn(
-                              "inline rounded-sm px-px transition-colors duration-100",
+                              "inline cursor-pointer rounded-sm px-px transition-colors duration-100 outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
                               status === "spoken" && "text-muted",
                               status === "current" &&
                                 "bg-accent/25 font-medium text-accent",
                               status === "unspoken" && "text-inherit",
                             )}
                             onClick={() => seekToWord(word)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                seekToWord(word);
+                              }
+                            }}
                           >
                             {word.text}
-                          </button>
+                          </span>
                         </span>
                       );
                     })}

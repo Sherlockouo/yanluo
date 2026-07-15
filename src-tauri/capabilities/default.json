@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/nicegoodcode/tauri-2.0/main/crates/tauri/permissions/schemas/cap.schema.json",
   "identifier": "default",
   "description": "Default capability for the ASR Workshop app",
-  "windows": ["main", "floating"],
+  "windows": ["main", "floating", "floating-lang", "floating-agent-menu"],
   "permissions": [
     "core:default",
     "core:event:default",

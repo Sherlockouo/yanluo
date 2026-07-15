@@ -224,6 +224,9 @@ pub(crate) struct AppConfig {
     /// Qwen3-ForcedAligner model directory (word/char timestamps).
     #[serde(default)]
     pub(crate) align_model_dir: String,
+    /// Enable ForcedAligner. Effective only when `align_model_dir` is non-empty.
+    #[serde(default = "default_align_enabled")]
+    pub(crate) align_enabled: bool,
     /// Catalog id e.g. `Qwen3-ASR-0.6B`.
     #[serde(default = "default_asr_model_id")]
     pub(crate) asr_model_id: String,
@@ -312,6 +315,11 @@ pub(crate) struct AppConfig {
     pub(crate) llm_api_base_url: String,
     pub(crate) llm_api_key: String,
     pub(crate) llm_model: String,
+    /// Per-provider credentials (provider id -> creds). The frontend resolves the
+    /// active provider into the flat `llm_api_*` fields; the backend only reads flat.
+    /// Persisted here so Rust-side saves don't drop it.
+    #[serde(default)]
+    pub(crate) llm_credentials: std::collections::HashMap<String, LlmCredential>,
     /// Empty = built-in refine prompt.
     #[serde(default)]
     pub(crate) llm_refine_prompt: String,
@@ -379,6 +387,22 @@ pub(crate) fn default_llm_provider() -> String {
     "openai".into()
 }
 
+pub(crate) fn default_align_enabled() -> bool {
+    true
+}
+
+/// Per-provider LLM credentials. Only persisted; requests read the flat `llm_api_*`.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct LlmCredential {
+    #[serde(default)]
+    pub(crate) api_base_url: String,
+    #[serde(default)]
+    pub(crate) api_key: String,
+    #[serde(default)]
+    pub(crate) model: String,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum AsrProvider {
@@ -392,6 +416,7 @@ impl Default for AppConfig {
         Self {
             asr_model_dir: String::new(),
             align_model_dir: default_align_model_dir(),
+            align_enabled: default_align_enabled(),
             asr_model_id: default_asr_model_id(),
             asr_provider: default_asr_provider(),
             elevenlabs_api_key: String::new(),
@@ -428,6 +453,7 @@ impl Default for AppConfig {
             llm_api_base_url: "https://api.openai.com/v1".into(),
             llm_api_key: String::new(),
             llm_model: "gpt-4o-mini".into(),
+            llm_credentials: std::collections::HashMap::new(),
             llm_refine_prompt: String::new(),
             llm_translate_prompt: String::new(),
             vocabulary: Vec::new(),

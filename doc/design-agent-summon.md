@@ -33,17 +33,17 @@
   - 实心 CSS 面板；`agent-picker` 事件 + `get_agent_picker` 同步。
 - Agent 态：
   - **上**：两个 pill — 左 Agent（读 `agent_profiles`）· 右工作目录（`agent_cwd_history`，首项 `+`）
-  - **中胶囊**：bars / 文本 · `@` 目录 · 📎 文件 · 停录 / 发送
-  - **下轨**：附件 chips（点预览、× 删）
+  - **中胶囊**：bars · **附件 Chip 缩略图（文字前）** · 文本 · `@` 目录 · 📎 文件 · 停录 / 发送
+  - 点 Chip → **系统默认应用打开**（`open_path_in_system`：macOS/Windows/Linux；禁止 HUD 内 Modal / 另开预览窗）
   - 默认 cwd = `{app_data}/agent`（自动创建）；历史写入 `agent_cwd_history`
 - **新 session 录音**：清空上一轮 ASR 文本（`committed`/`active`/`text`）。
 - 识别完成后 `state=editing`：用户改字再派发（不自动派发）。
 
 ## 配置
 
-- `agent_profiles[]`：`{ id, name, kind, bin, model }` — **本源**。每行自带 CLI 类型与路径；空 `bin` → `which <kind>`（全局 `agent_*_bin` 仅 fallback，UI 不展示）。
+- `agent_profiles[]`：`{ id, name, kind, bin, model }` — **本源**，只在 `/agent` 页头「配置」CRUD。空 `bin` → `which <kind>`（全局 `agent_*_bin` 仅 fallback，UI 不展示）。
 - `agent_profile_id`：当前默认；HUD pill 与派发用。
-- `kind`：`claude` | `codex` | `pi`。
+- `kind`：`claude` | `codex` | `pi`。设置页不设 Agent 配置 tab。
 
 ## 派发
 
@@ -73,6 +73,7 @@
   - **session_id**：Claude 首轮 `--session-id`；流里也可捕获。Codex 从 JSON 捕获 `session_id`/`thread_id`。Pi 从 `type:session` 捕 `id`。
   - **续聊**：底部输入 → `continue_agent_job`；无 session 时底栏可开新任务。发送钮 accent。
   - 底栏 **模型 Select** = CLI 底层模型（`claude --model` / `codex -m` / `pi --model`），**不是**切 Agent 类型。Agent 类型仍由 profile / HUD 选。
+  - **模型列表**：磁盘缓存 `agent-models.json`；启动后后台刷新（TTL 6h）；源：Claude 别名静态 · Codex `~/.codex/models_cache.json` · `pi --list-models`。配置页「模型」强制刷新；事件 `agent-models-updated`。
 
 ## 非目标
 
@@ -80,4 +81,4 @@
 - 不用 `claude --bg`。
 - 不单独第二 HUD 窗口（agent/cwd 菜单窗除外）。
 - 不另起 SQL DB；`agent-jobs.json` 即本地真相。
-- 不接 Pi 交互 TUI / RPC / 全量 `--list-models` 下拉（短预设 + 自由文本）。
+- 不接 Pi 交互 TUI / RPC。模型下拉走缓存刷新，非每次同步跑全量 list。

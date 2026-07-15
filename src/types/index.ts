@@ -76,16 +76,34 @@ export type AgentJob = {
 export type AgentPathInfo = {
   path: string;
   name: string;
-  kind: "file" | "dir" | "text" | "image" | string;
+  kind:
+    | "file"
+    | "dir"
+    | "text"
+    | "image"
+    | "pdf"
+    | "html"
+    | "video"
+    | "audio"
+    | string;
   size: number;
   ext: string;
   preview: string;
   previewable: boolean;
 };
 
+/** Per-provider LLM credentials, keyed by LlmProvider id. */
+export type LlmCredential = {
+  api_base_url: string;
+  api_key: string;
+  model: string;
+};
+
 export type AppConfig = {
   asr_model_dir: string;
   align_model_dir?: string;
+  /** Enable ForcedAligner. Effective only when align_model_dir is set. */
+  align_enabled: boolean;
   /** Catalog id e.g. Qwen3-ASR-0.6B */
   asr_model_id: string;
   asr_provider: AsrProvider;
@@ -141,6 +159,8 @@ export type AppConfig = {
   llm_api_base_url: string;
   llm_api_key: string;
   llm_model: string;
+  /** Per-provider credentials; the active provider mirrors into the flat llm_* fields. */
+  llm_credentials: Partial<Record<LlmProvider, LlmCredential>>;
   /** Empty = built-in default; `{glossary}` appended by backend for vocab. */
   llm_refine_prompt: string;
   /** Empty = built-in default; `{target}` replaced with language name. */

@@ -21,7 +21,8 @@ import type {
   RecState,
   TranscriptionResult,
 } from "@/types";
-import { defaultConfig } from "@/lib/constants";
+import { defaultConfig, seedLlmCredentials } from "@/lib/constants";
+import type { AgentModelsCache } from "@/lib/constants";
 import {
   harvestFromTriples,
 } from "@/lib/learn-cases";
@@ -40,6 +41,8 @@ type AppContextValue = {
   config: AppConfig;
   history: HistoryEntry[];
   agentJobs: AgentJob[];
+  agentModels: AgentModelsCache | null;
+  refreshAgentModels: (force?: boolean) => Promise<void>;
   state: RecState;
   modelLoaded: boolean;
   modelLoading: boolean;
@@ -104,6 +107,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [agentJobs, setAgentJobs] = useState<AgentJob[]>([]);
+  const [agentModels, setAgentModels] = useState<AgentModelsCache | null>(null);
   const [state, setState] = useState<RecState>("idle");
   const [modelLoaded, setModelLoaded] = useState(false);
   const [modelLoading, setModelLoading] = useState(false);
@@ -151,10 +155,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const next = await invoke<AppConfig>("get_app_config").catch(
       () => defaultConfig,
     );
-    setConfig({
+    const merged: AppConfig = {
       ...defaultConfig,
       ...next,
       language: next.language || "auto",
+      align_enabled: next.align_enabled ?? defaultConfig.align_enabled,
       hotkey_transcribe: next.hotkey_transcribe ?? defaultConfig.hotkey_transcribe,
       hotkey_translate: next.hotkey_translate ?? defaultConfig.hotkey_translate,
       hotkey_cancel: next.hotkey_cancel ?? defaultConfig.hotkey_cancel,
@@ -175,7 +180,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       agent_trusted_dirs:
         next.agent_trusted_dirs ?? defaultConfig.agent_trusted_dirs,
       audio_capture_mode: next.audio_capture_mode ?? defaultConfig.audio_capture_mode,
-    });
+    };
+    merged.llm_credentials = seedLlmCredentials(merged);
+    setConfig(merged);
   }, []);
 
   const loadHistory = useCallback(async () => {
@@ -186,6 +193,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loadAgentJobs = useCallback(async () => {
     const jobs = await invoke<AgentJob[]>("list_agent_jobs").catch(() => []);
     setAgentJobs(jobs);
+  }, []);
+
+  const loadAgentModels = useCallback(async () => {
+    const cache = await invoke<AgentModelsCache>("get_agent_models").catch(
+      () => null,
+    );
+    if (cache) setAgentModels(cache);
+  }, []);
+
+  const refreshAgentModels = useCallback(async (force = false) => {
+    const cache = await invoke<AgentModelsCache>("refresh_agent_models", {
+      force,
+    }).catch(() => null);
+    if (cache) setAgentModels(cache);
   }, []);
 
   const cancelAgentJob = useCallback(async (id: string) => {
@@ -239,6 +260,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const deferred = () => {
       void loadHistory();
       void loadAgentJobs();
+      void loadAgentModels();
+      void refreshAgentModels(false);
     };
     if (typeof window.requestIdleCallback === "function") {
       idleId = window.requestIdleCallback(deferred, { timeout: 1200 });
@@ -314,10 +337,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         );
       }),
       listen<AppConfig>("config-updated", (event) => {
-        setConfig({
+        const merged: AppConfig = {
           ...defaultConfig,
           ...event.payload,
           language: event.payload.language || "auto",
+          align_enabled:
+            event.payload.align_enabled ?? defaultConfig.align_enabled,
           hotkey_transcribe:
             event.payload.hotkey_transcribe ?? defaultConfig.hotkey_transcribe,
           hotkey_translate:
@@ -346,7 +371,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             event.payload.agent_trusted_dirs ?? defaultConfig.agent_trusted_dirs,
           audio_capture_mode:
             event.payload.audio_capture_mode ?? defaultConfig.audio_capture_mode,
-        });
+        };
+        merged.llm_credentials = seedLlmCredentials(merged);
+        setConfig(merged);
       }),
       listen<AgentJob>("agent-job-updated", (event) => {
         setAgentJobs((prev) => {
@@ -363,11 +390,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       listen("agent-jobs-reload", () => {
         void loadAgentJobs();
       }),
+      listen<AgentModelsCache>("agent-models-updated", (event) => {
+        setAgentModels(event.payload);
+      }),
       listen<string>("open-settings", (event) => {
         const page = event.payload;
         if (page === "llm") navigate("/llm");
         else if (page === "updates") navigate("/settings?tab=updates");
-        else if (page === "agent") navigate("/settings?tab=agent");
+        else if (page === "agent") navigate("/agent");
         else navigate("/settings");
       }),
       listen<string>("open-agent-job", (event) => {
@@ -489,7 +519,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (timeoutId != null) window.clearTimeout(timeoutId);
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [loadConfig, loadHistory, loadAgentJobs, navigate]);
+  }, [loadConfig, loadHistory, loadAgentJobs, loadAgentModels, refreshAgentModels, navigate]);
 
   const saveConfig = useCallback(
     async (next = config, opts?: { silent?: boolean }) => {
@@ -790,6 +820,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       config,
       history,
       agentJobs,
+      agentModels,
+      refreshAgentModels,
       state,
       modelLoaded,
       modelLoading,
@@ -829,6 +861,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       config,
       history,
       agentJobs,
+      agentModels,
+      refreshAgentModels,
       state,
       modelLoaded,
       modelLoading,

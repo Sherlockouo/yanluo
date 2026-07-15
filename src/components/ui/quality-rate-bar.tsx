@@ -1,3 +1,4 @@
+import { Button } from "@heroui/react";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -46,19 +47,19 @@ export function QualityRateBar({
         {OPTIONS.map((opt) => {
           const active = rating === opt.value;
           return (
-            <button
+            <Button
               key={opt.value}
-              type="button"
-              className="rate-segment-btn"
+              variant="ghost"
+              className="rate-segment-btn h-auto min-h-0 shadow-none data-[pressed=true]:scale-100"
               data-active={active ? "true" : "false"}
               data-tone={opt.tone}
               aria-pressed={active}
-              onClick={() => toggle(opt.value)}
+              onPress={() => toggle(opt.value)}
             >
               {opt.icon === "down" ? <ThumbsDown size={11} aria-hidden /> : null}
               {opt.icon === "up" ? <ThumbsUp size={11} aria-hidden /> : null}
               {opt.label}
-            </button>
+            </Button>
           );
         })}
       </div>

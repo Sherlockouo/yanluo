@@ -9,7 +9,6 @@ import {
   TextField,
 } from "@heroui/react";
 import { ChevronDown, Languages, RotateCcw, Save } from "lucide-react";
-import { Link } from "react-router-dom";
 import {
   EmptyState,
   PageHeader,
@@ -18,6 +17,7 @@ import {
   SoftCollapse,
 } from "@/components/shared/page-shell";
 import { SemanticPair } from "@/components/ui/refine-diff";
+import { LlmProviderSelect } from "@/components/ui/llm-provider-select";
 import {
   DEFAULT_LLM_TRANSLATE_PROMPT,
   TRANSLATE_LANGUAGES,
@@ -43,10 +43,6 @@ export function TranslatePage() {
   const targetLabel =
     TRANSLATE_LANGUAGES.find(([v]) => v === config.translate_target_language)?.[1] ??
     config.translate_target_language;
-
-  const llmReady = Boolean(
-    config.llm_api_base_url?.trim() && config.llm_model?.trim(),
-  );
 
   const setTargetLanguage = (code: string) => {
     updateConfig("translate_target_language", code);
@@ -106,17 +102,8 @@ export function TranslatePage() {
                 </ListBox>
               </Select.Popover>
             </Select>
-            {!llmReady ? (
-              <>
-                <span className="text-muted/40">·</span>
-                <Link
-                  to="/settings?tab=llm"
-                  className="text-accent hover:underline"
-                >
-                  配置 LLM
-                </Link>
-              </>
-            ) : null}
+            <span className="text-muted/40">·</span>
+            <LlmProviderSelect />
           </div>
         }
         action={

@@ -65,25 +65,25 @@ export function VocabularyPage() {
         <div className="flex min-h-[200px] flex-wrap content-start gap-2">
           {terms.map((term, i) => (
             <Reveal key={term} index={i}>
-              <button
-                type="button"
-                className="group"
-                onClick={() =>
+              <Button
+                variant="ghost"
+                className="group h-auto min-h-0 p-0 shadow-none data-[pressed=true]:scale-100"
+                aria-label={`删除 ${term}`}
+                onPress={() =>
                   void saveVocabulary(terms.filter((t) => t !== term))
                 }
-                title="删除"
               >
                 <Chip
                   size="sm"
                   variant="soft"
-                  className="transition group-hover:bg-danger/15 group-hover:text-danger"
+                  className="transition group-hover:bg-danger/15 group-hover:text-danger group-data-[hovered=true]:bg-danger/15 group-data-[hovered=true]:text-danger"
                 >
                   <Chip.Label className="inline-flex items-center gap-1.5 type-ui !font-normal">
                     {term}
                     <X size={11} className="opacity-50" />
                   </Chip.Label>
                 </Chip>
-              </button>
+              </Button>
             </Reveal>
           ))}
         </div>

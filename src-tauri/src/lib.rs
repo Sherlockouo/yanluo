@@ -80,7 +80,8 @@ pub fn main() {
                 agent::handle_agent_summon(&summon_handle);
             });
 
-            start_fn_event_tap(handle);
+            start_fn_event_tap(handle.clone());
+            agent::schedule_agent_models_refresh(&handle);
             Ok(())
         })
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
@@ -116,6 +117,7 @@ pub fn main() {
             hud::set_agent_picker,
             hud::get_agent_picker,
             hud::resize_floating_agent_menu,
+            hud::restore_floating_interaction,
             agent::show_agent_hud,
             agent::hide_agent_hud,
             agent::list_agent_jobs,
@@ -127,12 +129,15 @@ pub fn main() {
             agent::clear_agent_jobs,
             agent::set_agent_defaults,
             agent::detect_agent_bins,
+            agent::get_agent_models,
+            agent::refresh_agent_models,
             agent::get_path_info,
             agent::read_clipboard_attachments,
             agent::set_agent_hud_menu_open,
             hud::resize_floating_hud,
             commands::get_permission_status,
             commands::open_permission_settings,
+            commands::open_path_in_system,
             commands::request_permission,
             commands::get_app_info,
             commands::get_platform,

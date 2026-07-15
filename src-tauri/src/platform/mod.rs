@@ -273,14 +273,14 @@ pub(crate) fn configure_floating_lang_panel(window: &tauri::WebviewWindow, corne
     configure_floating_overlay_panel(window, corner_radius, false, true);
 }
 
-/// Agent/cwd picker outside HUD: NonactivatingPanel + shadow, no vibrancy
-/// (vibrancy washed out list text → looked empty).
+/// Agent/cwd picker outside HUD: NonactivatingPanel, no vibrancy, no native
+/// shadow (native shadow + clear radius = dark fringe; CSS shadow in inset pad).
 #[cfg(target_os = "macos")]
 pub(crate) fn configure_floating_agent_menu_panel(
     window: &tauri::WebviewWindow,
     corner_radius: f64,
 ) {
-    configure_floating_overlay_panel(window, corner_radius, true, false);
+    configure_floating_overlay_panel(window, corner_radius, false, false);
 }
 
 #[cfg(target_os = "macos")]
@@ -508,4 +508,38 @@ pub(crate) fn read_clipboard_attachment_paths() -> Result<Vec<String>, String> {
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn read_clipboard_attachment_paths() -> Result<Vec<String>, String> {
     Err("剪贴板附件仅支持 macOS".into())
+}
+
+/// Open a local path with the OS default app (Preview / Explorer / xdg-open).
+pub(crate) fn open_path_in_system(path: &str) -> Result<(), String> {
+    let p = std::path::Path::new(path);
+    if !p.exists() {
+        return Err(format!("不存在: {path}"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("打开失败: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", "start", "", path])
+            .spawn()
+            .map_err(|e| format!("打开失败: {e}"))?;
+        return Ok(());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(path)
+            .spawn()
+            .map_err(|e| format!("打开失败: {e}"))?;
+        return Ok(());
+    }
+    #[allow(unreachable_code)]
+    Err("当前平台不支持系统打开".into())
 }

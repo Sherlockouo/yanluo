@@ -94,13 +94,15 @@ html.light[data-floating="1"] .hud-agent {
 .hud-agent-pill {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   max-width: 9.5rem;
   min-width: 0;
+  height: 22px;
+  min-height: 22px;
   margin: 0;
-  padding: 5px 8px;
+  padding: 2px 7px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.14);
   color: inherit;
   font-size: 11px;
@@ -111,7 +113,14 @@ html.light[data-floating="1"] .hud-agent {
   app-region: no-drag;
 }
 
+.hud-agent-pill svg {
+  width: 10px;
+  height: 10px;
+  margin: 0;
+}
+
 .hud-agent-pill:hover,
+.hud-agent-pill[data-hovered="true"],
 .hud-agent-pill.is-open {
   background: rgba(255, 255, 255, 0.24);
 }
@@ -121,6 +130,7 @@ html.light[data-floating="1"] .hud-agent-pill {
 }
 
 html.light[data-floating="1"] .hud-agent-pill:hover,
+html.light[data-floating="1"] .hud-agent-pill[data-hovered="true"],
 html.light[data-floating="1"] .hud-agent-pill.is-open {
   background: rgba(0, 0, 0, 0.14);
 }
@@ -180,7 +190,10 @@ html.light[data-floating="1"] .hud-agent-menu-item.is-active {
 .hud-agent-menu-root {
   width: 100vw;
   height: 100vh;
+  padding: 12px;
+  box-sizing: border-box;
   background: transparent;
+  /* Keep overflow hidden but pad so radius/shadow aren't clipped → dark fringe */
   overflow: hidden;
   -webkit-app-region: no-drag;
   app-region: no-drag;
@@ -203,13 +216,18 @@ html.light[data-floating="1"] .hud-agent-menu-item.is-active {
   /* Solid — external window has no vibrancy; must not rely on frost */
   background: rgba(28, 28, 32, 0.98);
   color: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  /* Hairline kills clear-window anti-alias fringe; soft shadow stays inside inset */
+  box-shadow:
+    0 0 0 0.5px rgba(255, 255, 255, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.28);
 }
 
 html.light[data-floating="1"] .hud-agent-menu-ext {
   background: rgba(255, 255, 255, 0.98);
   color: rgba(16, 16, 18, 0.92);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+  box-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.1),
+    0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 html.light[data-floating="1"] .hud-agent-menu-ext .hud-agent-menu-item {
@@ -222,7 +240,7 @@ html.light[data-floating="1"] .hud-agent-menu-ext .hud-agent-menu-item {
   resize: none;
   border: 0;
   margin: 0;
-  padding: 4px 0;
+  padding: 4px 4px;
   background: transparent;
   color: inherit;
   font-size: 14px;
@@ -308,11 +326,13 @@ html.light[data-floating="1"] .hud-agent-icon-btn:hover {
   app-region: no-drag;
 }
 
-.hud-agent-send:hover:not(:disabled) {
+.hud-agent-send:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled="true"]) {
   background: rgba(255, 255, 255, 0.34);
 }
 
-.hud-agent-send:disabled {
+.hud-agent-send:disabled,
+.hud-agent-send[aria-disabled="true"],
+.hud-agent-send[data-disabled="true"] {
   opacity: 0.4;
   cursor: default;
 }
@@ -322,22 +342,46 @@ html.light[data-floating="1"] .hud-agent-send {
   color: #fff;
 }
 
-html.light[data-floating="1"] .hud-agent-send:hover:not(:disabled) {
+html.light[data-floating="1"] .hud-agent-send:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled="true"]) {
   background: rgba(0, 0, 0, 1);
 }
 
-.hud-agent-attach {
+.hud-agent-inline-attach {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 0 2px 2px;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 42%;
   overflow-x: auto;
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
 
-.hud-agent-attach::-webkit-scrollbar {
+.hud-agent-inline-attach::-webkit-scrollbar {
+  display: none;
+}
+
+.hud-agent-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.hud-agent-attach-chip {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.hud-agent-listbox {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  gap: 2px;
+}
+
+.hud-agent-attach {
   display: none;
 }
 
@@ -426,6 +470,62 @@ html.light[data-floating="1"] .hud-agent-preview {
   font-size: 11px;
   line-height: 1.45;
   opacity: 0.88;
+}
+
+.hud-agent-preview-open {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+
+.hud-agent-preview-open img {
+  display: block;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.hud-agent-preview-open-block {
+  max-height: 104px;
+  overflow: auto;
+}
+
+.hud-agent-preview-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 72px;
+  padding: 10px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+}
+
+html.light[data-floating="1"] .hud-agent-preview-fallback {
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(20, 20, 22, 0.7);
+}
+
+.hud-agent-preview-fallback:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+html.light[data-floating="1"] .hud-agent-preview-fallback:hover {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+.hud-agent-preview-fallback-label {
+  font-size: 11px;
+  opacity: 0.85;
 }
 
 .hud-inner {
@@ -567,11 +667,13 @@ html.light[data-floating="1"] .hud-agent-preview {
   transform: rotate(180deg);
 }
 
-.hud-lang-chip:hover:not(:disabled) {
+.hud-lang-chip:hover:not(:disabled):not([aria-disabled="true"]):not([data-disabled="true"]) {
   background: rgba(255, 255, 255, 0.1);
 }
 
 .hud-lang-chip:disabled,
+.hud-lang-chip[aria-disabled="true"],
+.hud-lang-chip[data-disabled="true"],
 .hud-lang-chip.is-busy {
   opacity: 0.6;
   cursor: default;

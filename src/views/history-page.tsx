@@ -72,6 +72,8 @@ export function HistoryPage() {
               <Button
                 size="sm"
                 variant="secondary"
+                aria-expanded={cleanupOpen}
+                aria-haspopup="menu"
                 onPress={() => setCleanupOpen((v) => !v)}
               >
                 <Trash2 size={14} />
@@ -79,16 +81,15 @@ export function HistoryPage() {
               </Button>
               {cleanupOpen ? (
                 <>
-                  <button
-                    type="button"
+                  <div
+                    role="presentation"
                     className="fixed inset-0 z-40 cursor-default"
-                    aria-label="关闭"
                     onClick={() => setCleanupOpen(false)}
                   />
                   <div className="absolute right-0 z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-border bg-surface py-1 shadow-xl">
                     <CleanupItem
                       label="保留最近 100 条"
-                      onClick={() =>
+                      onPress={() =>
                         void runCleanup("已保留最近 100 条", () =>
                           pruneHistory(100),
                         )
@@ -96,7 +97,7 @@ export function HistoryPage() {
                     />
                     <CleanupItem
                       label="保留最近 500 条"
-                      onClick={() =>
+                      onPress={() =>
                         void runCleanup("已保留最近 500 条", () =>
                           pruneHistory(500),
                         )
@@ -104,7 +105,7 @@ export function HistoryPage() {
                     />
                     <CleanupItem
                       label="删除 30 天前"
-                      onClick={() =>
+                      onPress={() =>
                         void runCleanup("已删除 30 天前记录", () =>
                           pruneHistoryOlderThan(30),
                         )
@@ -112,7 +113,7 @@ export function HistoryPage() {
                     />
                     <CleanupItem
                       label="删除 90 天前"
-                      onClick={() =>
+                      onPress={() =>
                         void runCleanup("已删除 90 天前记录", () =>
                           pruneHistoryOlderThan(90),
                         )
@@ -122,7 +123,7 @@ export function HistoryPage() {
                     <CleanupItem
                       label="清空全部"
                       danger
-                      onClick={() => {
+                      onPress={() => {
                         if (
                           !window.confirm(
                             `确定清空全部 ${history.length} 条记录？`,
@@ -185,24 +186,24 @@ export function HistoryPage() {
 
 function CleanupItem({
   label,
-  onClick,
+  onPress,
   danger,
 }: {
   label: string;
-  onClick: () => void;
+  onPress: () => void;
   danger?: boolean;
 }) {
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
       className={cn(
-        "flex w-full px-3.5 py-2 text-left text-[13px] transition hover:bg-default",
+        "h-auto min-h-0 w-full justify-start rounded-none px-3.5 py-2 text-left text-[13px] font-normal shadow-none data-[pressed=true]:scale-100",
         danger ? "text-danger" : "text-foreground",
       )}
-      onClick={onClick}
+      onPress={onPress}
     >
       {label}
-    </button>
+    </Button>
   );
 }
 
@@ -235,10 +236,10 @@ function HistoryRow({
           : "border-border bg-surface hover:bg-surface-secondary/40",
       )}
     >
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex min-w-0 flex-1 items-start gap-3 text-left"
+      <Button
+        variant="ghost"
+        onPress={onToggle}
+        className="h-auto min-h-0 min-w-0 flex-1 items-start justify-start gap-3 rounded-none bg-transparent px-0 py-0 text-left font-normal shadow-none hover:bg-transparent data-[hovered=true]:bg-transparent data-[pressed=true]:scale-100 data-[pressed=true]:bg-transparent"
       >
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 type-meta">
@@ -272,19 +273,17 @@ function HistoryRow({
             open && "rotate-180",
           )}
         />
-      </button>
-      <button
-        type="button"
-        className="mt-0.5 shrink-0 rounded-lg p-1.5 text-muted transition hover:bg-danger/10 hover:text-danger"
-        title="删除"
+      </Button>
+      <Button
+        isIconOnly
+        size="sm"
+        variant="ghost"
+        className="mt-0.5 shrink-0 text-muted hover:bg-danger/10 hover:text-danger data-[hovered=true]:bg-danger/10 data-[hovered=true]:text-danger"
         aria-label="删除"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
+        onPress={onDelete}
       >
         <Trash2 size={14} aria-hidden />
-      </button>
+      </Button>
     </div>
   );
 }

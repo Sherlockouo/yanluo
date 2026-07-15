@@ -1540,15 +1540,15 @@ pub(crate) fn mlx_worker(
                         model_loaded.store(true, Ordering::Release);
                         let _ = app.emit("model-loaded", &path.to_string_lossy().to_string());
 
-                        let align_dir = app
+                        let (align_dir, align_enabled) = app
                             .state::<AsrEngine>()
                             .inner()
                             .config
                             .lock()
                             .ok()
-                            .map(|c| c.align_model_dir.clone())
+                            .map(|c| (c.align_model_dir.clone(), c.align_enabled))
                             .unwrap_or_default();
-                        if !align_dir.trim().is_empty() {
+                        if align_enabled && !align_dir.trim().is_empty() {
                             let align_path = PathBuf::from(&align_dir);
                             eprintln!("[mlx-worker] Loading ForcedAligner from {:?}", align_path);
                             match qwen3_asr_rs::align::AlignInference::load(
