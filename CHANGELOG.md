@@ -2,6 +2,16 @@
 
 All notable changes to ASR Workshop are documented in this file.
 
+## [0.8.0] — 2026-07-16
+
+### Added
+- 言落 branding + design system (出稿 / 派活 / 设置)
+- Agent job flow and local-first jobs UI
+- Streaming ASR + VAD path (segment KV, RoPE grow, Silero)
+
+### Changed
+- Results-first / jobs hierarchy across ASR, translate, glossary, history
+
 ## [0.5.2] — 2026-07-11
 
 ### Fixed
