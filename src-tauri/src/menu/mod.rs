@@ -13,7 +13,7 @@ use crate::config::*;
 pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
     let pkg = app.package_info();
     let app_name = if pkg.name.trim().is_empty() {
-        "ASR Workshop".to_string()
+        "言落".to_string()
     } else {
         pkg.name.clone()
     };
@@ -138,7 +138,7 @@ pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
 pub(crate) fn install_tray(app: &AppHandle) -> Result<(), String> {
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    let show = MenuItemBuilder::with_id("tray:show", "Show ASR Workshop")
+    let show = MenuItemBuilder::with_id("tray:show", "显示言落")
         .build(app)
         .map_err(|e| e.to_string())?;
     let settings = MenuItemBuilder::with_id("tray:settings", "Settings...")
@@ -167,7 +167,7 @@ pub(crate) fn install_tray(app: &AppHandle) -> Result<(), String> {
     TrayIconBuilder::with_id("main")
         .icon(icon)
         .menu(&tray_menu)
-        .tooltip("ASR Workshop")
+        .tooltip("言落")
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             handle_menu_event(app, event.id().as_ref());

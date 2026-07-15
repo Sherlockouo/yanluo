@@ -1,4 +1,4 @@
-# Jobs 设计原则 — ASR Workshop
+# Jobs 设计原则 — 言落 (Yanluo)
 
 > 权威 UI 原则。改界面前先读；细则见本文件，会话强制约束见 `.cursor/rules/jobs-design.mdc`。
 

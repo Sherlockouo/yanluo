@@ -254,13 +254,5 @@ export type TranscriptionResult = {
   alignment?: CharacterAlignment | null;
 };
 
-export type Page =
-  | "overview"
-  | "transcribe"
-  | "translate"
-  | "asr"
-  | "llm"
-  | "vocabulary"
-  | "history"
-  | "agent"
-  | "settings";
+/** Narrow rail destinations — 出稿 / 派活 / 设置 (+ home). */
+export type Page = "overview" | "draft" | "dispatch" | "settings";

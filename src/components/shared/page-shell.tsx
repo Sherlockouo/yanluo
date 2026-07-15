@@ -33,6 +33,26 @@ export function PageHeader({
 }
 
 /**
+ * Slim secondary header for a mode panel embedded inside a parent page
+ * (e.g. 出稿 modes). No <h1> — the parent page already owns the title.
+ */
+export function PanelHeader({
+  status,
+  action,
+}: {
+  status?: ReactNode;
+  action?: ReactNode;
+}) {
+  if (!status && !action) return null;
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0 flex-1 type-meta">{status}</div>
+      {action ? <div className="shrink-0">{action}</div> : null}
+    </div>
+  );
+}
+
+/**
  * Page enter lives HERE — not around <Outlet />.
  * Enter-only: no AnimatePresence exit (Outlet is a singleton; exit hangs).
  */

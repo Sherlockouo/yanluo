@@ -286,7 +286,7 @@ export function AgentPage() {
   return (
     <PageShell className="agent-list-shell max-w-4xl h-full min-h-0 gap-3 pb-0">
       <PageHeader
-        title="Agent"
+        title="派活"
         status={
           agentJobs.length ? (
             <>
@@ -328,7 +328,7 @@ export function AgentPage() {
               <AgentJobCard
                 key={job.id}
                 job={job}
-                onOpen={() => navigate(`/agent/${job.id}`)}
+                onOpen={() => navigate(`/dispatch/${job.id}`)}
                 onCancel={() => void cancelAgentJob(job.id)}
                 onDelete={() => void removeJob(job.id)}
                 onCopy={() => void copyResult(job)}

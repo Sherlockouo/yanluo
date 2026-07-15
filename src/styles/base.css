@@ -96,15 +96,15 @@ body {
   background:
     radial-gradient(
       900px 520px at 8% -12%,
-      rgba(255, 255, 255, 0.05),
+      rgba(232, 230, 227, 0.04),
       transparent 55%
     ),
     radial-gradient(
       700px 480px at 100% 0%,
-      rgba(10, 132, 255, 0.07),
+      rgba(196, 120, 74, 0.08),
       transparent 50%
     ),
-    linear-gradient(180deg, #0a0a0a 0%, #000000 55%, #050505 100%);
+    linear-gradient(180deg, #0e0f12 0%, #0a0b0d 55%, #080909 100%);
 }
 
 .light body,
@@ -112,8 +112,8 @@ body {
   background:
     radial-gradient(
       900px 520px at 8% -12%,
-      rgba(0, 0, 0, 0.03),
+      rgba(18, 20, 26, 0.03),
       transparent 55%
     ),
-    linear-gradient(180deg, #fafafa 0%, #f5f5f7 100%);
+    linear-gradient(180deg, #f6f7f8 0%, #f3f4f6 100%);
 }

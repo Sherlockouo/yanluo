@@ -572,7 +572,7 @@ export function AgentJobPage() {
           title="任务"
           action={
             <Link
-              to="/agent"
+              to="/dispatch"
               className="text-sm text-muted hover:text-foreground"
             >
               返回列表
@@ -593,7 +593,7 @@ export function AgentJobPage() {
           size="sm"
           variant="secondary"
           className="agent-job-back"
-          onPress={() => navigate("/agent")}
+          onPress={() => navigate("/dispatch")}
         >
           <ArrowLeft size={14} />
           返回

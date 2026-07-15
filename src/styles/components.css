@@ -165,8 +165,8 @@ button.form-actions-primary,
 }
 
 .status-dot-busy {
-  background: #0a84ff;
-  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.22);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
 
@@ -202,17 +202,18 @@ button.form-actions-primary,
 .settings-tabs {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
   padding: 0.25rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 1.25rem;
   background: color-mix(in oklab, var(--surface) 80%, transparent);
 }
 
 .settings-tab {
   position: relative;
   z-index: 1;
-  flex: 1;
+  flex: 0 0 auto;
   border: 0;
   border-radius: 999px;
   padding: 0.55rem 0.75rem;

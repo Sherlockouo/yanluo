@@ -68,11 +68,15 @@ import {
   CHANGELOG,
   type ChangelogEntry,
 } from "@/lib/changelog";
+import { LlmPage } from "@/views/llm-page";
+import { VocabularyPage } from "@/views/vocabulary-page";
 
 type SettingsTab =
   | "general"
   | "asr"
   | "llm"
+  | "refine"
+  | "vocabulary"
   | "agent"
   | "hotkeys"
   | "permissions"
@@ -151,6 +155,8 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "常规" },
   { id: "asr", label: "ASR" },
   { id: "llm", label: "LLM" },
+  { id: "refine", label: "纠错学习" },
+  { id: "vocabulary", label: "词库" },
   { id: "agent", label: "Agent" },
   { id: "hotkeys", label: "快捷键" },
   { id: "permissions", label: "权限" },
@@ -232,7 +238,7 @@ export function SettingsPage() {
       <PageHeader title="设置" status="常规 · 快捷键 · 权限" />
 
       <LayoutGroup id="settings-tabs">
-        <div className="settings-tabs max-w-2xl">
+        <div className="settings-tabs max-w-3xl">
           {TABS.map((item) => {
             const active = tab === item.id;
             return (
@@ -273,6 +279,8 @@ export function SettingsPage() {
         {tab === "general" ? <GeneralPanel /> : null}
         {tab === "asr" ? <AsrProviderPanel /> : null}
         {tab === "llm" ? <LlmProviderPanel /> : null}
+        {tab === "refine" ? <LlmPage embedded /> : null}
+        {tab === "vocabulary" ? <VocabularyPage embedded /> : null}
         {tab === "agent" ? <AgentPanel /> : null}
         {tab === "hotkeys" ? <HotkeysPanel /> : null}
         {tab === "permissions" ? <PermissionsPanel /> : null}
@@ -418,8 +426,8 @@ function AsrProviderPanel() {
         </Select>
 
         <p className="text-[12px] text-muted">
-          <Link to="/asr" className="text-accent hover:underline">
-            ASR 页
+          <Link to="/draft?mode=live" className="text-accent hover:underline">
+            出稿 → 实时
           </Link>
           {" · 选择型号 / 对齐开关"}
         </p>
@@ -912,9 +920,14 @@ function LlmProviderPanel() {
       </TextField>
 
       <p className="text-[12px] text-muted">
-        在 <Link to="/llm" className="text-accent hover:underline">LLM 页</Link>
+        在本页{" "}
+        <Link to="/settings?tab=refine" className="text-accent hover:underline">
+          纠错学习
+        </Link>
         {" 或 "}
-        <Link to="/translate" className="text-accent hover:underline">翻译页</Link>
+        <Link to="/draft?mode=translate" className="text-accent hover:underline">
+          出稿 → 翻译
+        </Link>
         {" 选择 Provider 与模型。"}
       </p>
 
@@ -1328,7 +1341,7 @@ function UpdatesPanel() {
   useEffect(() => {
     void invoke<AppInfo>("get_app_info")
       .then(setInfo)
-      .catch(() => setInfo({ version: "0.1.0", name: "ASR Workshop" }));
+      .catch(() => setInfo({ version: "0.1.0", name: "言落" }));
   }, []);
 
   useEffect(() => {
@@ -1416,7 +1429,7 @@ function UpdatesPanel() {
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-foreground">
-              {info?.name ?? "ASR Workshop"}{" "}
+              {info?.name ?? "言落"}{" "}
               <span className="text-muted">v{current}</span>
             </div>
             <p className="mt-1 text-[12px] text-muted">
@@ -1579,10 +1592,6 @@ function detectedForKind(
   if (kind === "codex") return detected.codex;
   if (kind === "pi") return detected.pi;
   return detected.claude;
-}
-
-function defaultModelForKind(kind: AgentKind): string {
-  return kind === "claude" ? "sonnet" : "";
 }
 
 function shortBin(path: string): string {

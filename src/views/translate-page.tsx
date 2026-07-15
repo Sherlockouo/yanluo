@@ -13,6 +13,7 @@ import {
   EmptyState,
   PageHeader,
   PageShell,
+  PanelHeader,
   Reveal,
   SoftCollapse,
 } from "@/components/shared/page-shell";
@@ -26,7 +27,8 @@ import {
 import { useApp } from "@/app-context";
 import { cn } from "@/lib/cn";
 
-export function TranslatePage() {
+/** Translate mode panel — ⇧Fn results. Used standalone or embedded in 出稿. */
+export function TranslatePage({ embedded = false }: { embedded?: boolean } = {}) {
   const { config, updateConfig, saveConfig, history } = useApp();
   const [configOpen, setConfigOpen] = useState(false);
   const translateValue =
@@ -52,70 +54,73 @@ export function TranslatePage() {
     );
   };
 
-  return (
-    <PageShell className="max-w-2xl">
-      <PageHeader
-        title="翻译"
-        status={
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-            <Kbd>{config.hotkey_translate.label}</Kbd>
-            <span className="text-muted/40">·</span>
-            <Select
-              className="inline-flex w-auto"
-              aria-label="翻译到"
-              selectedKey={config.translate_target_language}
-              onSelectionChange={(key) => {
-                if (key == null) return;
-                setTargetLanguage(String(key));
-              }}
-            >
-              <Select.Trigger
-                className={cn(
-                  "h-7 gap-1 rounded-lg border border-border/80 bg-surface px-2.5",
-                  "shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)_inset]",
-                  "text-[12px] font-medium text-foreground items-center",
-                  "transition-[border-color,background-color] duration-150",
-                  "hover:border-foreground/20 hover:bg-surface-secondary/60",
-                )}
+  const header = (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      <Kbd>{config.hotkey_translate.label}</Kbd>
+      <span className="text-muted/40">·</span>
+      <Select
+        className="inline-flex w-auto"
+        aria-label="翻译到"
+        selectedKey={config.translate_target_language}
+        onSelectionChange={(key) => {
+          if (key == null) return;
+          setTargetLanguage(String(key));
+        }}
+      >
+        <Select.Trigger
+          className={cn(
+            "h-7 gap-1 rounded-lg border border-border/80 bg-surface px-2.5",
+            "shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)_inset]",
+            "text-[12px] font-medium text-foreground items-center",
+            "transition-[border-color,background-color] duration-150",
+            "hover:border-foreground/20 hover:bg-surface-secondary/60",
+          )}
+        >
+          <Select.Value>
+            {() => (
+              <span className="inline-flex items-center gap-1.5">
+                <span>{targetLabel}</span>
+              </span>
+            )}
+          </Select.Value>
+          <ChevronDown size={12} className="shrink-0 text-muted" />
+        </Select.Trigger>
+        <Select.Popover className="min-w-[10rem]">
+          <ListBox>
+            {TRANSLATE_LANGUAGES.map(([value, label]) => (
+              <ListBox.Item
+                key={value}
+                id={value}
+                textValue={`${label} ${value}`}
               >
-                <Select.Value>
-                  {() => (
-                    <span className="inline-flex items-center gap-1.5">
-                      <span>{targetLabel}</span>
-                    </span>
-                  )}
-                </Select.Value>
-                <ChevronDown size={12} className="shrink-0 text-muted" />
-              </Select.Trigger>
-              <Select.Popover className="min-w-[10rem]">
-                <ListBox>
-                  {TRANSLATE_LANGUAGES.map(([value, label]) => (
-                    <ListBox.Item
-                      key={value}
-                      id={value}
-                      textValue={`${label} ${value}`}
-                    >
-                      <span>{label}</span>
-                      <ListBox.ItemIndicator />
-                    </ListBox.Item>
-                  ))}
-                </ListBox>
-              </Select.Popover>
-            </Select>
-            <span className="text-muted/40">·</span>
-            <LlmProviderSelect />
-          </div>
-        }
-        action={
-          <Button
-            size="sm"
-            variant={configOpen ? "primary" : "secondary"}
-            onPress={() => setConfigOpen((v) => !v)}
-          >
-            配置
-          </Button>
-        }
-      />
+                <span>{label}</span>
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+            ))}
+          </ListBox>
+        </Select.Popover>
+      </Select>
+      <span className="text-muted/40">·</span>
+      <LlmProviderSelect />
+    </div>
+  );
+  const headerAction = (
+    <Button
+      size="sm"
+      variant={configOpen ? "primary" : "secondary"}
+      onPress={() => setConfigOpen((v) => !v)}
+    >
+      配置
+    </Button>
+  );
+
+  const content = (
+    <>
+      {embedded ? (
+        <PanelHeader status={header} action={headerAction} />
+      ) : (
+        <PageHeader title="翻译" status={header} action={headerAction} />
+      )}
 
       <SoftCollapse open={configOpen}>
         <div className="surface-card mb-1 flex flex-col gap-5 p-4">
@@ -189,6 +194,9 @@ export function TranslatePage() {
           ))}
         </div>
       )}
-    </PageShell>
+    </>
   );
+
+  if (embedded) return content;
+  return <PageShell className="max-w-2xl">{content}</PageShell>;
 }

@@ -733,13 +733,17 @@ html.light[data-floating-lang="1"] .hud-lang-chip.is-open {
 }
 
 .audio-bars-active .audio-bar {
-  background: rgba(255, 255, 255, 0.98);
+  background: #c4784a;
   opacity: 1;
 }
 
 html.light[data-floating="1"] .audio-bar {
   background: rgba(20, 20, 22, 0.88);
   box-shadow: none;
+}
+
+html.light[data-floating="1"] .audio-bars-active .audio-bar {
+  background: #c4784a;
 }
 
 .hud-colon {

@@ -15,13 +15,15 @@ import {
   EmptyState,
   PageHeader,
   PageShell,
+  PanelHeader,
   Reveal,
   SoftCollapse,
 } from "@/components/shared/page-shell";
 import { hasRefineDiff, RefineDiff } from "@/components/ui/refine-diff";
 import { useApp } from "@/app-context";
 
-export function AsrPage() {
+/** Live-draft mode panel — recent Fn transcriptions + engine config. Used standalone or embedded in 出稿. */
+export function AsrPage({ embedded = false }: { embedded?: boolean } = {}) {
   const {
     config,
     history,
@@ -47,30 +49,33 @@ export function AsrPage() {
     if (isQwen) await loadModel();
   };
 
-  return (
-    <PageShell className="max-w-2xl">
-      <PageHeader
-        title="ASR"
-        status={
-          <>
-            {providerLabel(config.asr_provider)}
-            {isQwen ? (modelLoaded ? " · 已加载" : " · 未加载") : null}
-            {" · "}
-            <Link to="/settings?tab=asr" className="text-accent hover:underline">
-              设置
-            </Link>
-          </>
-        }
-        action={
-          <Button
-            size="sm"
-            variant={engineOpen ? "primary" : "secondary"}
-            onPress={() => setEngineOpen((v) => !v)}
-          >
-            模型
-          </Button>
-        }
-      />
+  const header = (
+    <>
+      {providerLabel(config.asr_provider)}
+      {isQwen ? (modelLoaded ? " · 已加载" : " · 未加载") : null}
+      {" · "}
+      <Link to="/settings?tab=asr" className="text-accent hover:underline">
+        设置
+      </Link>
+    </>
+  );
+  const headerAction = (
+    <Button
+      size="sm"
+      variant={engineOpen ? "primary" : "secondary"}
+      onPress={() => setEngineOpen((v) => !v)}
+    >
+      模型
+    </Button>
+  );
+
+  const content = (
+    <>
+      {embedded ? (
+        <PanelHeader status={header} action={headerAction} />
+      ) : (
+        <PageHeader title="ASR" status={header} action={headerAction} />
+      )}
 
       <SoftCollapse open={engineOpen}>
         <div className="surface-card mb-1 flex flex-col gap-5 p-4">
@@ -249,6 +254,9 @@ export function AsrPage() {
           })}
         </div>
       )}
-    </PageShell>
+    </>
   );
+
+  if (embedded) return content;
+  return <PageShell className="max-w-2xl">{content}</PageShell>;
 }

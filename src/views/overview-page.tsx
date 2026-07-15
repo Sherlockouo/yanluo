@@ -130,7 +130,7 @@ export function OverviewPage() {
   return (
     <PageShell className="max-w-xl">
       <PageHeader
-        title="ASR Workshop"
+        title="言落"
         status={
           needsInstall ? undefined : (
             <>
@@ -176,41 +176,52 @@ export function OverviewPage() {
             </Button>
           </SectionCard>
         ) : (
-          <div className="flex flex-col gap-2">
-            <NavLink
-              to="/transcribe"
-              className="group flex items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-5 transition duration-200 hover:border-accent/30 hover:bg-surface-secondary/40"
-            >
-              <div className="grid h-11 w-11 place-items-center rounded-xl bg-accent/10 text-accent transition group-hover:scale-[1.03]">
-                <AudioLines size={18} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="type-section">转写</div>
-                <div className="mt-0.5 type-meta">文件或链接</div>
-              </div>
-            </NavLink>
-            <NavLink
-              to="/agent"
-              className="group flex items-center gap-3 rounded-2xl border border-border/70 bg-surface/70 px-4 py-4 transition duration-200 hover:border-accent/30 hover:bg-surface-secondary/40"
-            >
-              <div className="grid h-11 w-11 place-items-center rounded-xl bg-default/50 text-muted transition group-hover:scale-[1.03] group-hover:text-accent">
-                <Bot size={18} />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="type-section">Agent</div>
-                <div className="mt-0.5 type-meta">
-                  {activeAgents > 0
-                    ? `${activeAgents} 运行中`
-                    : agentJobs.length > 0
-                      ? `${agentJobs.length} 任务`
-                      : (
-                          <HotkeyKbd
-                            label={config.hotkey_agent?.label ?? "Fn+Space"}
-                          />
-                        )}
+          <div className="flex flex-col gap-5">
+            <div>
+              <p className="type-display !text-2xl">今天开口要什么结果？</p>
+              <p className="mt-1.5 type-meta">
+                你的声音留在本机。开口出稿，开口派活。
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <NavLink
+                to="/draft"
+                className="group flex items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-5 transition duration-200 hover:border-accent/30 hover:bg-surface-secondary/40"
+              >
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-accent/10 text-accent transition group-hover:scale-[1.03]">
+                  <AudioLines size={18} />
                 </div>
-              </div>
-            </NavLink>
+                <div className="min-w-0 flex-1">
+                  <div className="type-section">出稿</div>
+                  <div className="mt-0.5 type-meta">
+                    实时 · 文件/链接 · 翻译 · 历史
+                  </div>
+                </div>
+              </NavLink>
+              <NavLink
+                to="/dispatch"
+                className="group flex items-center gap-3 rounded-2xl border border-border/70 bg-surface/70 px-4 py-4 transition duration-200 hover:border-accent/30 hover:bg-surface-secondary/40"
+              >
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-default/50 text-muted transition group-hover:scale-[1.03] group-hover:text-accent">
+                  <Bot size={18} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="type-section">派活</div>
+                  <div className="mt-0.5 type-meta">
+                    {activeAgents > 0
+                      ? `${activeAgents} 运行中`
+                      : agentJobs.length > 0
+                        ? `${agentJobs.length} 任务`
+                        : (
+                            <HotkeyKbd
+                              label={config.hotkey_agent?.label ?? "Fn+Space"}
+                            />
+                          )}
+                  </div>
+                </div>
+              </NavLink>
+            </div>
           </div>
         )}
       </ModeSwitch>

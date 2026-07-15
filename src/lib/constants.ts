@@ -326,36 +326,10 @@ export function hudTargetShort(code?: string | null): string {
 
 export type NavItem = { id: Page; label: string };
 
-export type NavGroup = {
-  label: string;
-  items: NavItem[];
-};
-
-/** Sidebar groups — settings stays in footer, not here. */
-export const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "工作",
-    items: [
-      { id: "overview", label: "主页" },
-      { id: "transcribe", label: "转写" },
-      { id: "agent", label: "Agent" },
-      { id: "history", label: "历史" },
-    ],
-  },
-  {
-    label: "能力",
-    items: [
-      { id: "asr", label: "ASR" },
-      { id: "translate", label: "翻译" },
-      { id: "llm", label: "LLM" },
-      { id: "vocabulary", label: "词库" },
-    ],
-  },
-];
-
-/** Flat list (groups + settings) for any consumer that needs all pages. */
-export const NAV: NavItem[] = [
-  ...NAV_GROUPS.flatMap((g) => g.items),
+/** Narrow icon rail — 出稿 · 派活 · 设置. Not a wide labeled workbench sidebar. */
+export const RAIL: NavItem[] = [
+  { id: "draft", label: "出稿" },
+  { id: "dispatch", label: "派活" },
   { id: "settings", label: "设置" },
 ];
 

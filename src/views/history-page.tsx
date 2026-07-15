@@ -8,6 +8,7 @@ import {
   EmptyState,
   PageHeader,
   PageShell,
+  PanelHeader,
   Reveal,
   SectionCard,
 } from "@/components/shared/page-shell";
@@ -31,7 +32,8 @@ function historySourceLabel(entry: HistoryEntry): string {
   return "Fn";
 }
 
-export function HistoryPage() {
+/** Full history mode panel. Used standalone or embedded in 出稿. */
+export function HistoryPage({ embedded = false }: { embedded?: boolean } = {}) {
   const {
     history,
     clearHistory,
@@ -61,14 +63,10 @@ export function HistoryPage() {
     }
   };
 
-  return (
-    <PageShell>
-      <PageHeader
-        title="历史"
-        status={history.length ? `${history.length} 条` : undefined}
-        action={
-          history.length > 0 ? (
-            <div className="relative">
+  const headerStatus = history.length ? `${history.length} 条` : undefined;
+  const headerAction =
+    history.length > 0 ? (
+      <div className="relative">
               <Button
                 size="sm"
                 variant="secondary"
@@ -138,9 +136,15 @@ export function HistoryPage() {
                 </>
               ) : null}
             </div>
-          ) : null
-        }
-      />
+      ) : null;
+
+  const content = (
+    <>
+      {embedded ? (
+        <PanelHeader status={headerStatus} action={headerAction} />
+      ) : (
+        <PageHeader title="历史" status={headerStatus} action={headerAction} />
+      )}
 
       {history.length === 0 ? (
         <SectionCard>
@@ -180,8 +184,11 @@ export function HistoryPage() {
           })}
         </div>
       )}
-    </PageShell>
+    </>
   );
+
+  if (embedded) return content;
+  return <PageShell>{content}</PageShell>;
 }
 
 function CleanupItem({
@@ -344,10 +351,10 @@ function ExpandedViewer({ entry }: { entry: HistoryEntry }) {
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
         {isFn ? (
           <Link
-            to="/llm"
+            to="/settings?tab=refine"
             className="text-[12px] text-muted hover:text-accent hover:underline"
           >
-            在 LLM 页学习
+            在纠错学习页学习
           </Link>
         ) : (
           <span />

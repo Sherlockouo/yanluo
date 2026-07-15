@@ -6,10 +6,12 @@
 
 | 文档 | 用途 |
 |------|------|
+| [`DESIGN.md`](./DESIGN.md) | **品牌 + 视觉 + IA（言落）** — 改 UI 先读 |
 | [`design-jobs.md`](./design-jobs.md) | Jobs 设计：主次、减法、布局即说明 |
 | [`architecture-local-first.md`](./architecture-local-first.md) | Local-first：本地真相、乐观更新、合成层动效 |
 | [`design-agent-summon.md`](./design-agent-summon.md) | Fn+Space Agent 召唤：Claude/Codex 后台派发 |
 | [`design-hud-confirm-learn.md`](./design-hud-confirm-learn.md) | Fn/⇧Fn 确认再贴 + 改字即学 |
+| [`Sell-it.md`](./Sell-it.md) | 怎么卖：谁付钱、说什么、别说什么 |
 
 Cursor 强制规则：`.cursor/rules/jobs-design.mdc` · `.cursor/rules/local-first.mdc`（`alwaysApply`）。
 

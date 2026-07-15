@@ -395,14 +395,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }),
       listen<string>("open-settings", (event) => {
         const page = event.payload;
-        if (page === "llm") navigate("/llm");
+        if (page === "llm") navigate("/settings?tab=llm");
         else if (page === "updates") navigate("/settings?tab=updates");
-        else if (page === "agent") navigate("/agent");
+        else if (page === "agent") navigate("/dispatch");
         else navigate("/settings");
       }),
       listen<string>("open-agent-job", (event) => {
         const id = event.payload;
-        if (id) navigate(`/agent/${id}`);
+        if (id) navigate(`/dispatch/${id}`);
       }),
       listen<{ shift?: boolean; intention?: string }>("fn-key-down", async (event) => {
         // Confirm-wait: Fn is handled in floating via hud-confirm-request (hotkey tap).

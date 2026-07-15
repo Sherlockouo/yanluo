@@ -31,7 +31,7 @@ function spectrumFromRms(rms: number, bands: number[] | undefined): number[] {
     });
   } else {
     shape = Array.from({ length: n }, (_, i) => {
-      const t = n === 1 ? 0.5 : i / (n - 1);
+      const t = (n as number) === 1 ? 0.5 : i / (n - 1);
       return 0.55 + 0.45 * Math.sin(Math.PI * t);
     });
   }

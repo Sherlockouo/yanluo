@@ -50,7 +50,7 @@ pub(crate) fn get_app_info() -> AppInfo {
     let perms = permissions::get_permission_status();
     AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        name: "ASR Workshop".to_string(),
+        name: "言落".to_string(),
         platform: perms.platform,
         executable_path: perms.executable_path,
         apple_speech_available: cfg!(target_os = "macos"),

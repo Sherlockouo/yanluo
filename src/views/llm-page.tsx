@@ -14,6 +14,7 @@ import {
   EmptyState,
   PageHeader,
   PageShell,
+  PanelHeader,
   Reveal,
   SoftCollapse,
 } from "@/components/shared/page-shell";
@@ -56,7 +57,8 @@ function showLearnEntry(e: HistoryEntry): boolean {
   );
 }
 
-export function LlmPage() {
+/** LLM refine-learning loop. Used standalone or embedded in 设置 → 纠错学习. */
+export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
   const {
     config,
     updateConfig,
@@ -250,27 +252,30 @@ export function LlmPage() {
     }
   };
 
-  return (
-    <PageShell className="max-w-2xl">
-      <PageHeader
-        title="LLM"
-        status={
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-            <span>{config.llm_enabled ? "纠错开" : "纠错关"}</span>
-            <span className="text-muted/40">·</span>
-            <LlmProviderSelect />
-          </div>
-        }
-        action={
-          <Button
-            size="sm"
-            variant={configOpen ? "primary" : "secondary"}
-            onPress={() => setConfigOpen((v) => !v)}
-          >
-            配置
-          </Button>
-        }
-      />
+  const header = (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      <span>{config.llm_enabled ? "纠错开" : "纠错关"}</span>
+      <span className="text-muted/40">·</span>
+      <LlmProviderSelect />
+    </div>
+  );
+  const headerAction = (
+    <Button
+      size="sm"
+      variant={configOpen ? "primary" : "secondary"}
+      onPress={() => setConfigOpen((v) => !v)}
+    >
+      配置
+    </Button>
+  );
+
+  const content = (
+    <>
+      {embedded ? (
+        <PanelHeader status={header} action={headerAction} />
+      ) : (
+        <PageHeader title="LLM" status={header} action={headerAction} />
+      )}
 
       <SoftCollapse open={configOpen}>
         <div className="surface-card mb-1 flex flex-col gap-5 p-4">
@@ -408,7 +413,7 @@ export function LlmPage() {
               未标 {ratingStats.unlabeled} · 差 {ratingStats.bad} · 修正{" "}
               {userTripleCount} · 词库 {ratingStats.applied}
               {" · "}
-              <Link to="/vocabulary" className="text-accent hover:underline">
+              <Link to="/settings?tab=vocabulary" className="text-accent hover:underline">
                 词库
               </Link>
             </p>
@@ -553,6 +558,9 @@ export function LlmPage() {
           </div>
         </>
       )}
-    </PageShell>
+    </>
   );
+
+  if (embedded) return content;
+  return <PageShell className="max-w-2xl">{content}</PageShell>;
 }

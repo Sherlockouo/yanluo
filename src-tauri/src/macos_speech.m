@@ -64,7 +64,7 @@ int asr_speech_recognize_file(const char *path, const char *locale,
     switch (auth) {
     case SFSpeechRecognizerAuthorizationStatusDenied:
       hint = @"denied — 系统设置 → 隐私与安全性 → 语音识别，打开 "
-             @"ASR Workshop";
+             @"言落";
       break;
     case SFSpeechRecognizerAuthorizationStatusRestricted:
       hint = @"restricted by system policy";

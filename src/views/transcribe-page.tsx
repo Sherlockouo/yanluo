@@ -25,6 +25,7 @@ import {
   ModeSwitch,
   PageHeader,
   PageShell,
+  PanelHeader,
   SectionCard,
 } from "@/components/shared/page-shell";
 import { useApp } from "@/app-context";
@@ -151,7 +152,8 @@ function deferWork(fn: () => void, timeoutMs: number): () => void {
   return () => window.clearTimeout(id);
 }
 
-export function TranscribePage() {
+/** File/URL transcribe mode panel — upload/processing/result mutual-exclusive. Used standalone or embedded in 出稿. */
+export function TranscribePage({ embedded = false }: { embedded?: boolean } = {}) {
   const {
     config,
     history,
@@ -610,26 +612,27 @@ export function TranscribePage() {
     }
   };
 
-  return (
-    <PageShell className="max-w-5xl">
-      <PageHeader
-        title="转写"
-        status={
-          screen === "processing"
-            ? "识别中"
-            : screen === "result"
-              ? languageLabel
-              : `${providerLabel(config.asr_provider)} · ${languageLabel}`
-        }
-        action={
-          screen === "result" ? (
-            <Button variant="primary" onPress={enterUpload}>
-              <Plus size={16} aria-hidden />
-              新转写
-            </Button>
-          ) : null
-        }
-      />
+  const headerStatus =
+    screen === "processing"
+      ? "识别中"
+      : screen === "result"
+        ? languageLabel
+        : `${providerLabel(config.asr_provider)} · ${languageLabel}`;
+  const headerAction =
+    screen === "result" ? (
+      <Button variant="primary" onPress={enterUpload}>
+        <Plus size={16} aria-hidden />
+        新转写
+      </Button>
+    ) : null;
+
+  const content = (
+    <>
+      {embedded ? (
+        <PanelHeader status={headerStatus} action={headerAction} />
+      ) : (
+        <PageHeader title="转写" status={headerStatus} action={headerAction} />
+      )}
 
       {/* No nested AnimatePresence — PageShell already owns enter. Double motion = tab hitch. */}
       {screen === "upload" ? (
@@ -671,8 +674,11 @@ export function TranscribePage() {
           onNew={enterUpload}
         />
       ) : null}
-    </PageShell>
+    </>
   );
+
+  if (embedded) return content;
+  return <PageShell className="max-w-5xl">{content}</PageShell>;
 }
 
 function UploadPhase({

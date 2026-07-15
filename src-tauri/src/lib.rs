@@ -1,4 +1,4 @@
-//! ASR Workshop backend — Tauri application wiring.
+//! 言落 (Yanluo) backend — Tauri application wiring.
 
 mod agent;
 mod audio;

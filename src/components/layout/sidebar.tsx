@@ -1,150 +1,114 @@
 import { NavLink } from "react-router-dom";
-import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
-import {
-  Activity,
-  AudioLines,
-  BookOpen,
-  Bot,
-  Brain,
-  Languages,
-  Mic,
-  Moon,
-  PanelsTopLeft,
-  Settings,
-  Sun,
-  Wand2,
-} from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
+import { AudioLines, Bot, Moon, Settings, Sun } from "lucide-react";
 import type { Page } from "@/types";
-import { NAV_GROUPS } from "@/lib/constants";
 import { navIndicatorTransition } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/app-context";
 import { Button } from "@heroui/react";
 
-const ICONS: Record<Page, typeof Mic> = {
-  overview: PanelsTopLeft,
-  transcribe: AudioLines,
-  translate: Languages,
-  asr: Brain,
-  llm: Wand2,
-  vocabulary: BookOpen,
-  history: Activity,
-  agent: Bot,
+const ICONS: Record<Page, typeof AudioLines> = {
+  overview: AudioLines,
+  draft: AudioLines,
+  dispatch: Bot,
   settings: Settings,
 };
 
 const PATHS: Record<Page, string> = {
   overview: "/",
-  transcribe: "/transcribe",
-  translate: "/translate",
-  asr: "/asr",
-  llm: "/llm",
-  vocabulary: "/vocabulary",
-  history: "/history",
-  agent: "/agent",
+  draft: "/draft",
+  dispatch: "/dispatch",
   settings: "/settings",
 };
 
+const RAIL_ITEMS: { id: Page; label: string }[] = [
+  { id: "draft", label: "出稿" },
+  { id: "dispatch", label: "派活" },
+];
+
+/**
+ * Narrow icon rail — 言 mark (home) + 出稿 / 派活 + 设置 footer.
+ * Not a wide labeled workbench sidebar (DESIGN.md IA).
+ */
 export function Sidebar() {
-  const { theme, setTheme, config } = useApp();
+  const { theme, setTheme } = useApp();
   const reduce = useReducedMotion();
-  const hint = `${config.hotkey_transcribe?.label ?? "Fn"} · ${config.hotkey_cancel?.label ?? "Esc"}`;
 
   return (
-    <aside className="app-sidebar">
-      <div className="flex items-center gap-3 px-2.5 pb-1">
-        <div className="grid h-10 w-10 place-items-center rounded-2xl bg-default text-foreground ring-1 ring-border">
-          <Mic size={17} />
-        </div>
-        <div className="min-w-0">
-          <div className="truncate type-ui font-display tracking-tight">
-            ASR Workshop
-          </div>
-          <div className="truncate type-meta">{hint}</div>
-        </div>
+    <aside className="app-rail">
+      <NavLink to="/" end aria-label="言落 主页" className="app-rail-mark">
+        言
+      </NavLink>
+
+      <nav className="mt-2 flex flex-1 flex-col items-center gap-1.5">
+        {RAIL_ITEMS.map((item) => {
+          const Icon = ICONS[item.id];
+          return (
+            <NavLink
+              key={item.id}
+              to={PATHS[item.id]}
+              aria-label={item.label}
+              className={({ isActive }) =>
+                cn("rail-item", isActive && "rail-item-active")
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && !reduce ? (
+                    <motion.span
+                      layoutId="rail-active"
+                      className="rail-item-indicator"
+                      transition={navIndicatorTransition}
+                    />
+                  ) : isActive ? (
+                    <span className="rail-item-indicator" />
+                  ) : null}
+                  <Icon size={17} className="relative z-10 shrink-0" />
+                  <span className="rail-item-label relative z-10">
+                    {item.label}
+                  </span>
+                </>
+              )}
+            </NavLink>
+          );
+        })}
+      </nav>
+
+      <div className="mt-auto flex flex-col items-center gap-1.5">
+        <NavLink
+          to="/settings"
+          aria-label="设置"
+          className={({ isActive }) =>
+            cn("rail-item", isActive && "rail-item-active")
+          }
+        >
+          {({ isActive }) => (
+            <>
+              {isActive && !reduce ? (
+                <motion.span
+                  layoutId="rail-active"
+                  className="rail-item-indicator"
+                  transition={navIndicatorTransition}
+                />
+              ) : isActive ? (
+                <span className="rail-item-indicator" />
+              ) : null}
+              <Settings size={16} className="relative z-10" />
+              <span className="rail-item-label relative z-10">设置</span>
+            </>
+          )}
+        </NavLink>
+        <Button
+          type="button"
+          aria-label={theme === "dark" ? "切换浅色" : "切换深色"}
+          className="rail-item !w-11 shrink-0 justify-center !px-0 opacity-70 hover:opacity-100"
+          onClick={() =>
+            setTheme((prev) => (prev === "dark" ? "light" : "dark"))
+          }
+        >
+          {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+        </Button>
       </div>
-
-      <LayoutGroup id="sidebar-nav">
-        <nav className="mt-7 flex flex-1 flex-col gap-4">
-          {NAV_GROUPS.map((group) => (
-            <div key={group.label} className="flex flex-col gap-0.5">
-              <div className="nav-group-label">{group.label}</div>
-              {group.items.map((item) => {
-                const Icon = ICONS[item.id];
-                return (
-                  <NavLink
-                    key={item.id}
-                    to={PATHS[item.id]}
-                    end={item.id === "overview"}
-                    className={({ isActive }) =>
-                      cn("nav-item", isActive && "nav-item-active")
-                    }
-                  >
-                    {({ isActive }) => (
-                      <>
-                        {isActive && !reduce ? (
-                          <motion.span
-                            layoutId="nav-active"
-                            className="nav-item-indicator"
-                            transition={navIndicatorTransition}
-                          />
-                        ) : isActive ? (
-                          <span className="nav-item-indicator" />
-                        ) : null}
-                        <Icon
-                          size={16}
-                          className="relative z-10 shrink-0 opacity-75"
-                        />
-                        <span className="relative z-10 type-ui">
-                          {item.label}
-                        </span>
-                      </>
-                    )}
-                  </NavLink>
-                );
-              })}
-            </div>
-          ))}
-        </nav>
-
-        <div className="mt-auto flex items-center gap-1.5">
-          <NavLink
-            to="/settings"
-            className={({ isActive }) =>
-              cn(
-                "nav-item flex-1 justify-center gap-2 !px-2",
-                isActive && "nav-item-active",
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                {isActive && !reduce ? (
-                  <motion.span
-                    layoutId="nav-active"
-                    className="nav-item-indicator"
-                    transition={navIndicatorTransition}
-                  />
-                ) : isActive ? (
-                  <span className="nav-item-indicator" />
-                ) : null}
-                <Settings size={15} className="relative z-10" />
-                <span className="relative z-10 type-ui">设置</span>
-              </>
-            )}
-          </NavLink>
-          <Button
-            type="button"
-            aria-label={theme === "dark" ? "切换浅色" : "切换深色"}
-            className="nav-item !w-11 shrink-0 justify-center !px-0 rounded-lg opacity-70 hover:opacity-100"
-            onClick={() =>
-              setTheme((prev) => (prev === "dark" ? "light" : "dark"))
-            }
-          >
-            {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-          </Button>
-        </div>
-      </LayoutGroup>
     </aside>
   );
 }

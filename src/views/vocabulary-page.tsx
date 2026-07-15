@@ -5,32 +5,43 @@ import {
   EmptyState,
   PageHeader,
   PageShell,
+  PanelHeader,
   Reveal,
   SoftCollapse,
 } from "@/components/shared/page-shell";
 import { useApp } from "@/app-context";
 
-export function VocabularyPage() {
+/** Vocabulary entries. Used standalone or embedded in 设置 → 词库. */
+export function VocabularyPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { config, newTerm, setNewTerm, addTerm, saveVocabulary } = useApp();
   const [addOpen, setAddOpen] = useState(config.vocabulary.length === 0);
   const terms = config.vocabulary;
 
-  return (
-    <PageShell className="max-w-2xl">
-      <PageHeader
-        title="词库"
-        status={terms.length ? `${terms.length} 条` : undefined}
-        action={
-          <Button
-            size="sm"
-            variant={addOpen ? "primary" : "secondary"}
-            onPress={() => setAddOpen((v) => !v)}
-          >
-            <Plus size={14} />
-            添加
-          </Button>
-        }
-      />
+  const headerAction = (
+    <Button
+      size="sm"
+      variant={addOpen ? "primary" : "secondary"}
+      onPress={() => setAddOpen((v) => !v)}
+    >
+      <Plus size={14} />
+      添加
+    </Button>
+  );
+
+  const content = (
+    <>
+      {embedded ? (
+        <PanelHeader
+          status={terms.length ? `${terms.length} 条` : undefined}
+          action={headerAction}
+        />
+      ) : (
+        <PageHeader
+          title="词库"
+          status={terms.length ? `${terms.length} 条` : undefined}
+          action={headerAction}
+        />
+      )}
 
       <SoftCollapse open={addOpen}>
         <div className="surface-card mb-1 flex items-end gap-2 p-4">
@@ -88,6 +99,9 @@ export function VocabularyPage() {
           ))}
         </div>
       )}
-    </PageShell>
+    </>
   );
+
+  if (embedded) return content;
+  return <PageShell className="max-w-2xl">{content}</PageShell>;
 }

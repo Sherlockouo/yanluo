@@ -96,7 +96,7 @@ pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
         if let Some(window) = app.get_webview_window("floating") {
             if visible {
                 // Do NOT toggle Accessory/Regular here — that steals focus and
-                // makes Fn/cancel "jump back" to ASR Workshop. HUD was created
+                // makes Fn/cancel "jump back" to 言落. HUD was created
                 // under Accessory once at launch so FullScreenAuxiliary sticks.
                 remember_frontmost_app();
                 let width = window
