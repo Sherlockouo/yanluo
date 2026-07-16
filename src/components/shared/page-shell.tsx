@@ -46,7 +46,7 @@ export function PanelHeader({
   if (!status && !action) return null;
   return (
     <div className="flex items-center justify-between gap-4">
-      <div className="min-w-0 flex-1 type-meta">{status}</div>
+      <div className="min-w-0 flex-1 py-4 type-meta">{status}</div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>
   );

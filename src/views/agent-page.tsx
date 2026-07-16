@@ -342,7 +342,7 @@ export function AgentPage() {
         <div className="agent-composer p-2">
           <TextField
             fullWidth
-            aria-label="派给 Agent"
+            aria-label="派活"
             value={prompt}
             onChange={setPrompt}
             isDisabled={sending}
@@ -350,7 +350,7 @@ export function AgentPage() {
           >
             <TextArea
               rows={2}
-              placeholder="派给 Agent…"
+              placeholder="派个活…"
               className="agent-composer-input"
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing || e.keyCode === 229) return;

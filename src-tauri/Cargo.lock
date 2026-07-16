@@ -140,36 +140,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d3fb67a6e08acf24fdeccbac2cb6ac4305825bd1f117462e0e6f2f193345ad56"
 
 [[package]]
-name = "asr-workshop"
-version = "0.8.0"
-dependencies = [
- "cc",
- "chrono",
- "core-foundation 0.10.1",
- "core-graphics",
- "cpal",
- "dirs",
- "hound",
- "libc",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "qwen3-asr-rs",
- "reqwest",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-shell",
- "tempfile",
- "tokio",
- "voice_activity_detector",
- "webrtc-vad",
- "window-vibrancy",
-]
-
-[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3612,7 +3582,6 @@ dependencies = [
 [[package]]
 name = "qwen3-asr-rs"
 version = "0.2.0"
-source = "git+https://github.com/XBCoder128/qwen3_asr_rs?branch=main#4126a020f8f5dd3f80407ae3bcfeacac1613e72b"
 dependencies = [
  "anyhow",
  "axum",
@@ -6810,6 +6779,36 @@ checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
 dependencies = [
  "libc",
  "rustix",
+]
+
+[[package]]
+name = "yanluo"
+version = "0.8.0"
+dependencies = [
+ "cc",
+ "chrono",
+ "core-foundation 0.10.1",
+ "core-graphics",
+ "cpal",
+ "dirs",
+ "hound",
+ "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "qwen3-asr-rs",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-shell",
+ "tempfile",
+ "tokio",
+ "voice_activity_detector",
+ "webrtc-vad",
+ "window-vibrancy",
 ]
 
 [[package]]

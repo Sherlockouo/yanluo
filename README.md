@@ -1,6 +1,12 @@
-# ASR Workshop
+# 言落 (Yanluo)
 
-Desktop app for [Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR) (Automatic Speech Recognition), built on Tauri 2 + Solid.js + Tailwind CSS. Pure Rust inference via [qwen3_asr_rs](https://github.com/second-state/qwen3_asr_rs), with MLX/Metal acceleration on Apple Silicon.
+你的声音留在本机。开口出稿，开口派活。
+
+言落是一款 macOS 桌面应用：本机语音识别 + AI 润色出稿，还能直接语音派活给 Claude / Codex 等 Agent。声音和文字都不离开这台电脑。
+
+下面是给开发者看的技术栈说明——桌面壁纸不是本机推理、MLX、流式切段，这些是引擎细节，不是卖点。
+
+Built on Tauri 2 + React + Tailwind CSS, with pure Rust inference via [qwen3_asr_rs](https://github.com/second-state/qwen3_asr_rs) ([Qwen3-ASR](https://github.com/QwenLM/Qwen3-ASR)) and MLX/Metal acceleration on Apple Silicon.
 
 ## Features
 

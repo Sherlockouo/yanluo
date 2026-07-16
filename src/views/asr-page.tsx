@@ -74,7 +74,7 @@ export function AsrPage({ embedded = false }: { embedded?: boolean } = {}) {
       {embedded ? (
         <PanelHeader status={header} action={headerAction} />
       ) : (
-        <PageHeader title="ASR" status={header} action={headerAction} />
+        <PageHeader title="实时" status={header} action={headerAction} />
       )}
 
       <SoftCollapse open={engineOpen}>

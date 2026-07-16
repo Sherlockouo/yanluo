@@ -244,6 +244,19 @@ button.form-actions-primary,
   transform: translateZ(0);
 }
 
+/* Secondary (二级) tab row nested inside a panel — smaller & quieter than top-level. */
+.settings-tabs-sub {
+  border: 0;
+  padding: 0;
+  gap: 0.35rem;
+  background: transparent;
+}
+
+.settings-tab-sub {
+  padding: 0.35rem 0.65rem;
+  font-size: 12px;
+}
+
 .release-entry + .release-entry {
   padding-top: 1.1rem;
   border-top: 1px solid var(--separator);

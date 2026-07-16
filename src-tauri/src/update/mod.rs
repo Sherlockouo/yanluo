@@ -223,7 +223,7 @@ fn downloads_dir() -> PathBuf {
     dirs::download_dir()
         .or_else(dirs::home_dir)
         .unwrap_or_else(std::env::temp_dir)
-        .join("ASR Workshop Updates")
+        .join("言落 Updates")
 }
 
 fn open_installer(path: &std::path::Path) -> Result<(), String> {

@@ -1276,6 +1276,7 @@ pub(crate) fn language_for_align(language: &str) -> String {
 }
 
 /// Pick ForcedAligner / chunk-join language from transcript script when UI is `auto`.
+#[cfg(feature = "qwen-local")]
 pub(crate) fn align_lang_from_text(configured: &str, text: &str) -> String {
     let configured = configured.trim();
     if !configured.is_empty() && !configured.eq_ignore_ascii_case("auto") {

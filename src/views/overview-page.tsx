@@ -116,15 +116,12 @@ export function OverviewPage() {
   ).length;
 
   const statusBits = [
-    providerLabel(config.asr_provider),
-    config.asr_provider === "qwen"
-      ? modelLoaded
-        ? "已加载"
-        : "未加载"
-      : null,
+    config.asr_provider === "qwen" && modelLoaded
+      ? "本机就绪"
+      : providerLabel(config.asr_provider),
     stateLabel(state),
     config.language === "auto" ? "自动检测" : config.language,
-    activeAgents > 0 ? `Agent ${activeAgents}` : null,
+    activeAgents > 0 ? `派活中 ${activeAgents}` : null,
   ].filter(Boolean);
 
   return (
@@ -151,8 +148,11 @@ export function OverviewPage() {
       <ModeSwitch modeKey={needsInstall ? "install" : "ready"}>
         {needsInstall ? (
           <SectionCard className="flex flex-col gap-4 border-accent/30">
-            <div className="type-section">
-              安装 {config.asr_model_id || "Qwen3-ASR-0.6B"}
+            <div>
+              <div className="type-section">下载本机识别（约 2GB）</div>
+              <p className="mt-1 type-meta">
+                声音留在本机 · 型号 {config.asr_model_id || "Qwen3-ASR-0.6B"}
+              </p>
             </div>
             {downloading && progress ? (
               <div className="type-meta">
@@ -161,9 +161,7 @@ export function OverviewPage() {
                   ? `${progress.percent.toFixed(0)}%`
                   : `${progress.file_index}/${progress.file_count}`}
               </div>
-            ) : (
-              <p className="type-meta">约 2GB · 本地识别</p>
-            )}
+            ) : null}
             <Button
               fullWidth
               variant="primary"
@@ -172,7 +170,7 @@ export function OverviewPage() {
               onPress={() => void startDownload()}
             >
               <Download size={14} />
-              {downloading ? "下载中…" : "下载并加载"}
+              {downloading ? "下载中…" : "下载本机识别"}
             </Button>
           </SectionCard>
         ) : (

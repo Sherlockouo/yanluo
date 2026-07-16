@@ -60,7 +60,7 @@ make install-local
 
 ## In-app updates
 - **检查更新** calls the GitHub Releases API off the UI thread (async + short timeout).
-- **下载并安装** saves under `~/Downloads/ASR Workshop Updates/` and opens the installer.
+- **下载并安装** saves under `~/Downloads/言落 Updates/` and opens the installer.
 - macOS: open the `.dmg`, drag into Applications, relaunch.
 - Menu: **Check for Updates…** → **设置 → 更新**.
 

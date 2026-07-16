@@ -71,16 +71,32 @@ import {
 import { LlmPage } from "@/views/llm-page";
 import { VocabularyPage } from "@/views/vocabulary-page";
 
-type SettingsTab =
-  | "general"
-  | "asr"
-  | "llm"
-  | "refine"
-  | "vocabulary"
-  | "agent"
-  | "hotkeys"
-  | "permissions"
-  | "updates";
+type SettingsTab = "general" | "asr" | "polish" | "agent" | "system" | "updates";
+
+type PolishSub = "config" | "refine" | "vocab";
+type SystemSub = "hotkeys" | "permissions";
+
+/**
+ * Old 9-tab ids (pre-consolidation) map onto the new 6 product tabs, so
+ * existing deep links (`?tab=refine`, tray menu events, in-app `<Link>`s)
+ * keep landing on the right place instead of 404ing into 常规.
+ */
+const TAB_ALIASES: Record<string, { tab: SettingsTab; sub?: string }> = {
+  llm: { tab: "polish", sub: "config" },
+  refine: { tab: "polish", sub: "refine" },
+  vocabulary: { tab: "polish", sub: "vocab" },
+  hotkeys: { tab: "system", sub: "hotkeys" },
+  permissions: { tab: "system", sub: "permissions" },
+};
+
+function resolveTabParam(raw: string | null): {
+  tab: SettingsTab;
+  sub?: string;
+} {
+  if (raw && TABS.some((t) => t.id === raw)) return { tab: raw as SettingsTab };
+  if (raw && raw in TAB_ALIASES) return TAB_ALIASES[raw];
+  return { tab: "general" };
+}
 
 type PermissionStatus = {
   accessibility: boolean;
@@ -153,14 +169,22 @@ type DownloadInstallResult = {
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "常规" },
-  { id: "asr", label: "ASR" },
-  { id: "llm", label: "LLM" },
+  { id: "asr", label: "识别" },
+  { id: "polish", label: "润色" },
+  { id: "agent", label: "派活" },
+  { id: "system", label: "系统" },
+  { id: "updates", label: "更新" },
+];
+
+const POLISH_SUBS: { id: PolishSub; label: string }[] = [
+  { id: "config", label: "配置" },
   { id: "refine", label: "纠错学习" },
-  { id: "vocabulary", label: "词库" },
-  { id: "agent", label: "Agent" },
+  { id: "vocab", label: "词库" },
+];
+
+const SYSTEM_SUBS: { id: SystemSub; label: string }[] = [
   { id: "hotkeys", label: "快捷键" },
   { id: "permissions", label: "权限" },
-  { id: "updates", label: "更新" },
 ];
 
 const PERMS: {
@@ -207,22 +231,85 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Shared secondary (二级) tab row nested inside a merged settings tab. */
+function SubTabs<T extends string>({
+  items,
+  active,
+  onSelect,
+  layoutId,
+}: {
+  items: { id: T; label: string }[];
+  active: T;
+  onSelect: (id: T) => void;
+  layoutId: string;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <LayoutGroup id={layoutId}>
+      <div className="settings-tabs settings-tabs-sub">
+        {items.map((item) => {
+          const isActive = active === item.id;
+          return (
+            <Button
+              key={item.id}
+              size="sm"
+              variant="ghost"
+              data-selected={isActive || undefined}
+              aria-current={isActive ? "true" : undefined}
+              className={cn(
+                "settings-tab settings-tab-sub h-auto min-h-0 shadow-none data-[pressed=true]:scale-100",
+                isActive && "settings-tab-active",
+              )}
+              onPress={() => onSelect(item.id)}
+            >
+              {isActive && !reduce ? (
+                <motion.span
+                  layoutId={`${layoutId}-active`}
+                  className="settings-tab-indicator"
+                  transition={navIndicatorTransition}
+                />
+              ) : isActive ? (
+                <span className="settings-tab-indicator" />
+              ) : null}
+              <span className="relative z-10">{item.label}</span>
+            </Button>
+          );
+        })}
+      </div>
+    </LayoutGroup>
+  );
+}
+
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialTab = (searchParams.get("tab") as SettingsTab | null) ?? "general";
-  const [tab, setTab] = useState<SettingsTab>(
-    TABS.some((t) => t.id === initialTab) ? initialTab : "general",
-  );
+  const resolved = resolveTabParam(searchParams.get("tab"));
+  const [tab, setTab] = useState<SettingsTab>(resolved.tab);
+  const [sub, setSub] = useState<string | undefined>(resolved.sub);
+
+  // Old ids (?tab=refine etc.) resolve above; normalize the URL once so the
+  // address reflects the canonical tab/sub instead of the retired alias.
+  useEffect(() => {
+    const raw = searchParams.get("tab");
+    if (raw && !TABS.some((t) => t.id === raw) && raw in TAB_ALIASES) {
+      const next = TAB_ALIASES[raw];
+      const params: Record<string, string> = { tab: next.tab };
+      if (next.sub) params.sub = next.sub;
+      setSearchParams(params, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
-    const next = searchParams.get("tab") as SettingsTab | null;
-    if (next && TABS.some((t) => t.id === next) && next !== tab) {
-      setTab(next);
-    }
-  }, [searchParams, tab]);
+    const resolvedNext = resolveTabParam(searchParams.get("tab"));
+    if (resolvedNext.tab !== tab) setTab(resolvedNext.tab);
+    const nextSub = searchParams.get("sub") ?? resolvedNext.sub;
+    if (nextSub !== sub) setSub(nextSub);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const selectTab = (id: SettingsTab) => {
     setTab(id);
+    setSub(undefined);
     if (id === "general") {
       setSearchParams({}, { replace: true });
     } else {
@@ -230,12 +317,17 @@ export function SettingsPage() {
     }
   };
 
+  const selectSub = (nextSub: string) => {
+    setSub(nextSub);
+    setSearchParams({ tab, sub: nextSub }, { replace: true });
+  };
+
   const fade = useFade();
   const reduce = useReducedMotion();
 
   return (
     <PageShell>
-      <PageHeader title="设置" status="常规 · 快捷键 · 权限" />
+      <PageHeader title="设置" />
 
       <LayoutGroup id="settings-tabs">
         <div className="settings-tabs max-w-3xl">
@@ -278,15 +370,85 @@ export function SettingsPage() {
       >
         {tab === "general" ? <GeneralPanel /> : null}
         {tab === "asr" ? <AsrProviderPanel /> : null}
-        {tab === "llm" ? <LlmProviderPanel /> : null}
-        {tab === "refine" ? <LlmPage embedded /> : null}
-        {tab === "vocabulary" ? <VocabularyPage embedded /> : null}
+        {tab === "polish" ? (
+          <PolishPanel
+            sub={POLISH_SUBS.some((s) => s.id === sub) ? (sub as PolishSub) : "config"}
+            onSelectSub={selectSub}
+          />
+        ) : null}
         {tab === "agent" ? <AgentPanel /> : null}
-        {tab === "hotkeys" ? <HotkeysPanel /> : null}
-        {tab === "permissions" ? <PermissionsPanel /> : null}
+        {tab === "system" ? (
+          <SystemPanel
+            sub={SYSTEM_SUBS.some((s) => s.id === sub) ? (sub as SystemSub) : "hotkeys"}
+            onSelectSub={selectSub}
+          />
+        ) : null}
         {tab === "updates" ? <UpdatesPanel /> : null}
       </motion.div>
     </PageShell>
+  );
+}
+
+/** 润色 — LLM 凭证 + 纠错学习 + 词库 as 二级 sub-sections (one product tab, not three). */
+function PolishPanel({
+  sub,
+  onSelectSub,
+}: {
+  sub: PolishSub;
+  onSelectSub: (id: string) => void;
+}) {
+  const fade = useFade();
+  return (
+    <div className="flex max-w-2xl flex-col gap-4">
+      <SubTabs
+        items={POLISH_SUBS}
+        active={sub}
+        onSelect={onSelectSub}
+        layoutId="polish-sub-tabs"
+      />
+      <motion.div
+        key={sub}
+        initial={fade.initial}
+        animate={fade.animate}
+        transition={fade.transition}
+        style={{ willChange: "opacity" }}
+      >
+        {sub === "config" ? <LlmProviderPanel /> : null}
+        {sub === "refine" ? <LlmPage embedded /> : null}
+        {sub === "vocab" ? <VocabularyPage embedded /> : null}
+      </motion.div>
+    </div>
+  );
+}
+
+/** 系统 — 快捷键 + 权限 as 二级 sub-sections. */
+function SystemPanel({
+  sub,
+  onSelectSub,
+}: {
+  sub: SystemSub;
+  onSelectSub: (id: string) => void;
+}) {
+  const fade = useFade();
+  return (
+    <div className="flex max-w-2xl flex-col gap-4">
+      <SubTabs
+        items={SYSTEM_SUBS}
+        active={sub}
+        onSelect={onSelectSub}
+        layoutId="system-sub-tabs"
+      />
+      <motion.div
+        key={sub}
+        initial={fade.initial}
+        animate={fade.animate}
+        transition={fade.transition}
+        style={{ willChange: "opacity" }}
+      >
+        {sub === "hotkeys" ? <HotkeysPanel /> : null}
+        {sub === "permissions" ? <PermissionsPanel /> : null}
+      </motion.div>
+    </div>
   );
 }
 
@@ -391,7 +553,7 @@ function AsrProviderPanel() {
   return (
     <div className="flex max-w-2xl flex-col gap-4">
       <Reveal index={0}>
-      <SectionCard className="flex flex-col gap-5" title="ASR 引擎">
+      <SectionCard className="flex flex-col gap-5" title="识别引擎">
         <Select
           className="w-full flex"
           selectedKey={config.asr_provider}
@@ -453,7 +615,7 @@ function AsrProviderPanel() {
 
       {config.asr_provider === "qwen" ? (
         <Reveal index={1}>
-        <SectionCard className="flex flex-col gap-5" title="Qwen 模型与对齐">
+        <SectionCard className="flex flex-col gap-5" title="本机模型与对齐">
           <Select
             className="w-full flex"
             selectedKey={config.asr_model_id || "Qwen3-ASR-0.6B"}
@@ -528,7 +690,7 @@ function AsrProviderPanel() {
 
           <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface-secondary/40 p-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="type-ui">对齐模型（ForcedAligner）</div>
+              <div className="type-ui">逐字对齐（ForcedAligner）</div>
               <span
                 className={cn(
                   "type-micro rounded-md px-1.5 py-0.5",
@@ -548,7 +710,7 @@ function AsrProviderPanel() {
                 <Checkbox.Control>
                   <Checkbox.Indicator />
                 </Checkbox.Control>
-                下载时一并获取 ForcedAligner
+                下载时一并获取逐字对齐模型（ForcedAligner）
               </Checkbox.Content>
             </Checkbox>
             <TextField
@@ -561,7 +723,7 @@ function AsrProviderPanel() {
               <Input className="min-w-0 flex items-center font-mono text-[13px]" />
             </TextField>
             <p className="type-meta">
-              配置后可在 ASR 页开启逐字对齐；留空则对齐开关不可用。
+              配置后可在 出稿 → 实时 开启逐字对齐；留空则对齐开关不可用。
             </p>
           </div>
 
@@ -570,7 +732,7 @@ function AsrProviderPanel() {
             onToggle={() => setAdvancedOpen((v) => !v)}
             className="rounded-xl border border-border/60 px-3"
           >
-            高级 · VAD / 流式
+            高级设置
           </CollapseTrigger>
           <SoftCollapse open={advancedOpen}>
             <VadAdvancedFields config={config} updateConfig={updateConfig} />
@@ -853,7 +1015,7 @@ function LlmProviderPanel() {
   };
 
   return (
-    <SectionCard className="max-w-2xl flex flex-col gap-5" title="LLM 凭证">
+    <SectionCard className="max-w-2xl flex flex-col gap-5" title="润色引擎">
       <div className="rounded-2xl border border-border bg-surface-secondary/50 px-3 py-2">
         <Switch
           isSelected={config.llm_enabled}
@@ -880,7 +1042,7 @@ function LlmProviderPanel() {
           setEditProvider(String(key) as LlmProvider);
         }}
       >
-        <Label>配置哪个 Provider</Label>
+        <Label>服务商</Label>
         <Select.Trigger className="flex items-center justify-between p-4">
           <Select.Value />
           <Select.Indicator />
@@ -920,15 +1082,11 @@ function LlmProviderPanel() {
       </TextField>
 
       <p className="text-[12px] text-muted">
-        在本页{" "}
-        <Link to="/settings?tab=refine" className="text-accent hover:underline">
-          纠错学习
-        </Link>
-        {" 或 "}
+        模型可在上方「纠错学习」「词库」两个子页，或{" "}
         <Link to="/draft?mode=translate" className="text-accent hover:underline">
           出稿 → 翻译
         </Link>
-        {" 选择 Provider 与模型。"}
+        {" 中选择。"}
       </p>
 
       <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
@@ -1082,7 +1240,7 @@ function HotkeysPanel() {
   }[] = [
     {
       slot: "transcribe",
-      title: "转录",
+      title: "出稿",
       binding: config.hotkey_transcribe,
     },
     {
@@ -1092,7 +1250,7 @@ function HotkeysPanel() {
     },
     {
       slot: "agent",
-      title: "Agent",
+      title: "派活",
       binding: config.hotkey_agent ?? {
         key: "49",
         modifiers: ["fn"],
@@ -1446,7 +1604,7 @@ function UpdatesPanel() {
             ) : null}
             {checkError ? (
               <p className="mt-1 text-[12px]" style={{ color: "var(--danger)" }}>
-                检查失败：{checkError}（仍显示本地 Release Log）
+                检查失败：{checkError}（仍显示本地更新说明）
               </p>
             ) : null}
             {installMessage ? (
@@ -1549,7 +1707,7 @@ function UpdatesPanel() {
         </div>
       </SectionCard>
 
-      <SectionCard className="max-w-2xl" title="Release Log">
+      <SectionCard className="max-w-2xl" title="更新说明">
         <div className="flex flex-col gap-5">
           {logEntries.map((entry) => (
             <article key={`${entry.version}-${entry.date}`} className="release-entry">
@@ -1691,7 +1849,7 @@ function AgentPanel() {
   return (
     <div className="flex max-w-2xl flex-col gap-4">
       <Reveal index={0}>
-      <SectionCard className="flex flex-col gap-4" title="Agent 类型">
+      <SectionCard className="flex flex-col gap-4" title="派活能力">
         <div className="flex items-center justify-end">
           <Button
             size="sm"

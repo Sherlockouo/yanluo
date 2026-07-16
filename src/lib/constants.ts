@@ -341,7 +341,7 @@ export const CAPSULE_TAIL_CHARS = 34;
 export function providerLabel(provider: AsrProvider) {
   if (provider === "apple") return "Apple Speech";
   if (provider === "elevenlabs") return "ElevenLabs";
-  return "Qwen Local";
+  return "本机识别";
 }
 
 export function stateLabel(state: RecState) {
