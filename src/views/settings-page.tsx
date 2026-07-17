@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
@@ -248,8 +249,6 @@ function SubTabs<T extends string>({
   items: { id: T; label: string }[];
   active: T;
   onSelect: (id: T) => void;
-  /** kept for call-site compatibility; no longer used. */
-  layoutId?: string;
 }) {
   return (
     <div className="set-subtabs" role="tablist">
@@ -391,7 +390,6 @@ function PolishPanel({
         items={POLISH_SUBS}
         active={sub}
         onSelect={onSelectSub}
-        layoutId="polish-sub-tabs"
       />
       <motion.div
         key={sub}
@@ -401,7 +399,11 @@ function PolishPanel({
         style={{ willChange: "opacity" }}
       >
         {sub === "config" ? <LlmProviderPanel /> : null}
-        {sub === "refine" ? <LlmPage embedded /> : null}
+        {sub === "refine" ? (
+          <div className="learn-embed">
+            <LlmPage embedded />
+          </div>
+        ) : null}
         {sub === "vocab" ? <VocabularyPage embedded /> : null}
       </motion.div>
     </div>
@@ -423,7 +425,6 @@ function SystemPanel({
         items={SYSTEM_SUBS}
         active={sub}
         onSelect={onSelectSub}
-        layoutId="system-sub-tabs"
       />
       <motion.div
         key={sub}
@@ -621,7 +622,7 @@ function AsrProviderPanel() {
             </Select>
             {status?.installed ? (
               <p className="-mt-2 truncate type-meta">
-                <span className="rounded-md bg-success/10 px-1.5 py-0.5 text-success">
+                <span className="badge-soft" data-tone="success">
                   已安装
                 </span>{" "}
                 {status.path}
@@ -690,11 +691,11 @@ function AsrProviderPanel() {
                     <div
                       className="update-progress-bar"
                       style={{
-                        width:
+                        "--progress":
                           progress.percent != null
-                            ? `${Math.min(100, Math.max(0, progress.percent))}%`
-                            : "30%",
-                      }}
+                            ? Math.min(100, Math.max(0, progress.percent)) / 100
+                            : 0.3,
+                      } as CSSProperties}
                     />
                   </div>
                 </div>
@@ -1043,7 +1044,6 @@ function LlmProviderPanel() {
   };
 
   const deleteCustom = (provider: LlmProvider) => {
-    if (!window.confirm("删除该自定义服务商？")) return;
     const rest = { ...config.llm_credentials };
     delete rest[provider];
     const next = { ...config, llm_credentials: rest };
@@ -1143,14 +1143,10 @@ function LlmProviderPanel() {
                   </div>
                   <span className="flex items-center gap-2">
                     <span
-                      className={cn(
-                        "type-micro rounded-md px-1.5 py-0.5",
-                        isCur
-                          ? "bg-accent-soft text-accent-soft-foreground"
-                          : local || hasKey
-                            ? "bg-success/10 text-success"
-                            : "bg-default/60 text-muted",
-                      )}
+                      className="badge-soft"
+                      data-tone={
+                        isCur ? "accent" : local || hasKey ? "success" : "neutral"
+                      }
                     >
                       {badge}
                     </span>
@@ -1219,6 +1215,39 @@ function ProviderEditor({
 }) {
   const creds = resolveLlmCreds(config, provider);
   const preset = llmPreset(provider);
+  // Two-step inline confirm for delete: first press arms (确认删除？), second executes.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const confirmTimer = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (confirmTimer.current != null) {
+        window.clearTimeout(confirmTimer.current);
+      }
+    },
+    [],
+  );
+
+  const pressDestructive = () => {
+    if (builtin) {
+      onReset();
+      return;
+    }
+    if (confirmingDelete) {
+      if (confirmTimer.current != null) {
+        window.clearTimeout(confirmTimer.current);
+        confirmTimer.current = null;
+      }
+      setConfirmingDelete(false);
+      onDelete();
+      return;
+    }
+    setConfirmingDelete(true);
+    confirmTimer.current = window.setTimeout(() => {
+      setConfirmingDelete(false);
+      confirmTimer.current = null;
+    }, 3000);
+  };
 
   return (
     <div className="flex flex-col gap-4 px-3 pb-4 pt-3">
@@ -1292,11 +1321,15 @@ function ProviderEditor({
           <Button
             size="sm"
             variant="ghost"
-            className="text-muted hover:text-danger data-[hovered=true]:text-danger"
-            onPress={builtin ? onReset : onDelete}
+            className={
+              confirmingDelete
+                ? "text-danger"
+                : "text-muted hover:text-danger data-[hovered=true]:text-danger"
+            }
+            onPress={pressDestructive}
           >
             <Trash2 size={14} />
-            {builtin ? "重置" : "删除"}
+            {builtin ? "重置" : confirmingDelete ? "确认删除？" : "删除"}
           </Button>
         </div>
         <Button
@@ -1345,7 +1378,7 @@ function GeneralPanel() {
 
       <div className="flex flex-col gap-2.5">
         <div className="type-ui">录音源</div>
-        <div className="flex flex-col gap-2" role="radiogroup" aria-label="录音源">
+        <div className="choice-row" role="radiogroup" aria-label="录音源">
           {(
             [
               { id: "external" as const, title: "只录外部" },
@@ -1361,12 +1394,7 @@ function GeneralPanel() {
                 type="button"
                 role="radio"
                 aria-checked={active}
-                className={cn(
-                  "w-full rounded-[10px] border px-3.5 py-3 text-left text-sm font-medium transition-colors",
-                  active
-                    ? "border-foreground/20 bg-surface-secondary text-foreground"
-                    : "border-border text-muted hover:border-foreground/15 hover:bg-surface-secondary/60",
-                )}
+                className={cn("choice-cell", active && "is-active")}
                 onClick={() => updateConfig("audio_capture_mode", item.id)}
               >
                 {item.title}
@@ -1483,54 +1511,50 @@ function HotkeysPanel() {
   ];
 
   return (
-    <>
-      <SectionCard className="max-w-2xl flex flex-col gap-4" title="全局快捷键">
-        <div className="flex flex-col gap-3">
-          {rows.map((row) => {
-            const active = listening === row.slot;
-            return (
-              <div
-                key={row.slot}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-default/30 px-3.5 py-3"
-              >
-                <div className="min-w-0 text-sm font-medium text-foreground">
-                  {row.title}
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  {active ? (
-                    <>
-                      <span className="text-[12px] text-accent">
-                        {preview ? `松键确认：${preview}` : "按下组合键…"}
-                      </span>
-                      <Button size="sm" variant="secondary" onPress={() => void abortCapture()}>
-                        取消
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="inline-flex h-auto min-h-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground shadow-none transition hover:border-foreground/25 hover:bg-default data-[hovered=true]:border-foreground/25 data-[hovered=true]:bg-default"
-                      aria-label={`修改快捷键：${row.title}`}
-                      onPress={() => void startCapture(row.slot)}
-                    >
-                      {hotkeySegments(row.binding.label).map((part, i) => (
-                        <span key={`${row.slot}-${part}-${i}`} className="inline-flex items-center gap-1">
-                          {i > 0 ? <span className="text-muted">+</span> : null}
-                          <Kbd>{part}</Kbd>
-                        </span>
-                      ))}
-                    </Button>
-                  )}
-                </div>
+    <SectionCard className="max-w-2xl flex flex-col gap-4" title="全局快捷键">
+      <div>
+        {rows.map((row) => {
+          const active = listening === row.slot;
+          return (
+            <div
+              key={row.slot}
+              className="set-linerow flex-wrap"
+            >
+              <div className="min-w-0 type-ui">
+                {row.title}
               </div>
-            );
-          })}
-        </div>
-      </SectionCard>
-
-  
-    </>
+              <div className="flex shrink-0 items-center gap-2">
+                {active ? (
+                  <>
+                    <span className="type-meta text-accent-soft-foreground!">
+                      {preview ? `松键确认：${preview}` : "按下组合键…"}
+                    </span>
+                    <Button size="sm" variant="secondary" onPress={() => void abortCapture()}>
+                      取消
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="inline-flex h-auto min-h-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground shadow-none transition hover:border-foreground/25 hover:bg-default data-[hovered=true]:border-foreground/25 data-[hovered=true]:bg-default"
+                    aria-label={`修改快捷键：${row.title}`}
+                    onPress={() => void startCapture(row.slot)}
+                  >
+                    {hotkeySegments(row.binding.label).map((part, i) => (
+                      <span key={`${row.slot}-${part}-${i}`} className="inline-flex items-center gap-1">
+                        {i > 0 ? <span className="text-muted">+</span> : null}
+                        <Kbd>{part}</Kbd>
+                      </span>
+                    ))}
+                  </Button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </SectionCard>
   );
 }
 
@@ -1622,7 +1646,7 @@ function PermissionsPanel() {
                   className={cn(
                     "grid h-10 w-10 shrink-0 place-items-center rounded-xl border",
                     granted
-                      ? "border-white/10 bg-white/8 text-foreground"
+                      ? "border-foreground/10 bg-foreground/[0.06] text-foreground"
                       : "border-border bg-default/40 text-muted",
                   )}
                 >
@@ -1804,11 +1828,11 @@ function UpdatesPanel() {
       <SectionCard className="max-w-2xl flex flex-col gap-4" title="当前版本">
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-foreground">
+            <div className="type-ui">
               {info?.name ?? "言落"}{" "}
               <span className="text-muted">v{current}</span>
             </div>
-            <p className="mt-1 text-[12px] text-muted">
+            <p className="mt-1 type-meta">
               {updateAvailable
                 ? `发现新版本 ${latest?.tag_name}${asset ? ` · ${asset.name}` : ""}`
                 : checking
@@ -1816,17 +1840,17 @@ function UpdatesPanel() {
                   : "已是最新，或尚未发布远程版本。"}
             </p>
             {asset && updateAvailable ? (
-              <p className="mt-1 text-[11px] text-muted">
+              <p className="mt-1 type-meta">
                 安装包约 {formatBytes(asset.size)}
               </p>
             ) : null}
             {checkError ? (
-              <p className="mt-1 text-[12px]" style={{ color: "var(--danger)" }}>
+              <p className="mt-1 text-[12px] text-danger">
                 检查失败：{checkError}（仍显示本地更新说明）
               </p>
             ) : null}
             {installMessage ? (
-              <p className="mt-1 text-[12px] text-muted">{installMessage}</p>
+              <p className="mt-1 type-meta">{installMessage}</p>
             ) : null}
           </div>
           <Button
@@ -1842,7 +1866,7 @@ function UpdatesPanel() {
 
         {downloading ? (
           <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between text-[12px] text-muted">
+            <div className="flex items-center justify-between type-meta">
               <span>正在下载安装包…</span>
               <span>
                 {percent != null
@@ -1859,11 +1883,11 @@ function UpdatesPanel() {
               <div
                 className="update-progress-bar"
                 style={{
-                  width:
+                  "--progress":
                     percent != null
-                      ? `${Math.min(100, Math.max(0, percent))}%`
-                      : "30%",
-                }}
+                      ? Math.min(100, Math.max(0, percent)) / 100
+                      : 0.3,
+                } as CSSProperties}
               />
             </div>
           </div>
@@ -1891,11 +1915,14 @@ function UpdatesPanel() {
               打开 Release 页下载
             </Button>
           ) : null}
-          <Button
-            size="sm"
-            variant="secondary"
-            isDisabled={downloading}
-            onPress={() =>
+        </div>
+
+        {/* link-grade actions — quiet mono links, not a row of equal buttons */}
+        <div className="flex flex-wrap items-center gap-4">
+          <button
+            type="button"
+            className="dlink muted"
+            onClick={() =>
               void invoke("open_update_download_dir").catch((error) => {
                 toast.danger(
                   `无法打开下载目录: ${error instanceof Error ? error.message : String(error)}`,
@@ -1903,25 +1930,22 @@ function UpdatesPanel() {
               })
             }
           >
-            <FolderOpen size={14} />
             下载目录
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onPress={() => void open(APP_RELEASES_URL)}
+          </button>
+          <button
+            type="button"
+            className="dlink muted"
+            onClick={() => void open(APP_RELEASES_URL)}
           >
-            <ExternalLink size={14} />
             Releases
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onPress={() => void open(APP_REPO_URL)}
+          </button>
+          <button
+            type="button"
+            className="dlink muted"
+            onClick={() => void open(APP_REPO_URL)}
           >
-            <ExternalLink size={14} />
             仓库
-          </Button>
+          </button>
         </div>
       </SectionCard>
 
@@ -1934,7 +1958,7 @@ function UpdatesPanel() {
                   v{entry.version}
                 </h3>
                 {entry.date ? (
-                  <time className="text-[11px] text-muted">{entry.date}</time>
+                  <time className="type-mono-meta">{entry.date}</time>
                 ) : null}
               </header>
               <ul className="flex flex-col gap-1.5">
@@ -2089,17 +2113,16 @@ function AgentPanel() {
           <SectionCard className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="type-section">
-                  {meta.name}
-                  <span className="ml-2 type-meta font-normal">{meta.desc}</span>
-                </div>
+                <div className="type-section">{meta.name}</div>
                 <div className="mt-0.5 type-meta">
+                  {meta.desc}
+                  {" · "}
                   {configured ? (
                     <span className="text-success-soft-foreground">
                       已检测到路径
                     </span>
                   ) : (
-                    <span className="text-muted">未检测到路径</span>
+                    <span>未检测到路径</span>
                   )}
                 </div>
               </div>
@@ -2218,42 +2241,49 @@ function AgentPanel() {
       {config.agent_trusted_dirs.length > 0 ? (
         <Reveal index={2}>
         <SectionCard className="flex flex-col gap-2" title="Codex 信任目录">
-          {config.agent_trusted_dirs.map((dir) => (
-            <div
-              key={dir}
-              className="flex items-center justify-between gap-2 rounded-lg border border-border bg-default/25 px-3 py-2"
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">
-                {dir}
-              </span>
-              <Button
-                isIconOnly
-                size="sm"
-                variant="ghost"
-                className="h-auto min-h-0 rounded-md p-1 text-muted shadow-none hover:bg-default/50 hover:text-danger data-[hovered=true]:bg-default/50 data-[hovered=true]:text-danger"
-                aria-label={`移除信任目录 ${dir}`}
-                onPress={() =>
-                  updateConfig(
-                    "agent_trusted_dirs",
-                    config.agent_trusted_dirs.filter((d) => d !== dir),
-                  )
-                }
+          <div>
+            {config.agent_trusted_dirs.map((dir) => (
+              <div
+                key={dir}
+                className="set-linerow"
               >
-                <Trash2 size={12} aria-hidden />
-              </Button>
-            </div>
-          ))}
+                <span className="min-w-0 flex-1 truncate type-mono-meta text-foreground!">
+                  {dir}
+                </span>
+                <Button
+                  isIconOnly
+                  size="sm"
+                  variant="ghost"
+                  className="h-auto min-h-0 rounded-md p-1 text-muted shadow-none hover:bg-default/50 hover:text-danger data-[hovered=true]:bg-default/50 data-[hovered=true]:text-danger"
+                  aria-label={`移除信任目录 ${dir}`}
+                  onPress={() =>
+                    updateConfig(
+                      "agent_trusted_dirs",
+                      config.agent_trusted_dirs.filter((d) => d !== dir),
+                    )
+                  }
+                >
+                  <Trash2 size={12} aria-hidden />
+                </Button>
+              </div>
+            ))}
+          </div>
         </SectionCard>
         </Reveal>
       ) : null}
 
-      <Reveal index={2}>
-      <SectionCard>
-        <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
+      <Reveal index={3}>
+      <div className="form-actions">
+        <Button
+          className="form-actions-primary btn-press"
+          fullWidth
+          variant="primary"
+          onPress={() => void saveConfig()}
+        >
           <Save size={16} />
           保存
         </Button>
-      </SectionCard>
+      </div>
       </Reveal>
     </div>
   );

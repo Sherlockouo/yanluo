@@ -36,6 +36,7 @@ import {
 } from "@/lib/alignment";
 import type { CharacterAlignment, TranscriptSegment } from "@/types";
 import { motion } from "framer-motion";
+import { useFade } from "@/lib/motion";
 
 type WordStatus = "spoken" | "unspoken" | "current";
 type ViewMode = "focus" | "read";
@@ -494,15 +495,16 @@ function TranscriptControls({ className }: { className?: string }) {
     setIsScrubbing,
   } = useTranscript();
   const { currentTime, progress } = useClock();
+  const fade = useFade();
 
   if (!src) return null;
 
   return (
-    <motion.div className={cn("flex flex-col gap-2", className)}
-    initial={{ opacity: 0}}
-    animate={{ opacity: 1}}
-    exit={{ opacity: 0}}
-    transition={{ duration: 0.18}}
+    <motion.div
+      className={cn("flex flex-col gap-2", className)}
+      initial={fade.initial}
+      animate={fade.animate}
+      transition={fade.transition}
     >
       <div className="flex items-center gap-3">
         <Button
@@ -548,7 +550,7 @@ function TranscriptModeToggle({ className }: { className?: string }) {
           className={cn(
             "inline-flex h-auto min-h-0 items-center gap-1 rounded-none px-2.5 py-1 text-[11px] shadow-none data-[pressed=true]:scale-100",
             mode === "focus"
-              ? "bg-accent/15 font-medium text-accent data-[hovered=true]:bg-accent/15"
+              ? "bg-accent/15 font-medium text-accent-soft-foreground data-[hovered=true]:bg-accent/15"
               : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
           )}
           onPress={() => setMode("focus")}
@@ -563,7 +565,7 @@ function TranscriptModeToggle({ className }: { className?: string }) {
           className={cn(
             "inline-flex h-auto min-h-0 items-center gap-1 rounded-none px-2.5 py-1 text-[11px] shadow-none data-[pressed=true]:scale-100",
             mode === "read"
-              ? "bg-accent/15 font-medium text-accent data-[hovered=true]:bg-accent/15"
+              ? "bg-accent/15 font-medium text-accent-soft-foreground data-[hovered=true]:bg-accent/15"
               : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
           )}
           onPress={() => setMode("read")}
@@ -677,7 +679,7 @@ function TranscriptContent({
                   }
                   data-active={isActive || undefined}
                   className={cn(
-                    "group relative rounded-xl transition-[opacity,background-color,box-shadow] duration-200",
+                    "group relative rounded-xl transition-[opacity,background-color] duration-200",
                     mode === "focus" &&
                       isActive &&
                       "bg-accent/[0.07] px-4 py-3.5 ring-1 ring-accent/15",
@@ -690,7 +692,7 @@ function TranscriptContent({
                   <Button
                     variant="ghost"
                     aria-label={`跳转到 ${formatClock(para.startTime)}`}
-                    className="mb-1.5 h-auto min-h-0 justify-start rounded-none px-0 py-0 font-mono text-[10px] font-normal tabular-nums tracking-wider text-muted/70 shadow-none hover:text-accent data-[hovered=true]:bg-transparent data-[hovered=true]:text-accent data-[pressed=true]:scale-100 data-[pressed=true]:bg-transparent"
+                    className="mb-1.5 h-auto min-h-0 justify-start rounded-none px-0 py-0 font-mono text-[10px] font-normal tabular-nums tracking-wider text-muted/70 shadow-none hover:text-accent-soft-foreground data-[hovered=true]:bg-transparent data-[hovered=true]:text-accent-soft-foreground data-[pressed=true]:scale-100 data-[pressed=true]:bg-transparent"
                     onPress={() => seekToParagraph(para)}
                   >
                     {formatClock(para.startTime)}
@@ -723,7 +725,7 @@ function TranscriptContent({
                               /[A-Za-z0-9]/.test(word.text) && "px-px",
                               status === "spoken" && "text-muted",
                               status === "current" &&
-                                "bg-accent/25 font-medium text-accent",
+                                "bg-accent/25 font-medium text-accent-soft-foreground",
                               status === "unspoken" && "text-inherit",
                             )}
                             onClick={() => seekToWord(word)}

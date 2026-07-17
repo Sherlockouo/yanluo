@@ -157,7 +157,7 @@ export function LlmProviderSelect({ className }: { className?: string }) {
       {!ready ? (
         <Link
           to="/settings?tab=llm"
-          className="text-[12px] text-accent hover:underline"
+          className="text-[12px] text-accent-soft-foreground hover:underline"
         >
           配置
         </Link>

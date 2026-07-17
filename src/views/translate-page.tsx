@@ -74,7 +74,6 @@ export function TranslatePage({
       <Select.Trigger
         className={cn(
           "h-7 gap-1 rounded-lg border border-border/80 bg-surface px-2.5",
-          "shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)_inset]",
           "text-[12px] font-medium text-foreground items-center",
           "transition-[border-color,background-color] duration-150",
           "hover:border-foreground/20 hover:bg-surface-secondary/60",
@@ -197,8 +196,8 @@ export function TranslatePage({
         </div>
       ) : (
         <div className="recs">
-          {entries.map((entry, i) => (
-            <Reveal key={entry.id} index={i}>
+          {entries.map((entry, i) => {
+            const row = (
               <article className="rec">
                 <div className="rec-l">
                   <span>{new Date(entry.created_at).toLocaleString()}</span>
@@ -215,8 +214,17 @@ export function TranslatePage({
                   />
                 </div>
               </article>
-            </Reveal>
-          ))}
+            );
+            // Reveal (framer, willChange) only for the first screenful —
+            // beyond that a plain div keeps long lists cheap.
+            return i < 8 ? (
+              <Reveal key={entry.id} index={i}>
+                {row}
+              </Reveal>
+            ) : (
+              <div key={entry.id}>{row}</div>
+            );
+          })}
         </div>
       )}
     </>

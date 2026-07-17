@@ -71,10 +71,9 @@ export function PageShell({
         "mx-auto flex w-full max-w-3xl flex-col gap-6 pb-10",
         className,
       )}
-      initial={reduce ? false : { opacity: 0.96, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
+      initial={reduce ? false : { opacity: 0.92, y: 12, scale: 0.995 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: duration.normal, ease: easeOut }}
-      style={{ willChange: "opacity, transform" }}
     >
       {children}
     </motion.section>
@@ -219,7 +218,6 @@ export function ModeSwitch({
       initial={fade.initial}
       animate={fade.animate}
       transition={fade.transition}
-      style={{ willChange: "opacity, transform" }}
     >
       {children}
     </motion.div>
@@ -246,7 +244,6 @@ export function Reveal({
       initial={collapse.initial}
       animate={collapse.animate}
       transition={{ ...collapse.transition, delay }}
-      style={{ willChange: "opacity, transform" }}
     >
       {children}
     </motion.div>
@@ -271,7 +268,6 @@ export function SoftCollapse({
       initial={collapse.initial}
       animate={collapse.animate}
       transition={collapse.transition}
-      style={{ willChange: "opacity, transform" }}
     >
       {children}
     </motion.div>

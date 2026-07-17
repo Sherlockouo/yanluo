@@ -374,6 +374,15 @@ export function TranscribePage({
       const params = new URLSearchParams();
       params.set("view", paintedView);
       if (paintedView === "result" && paintedId) params.set("id", paintedId);
+      // Skip when the URL already says this — a redundant write re-renders
+      // DraftPage on the default tab's first paint.
+      const curId = searchParams.get("id");
+      if (
+        searchParams.get("view") === paintedView &&
+        (curId ?? null) === (params.get("id") ?? null)
+      ) {
+        return;
+      }
       setSearchParams(params, { replace: true });
     });
     return () => window.cancelAnimationFrame(id);
@@ -749,26 +758,31 @@ function UploadPhase({
 
   return (
     <div className="flex w-full flex-col gap-5">
-      <div className="tswitch" role="tablist" aria-label="来源">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={source === "file"}
-          className={cn("o", source === "file" && "is-active")}
-          onClick={() => setSource("file")}
-        >
-          本地文件
-        </button>
-        <span className="sep">/</span>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={source === "link"}
-          className={cn("o", source === "link" && "is-active")}
-          onClick={() => setSource("link")}
-        >
-          网络链接
-        </button>
+      <div className="flex items-center justify-between gap-3">
+        <div className="tswitch" role="tablist" aria-label="来源">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={source === "file"}
+            className={cn("o", source === "file" && "is-active")}
+            onClick={() => setSource("file")}
+          >
+            本地文件
+          </button>
+          <span className="sep">/</span>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={source === "link"}
+            className={cn("o", source === "link" && "is-active")}
+            onClick={() => setSource("link")}
+          >
+            网络链接
+          </button>
+        </div>
+        {source === "file" ? (
+          <span className="type-meta">拖入、粘贴或选择</span>
+        ) : null}
       </div>
 
       <ModeSwitch modeKey={source}>
@@ -907,7 +921,7 @@ function ProcessingPhase({
     name?.includes("下载") === true || downloadPercent != null;
   return (
     <SectionCard className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4 py-16 text-center">
-      <div className="grid h-14 w-14 place-items-center rounded-2xl bg-accent/10 text-accent ring-1 ring-accent/20">
+      <div className="dropzone-ic">
         {downloading ? (
           <Download size={24} aria-hidden />
         ) : (
@@ -1008,6 +1022,9 @@ function ResultPhase({
       <div className="w-full">
         {sessionEntries.length === 0 ? (
           <div className="dropzone" style={{ minHeight: 220 }}>
+            <span className="dropzone-ic">
+              <FileAudio size={22} aria-hidden />
+            </span>
             <span className="dropzone-t">还没有转写结果</span>
             <Button variant="primary" onPress={onNew}>
               <Plus size={16} aria-hidden />

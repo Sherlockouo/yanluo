@@ -52,6 +52,31 @@ export function HistoryPage({
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const collapse = useCollapse();
 
+  // First paint: few rows (each row can run a refine diff). Ramp after idle,
+  // then render the rest when the user scrolls near the bottom — mirrors
+  // TranscribePage's listReady/visibleCount deferral.
+  const [visibleCount, setVisibleCount] = useState(8);
+  useEffect(() => {
+    const raise = () => setVisibleCount(30);
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(raise, { timeout: 400 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(raise, 300);
+    return () => window.clearTimeout(id);
+  }, []);
+  useEffect(() => {
+    if (visibleCount >= history.length) return;
+    const onScroll = () => {
+      const nearBottom =
+        window.innerHeight + window.scrollY >=
+        document.documentElement.scrollHeight - 600;
+      if (nearBottom) setVisibleCount(history.length);
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [history.length, visibleCount]);
+
   const runCleanup = async (label: string, action: () => Promise<void>) => {
     await action();
     setExpandedId(null);
@@ -74,76 +99,76 @@ export function HistoryPage({
   const headerAction =
     history.length > 0 ? (
       <div className="relative">
-              <Button
-                size="sm"
-                variant="secondary"
-                aria-expanded={cleanupOpen}
-                aria-haspopup="menu"
-                onPress={() => setCleanupOpen((v) => !v)}
-              >
-                <Trash2 size={14} />
-                清理
-              </Button>
-              {cleanupOpen ? (
-                <>
-                  <div
-                    role="presentation"
-                    className="fixed inset-0 z-40 cursor-default"
-                    onClick={() => setCleanupOpen(false)}
-                  />
-                  <div className="absolute right-0 z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-border bg-surface py-1 shadow-xl">
-                    <CleanupItem
-                      label="保留最近 100 条"
-                      onPress={() =>
-                        void runCleanup("已保留最近 100 条", () =>
-                          pruneHistory(100),
-                        )
-                      }
-                    />
-                    <CleanupItem
-                      label="保留最近 500 条"
-                      onPress={() =>
-                        void runCleanup("已保留最近 500 条", () =>
-                          pruneHistory(500),
-                        )
-                      }
-                    />
-                    <CleanupItem
-                      label="删除 30 天前"
-                      onPress={() =>
-                        void runCleanup("已删除 30 天前记录", () =>
-                          pruneHistoryOlderThan(30),
-                        )
-                      }
-                    />
-                    <CleanupItem
-                      label="删除 90 天前"
-                      onPress={() =>
-                        void runCleanup("已删除 90 天前记录", () =>
-                          pruneHistoryOlderThan(90),
-                        )
-                      }
-                    />
-                    <div className="my-1 border-t border-border" />
-                    <CleanupItem
-                      label="清空全部"
-                      danger
-                      onPress={() => {
-                        if (
-                          !window.confirm(
-                            `确定清空全部 ${history.length} 条记录？`,
-                          )
-                        ) {
-                          return;
-                        }
-                        void runCleanup("已清空历史", () => clearHistory());
-                      }}
-                    />
-                  </div>
-                </>
-              ) : null}
+        <Button
+          size="sm"
+          variant="secondary"
+          aria-expanded={cleanupOpen}
+          aria-haspopup="menu"
+          onPress={() => setCleanupOpen((v) => !v)}
+        >
+          <Trash2 size={14} />
+          清理
+        </Button>
+        {cleanupOpen ? (
+          <>
+            <div
+              role="presentation"
+              className="fixed inset-0 z-40 cursor-default"
+              onClick={() => setCleanupOpen(false)}
+            />
+            <div className="absolute right-0 z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-border bg-surface py-1 shadow-lg">
+              <CleanupItem
+                label="保留最近 100 条"
+                onPress={() =>
+                  void runCleanup("已保留最近 100 条", () =>
+                    pruneHistory(100),
+                  )
+                }
+              />
+              <CleanupItem
+                label="保留最近 500 条"
+                onPress={() =>
+                  void runCleanup("已保留最近 500 条", () =>
+                    pruneHistory(500),
+                  )
+                }
+              />
+              <CleanupItem
+                label="删除 30 天前"
+                onPress={() =>
+                  void runCleanup("已删除 30 天前记录", () =>
+                    pruneHistoryOlderThan(30),
+                  )
+                }
+              />
+              <CleanupItem
+                label="删除 90 天前"
+                onPress={() =>
+                  void runCleanup("已删除 90 天前记录", () =>
+                    pruneHistoryOlderThan(90),
+                  )
+                }
+              />
+              <div className="my-1 border-t border-border" />
+              <CleanupItem
+                label="清空全部"
+                danger
+                onPress={() => {
+                  if (
+                    !window.confirm(
+                      `确定清空全部 ${history.length} 条记录？`,
+                    )
+                  ) {
+                    return;
+                  }
+                  void runCleanup("已清空历史", () => clearHistory());
+                }}
+              />
             </div>
-      ) : null;
+          </>
+        ) : null}
+      </div>
+    ) : null;
 
   const content = (
     <>
@@ -168,34 +193,41 @@ export function HistoryPage({
         </div>
       ) : (
         <div className="recs">
-          {history.map((entry, i) => {
+          {history.slice(0, visibleCount).map((entry, i) => {
             const open = expandedId === entry.id;
-            return (
+            const row = (
+              <div className="rec">
+                <HistoryRow
+                  entry={entry}
+                  open={open}
+                  onToggle={() =>
+                    setExpandedId((id) =>
+                      id === entry.id ? null : entry.id,
+                    )
+                  }
+                  onDelete={() => void removeEntry(entry.id)}
+                />
+                {open ? (
+                  <motion.div
+                    key="expanded"
+                    initial={collapse.initial}
+                    animate={collapse.animate}
+                    transition={collapse.transition}
+                    style={{ willChange: "opacity, transform" }}
+                  >
+                    <ExpandedViewer entry={entry} />
+                  </motion.div>
+                ) : null}
+              </div>
+            );
+            // Reveal (framer, willChange) only for the first screenful —
+            // beyond that a plain div keeps long lists cheap.
+            return i < 8 ? (
               <Reveal key={entry.id} index={i}>
-                <div className="rec">
-                  <HistoryRow
-                    entry={entry}
-                    open={open}
-                    onToggle={() =>
-                      setExpandedId((id) =>
-                        id === entry.id ? null : entry.id,
-                      )
-                    }
-                    onDelete={() => void removeEntry(entry.id)}
-                  />
-                  {open ? (
-                    <motion.div
-                      key="expanded"
-                      initial={collapse.initial}
-                      animate={collapse.animate}
-                      transition={collapse.transition}
-                      style={{ willChange: "opacity, transform" }}
-                    >
-                      <ExpandedViewer entry={entry} />
-                    </motion.div>
-                  ) : null}
-                </div>
+                {row}
               </Reveal>
+            ) : (
+              <div key={entry.id}>{row}</div>
             );
           })}
         </div>
@@ -278,7 +310,7 @@ function HistoryRow({
       <ChevronDown
         size={16}
         className={cn(
-          "mt-1 shrink-0 text-muted transition-transform duration-200",
+          "mt-1 shrink-0 text-muted transition-transform duration-150",
           open && "rotate-180",
         )}
       />
@@ -323,7 +355,7 @@ function ExpandedViewer({ entry }: { entry: HistoryEntry }) {
   const isFn = (view.source ?? "fn") === "fn";
 
   return (
-    <SectionCard className="p-4!">
+    <SectionCard className="panel-compact">
       {isTranslate && showDiff ? (
         <div className="mb-4">
           <SemanticPair before={view.raw_text} after={view.text} />

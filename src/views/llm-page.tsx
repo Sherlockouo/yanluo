@@ -295,7 +295,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
 
           <p className="type-meta">
             Provider 与模型在标题栏选择，凭证在{" "}
-            <Link to="/settings?tab=llm" className="text-accent hover:underline">
+            <Link to="/settings?tab=llm" className="text-accent-soft-foreground hover:underline">
               设置
             </Link>
             {" 配置。"}
@@ -419,7 +419,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
               未标 {ratingStats.unlabeled} · 差 {ratingStats.bad} · 修正{" "}
               {userTripleCount} · 词库 {ratingStats.applied}
               {" · "}
-              <Link to="/settings?tab=vocabulary" className="text-accent hover:underline">
+              <Link to="/settings?tab=vocabulary" className="text-accent-soft-foreground hover:underline">
                 词库
               </Link>
             </p>
@@ -503,7 +503,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
                         variant="ghost"
                         className={cn(
                           "h-auto min-h-0 px-1.5 py-0.5 type-meta shadow-none transition-colors hover:text-foreground data-[hovered=true]:bg-transparent",
-                          editing ? "text-accent" : "text-muted",
+                          editing ? "text-accent-soft-foreground" : "text-muted",
                         )}
                         onPress={() =>
                           setEditingId((id) =>

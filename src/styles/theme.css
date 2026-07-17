@@ -17,11 +17,11 @@
   --color-accent-fg: #ffffff;
 
   /* Type ladder — Jobs: clear hierarchy, not denser soup */
-  --text-display: 2.125rem;
+  --text-display: 2.375rem;
   --text-section: 1.0625rem;
   --text-body: 0.9375rem;
   --text-ui: 0.875rem;
-  --text-meta: 0.75rem;
+  --text-meta: 0.8125rem;
   --text-micro: 0.6875rem;
 }
 
@@ -44,15 +44,16 @@
   /* Warm near-white paper + clean white cards + warm ink (浅色 v3) */
   --background: #f4f2ee;
   --foreground: #1c1a17;
-  --muted: #6e6862;
-  --border: rgba(28, 26, 23, 0.1);
-  --separator: rgba(28, 26, 23, 0.08);
-  --focus: #d9722e;
+  --muted: #5f5952;
+  --faint: #6e6860;
+  --border: rgba(28, 26, 23, 0.18);
+  --separator: rgba(28, 26, 23, 0.13);
+  --focus: #e37226;
   --link: #a0561f;
 
   /* Bright orange = only primary action / recording light. White text on solid;
      copper text on paper uses the deeper --accent-soft-foreground (≥4.5:1 on paper). */
-  --accent: #d9722e;
+  --accent: #f78438;
   --accent-foreground: #ffffff;
   --accent-hover: #be611f;
   --accent-soft: rgba(217, 114, 46, 0.11);
@@ -98,8 +99,8 @@
 
   --field-background: #ffffff;
   --field-foreground: #1c1a17;
-  --field-placeholder: #8a847c;
-  --field-border: rgba(28, 26, 23, 0.16);
+  --field-placeholder: #726b63;
+  --field-border: rgba(28, 26, 23, 0.20);
   --field-hover: #f5f2ed;
   --field-focus: #ffffff;
   --field-border-hover: rgba(28, 26, 23, 0.22);
@@ -119,6 +120,8 @@
   --background: #0e0f12;
   --foreground: #e8e6e3;
   --muted: #8b8a86;
+  /* meta/timestamp tier — matches the old foreground@42% mix, slightly up */
+  --faint: #7a7978;
   --border: rgba(232, 230, 227, 0.08);
   --separator: rgba(232, 230, 227, 0.07);
   --focus: #c4784a;

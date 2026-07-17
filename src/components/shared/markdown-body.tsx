@@ -1,13 +1,9 @@
+import { memo } from "react";
 import { Streamdown } from "streamdown";
 import "streamdown/styles.css";
 import { cn } from "@/lib/cn";
 
-/**
- * LLM / agent markdown — Streamdown (Vercel):
- * streaming-safe incomplete MD, GFM tables, hardened rehype.
- * Best fit for agent chat among react-markdown / StreamMD / StreamMDX.
- */
-export function MarkdownBody({
+export const MarkdownBody = memo(function MarkdownBody({
   text,
   className,
   streaming = false,
@@ -28,4 +24,4 @@ export function MarkdownBody({
       <Streamdown isAnimating={streaming}>{t}</Streamdown>
     </div>
   );
-}
+}, (prev, next) => prev.text === next.text && prev.streaming === next.streaming && prev.className === next.className);

@@ -306,8 +306,8 @@ html.light[data-floating="1"] .hud-agent-icon-btn:hover {
 }
 
 .hud-agent-icon-btn.is-danger:hover {
-  color: #ff453a;
-  background: rgba(255, 69, 58, 0.16);
+  color: var(--danger);
+  background: color-mix(in oklab, var(--danger) 16%, transparent);
 }
 
 .hud-agent-send {
@@ -728,12 +728,11 @@ html.light[data-floating-lang="1"] .hud-lang-chip.is-open {
   box-shadow: none;
   transition: none;
   align-self: center;
-  will-change: height;
   opacity: 0.92;
 }
 
 .audio-bars-active .audio-bar {
-  background: #c4784a;
+  background: var(--accent);
   opacity: 1;
 }
 
@@ -743,7 +742,95 @@ html.light[data-floating="1"] .audio-bar {
 }
 
 html.light[data-floating="1"] .audio-bars-active .audio-bar {
-  background: #c4784a;
+  background: var(--accent);
+}
+
+/* Brand-preview capsule — CSS-only 5-bar audio visualizer */
+.hud-brand-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 20px;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+
+.hud-brand-bar {
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent, #c4784a);
+  opacity: 0.5;
+  transform-origin: bottom;
+  animation: hud-bar-pulse 1.1s ease-in-out infinite;
+}
+
+.hud-brand-bar:nth-child(1) {
+  height: 6px;
+  animation-delay: 0s;
+}
+.hud-brand-bar:nth-child(2) {
+  height: 14px;
+  animation-delay: 0.1s;
+}
+.hud-brand-bar:nth-child(3) {
+  height: 20px;
+  animation-delay: 0.2s;
+}
+.hud-brand-bar:nth-child(4) {
+  height: 12px;
+  animation-delay: 0.15s;
+}
+.hud-brand-bar:nth-child(5) {
+  height: 8px;
+  animation-delay: 0.05s;
+}
+
+@keyframes hud-bar-pulse {
+  0%,
+  100% {
+    transform: scaleY(0.55);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+.hud-capsule {
+  min-width: 420px;
+  padding: 10px 18px 10px 14px;
+  background: rgba(23, 25, 30, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+html.light[data-floating="1"] .hud-capsule {
+  background: rgba(244, 242, 238, 0.96);
+  border-color: rgba(28, 26, 23, 0.12);
+}
+
+.hud-fn-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border-radius: 6px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--muted);
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
+html.light[data-floating="1"] .hud-fn-badge {
+  border-color: rgba(28, 26, 23, 0.14);
+  color: var(--faint);
 }
 
 .hud-colon {
@@ -888,12 +975,12 @@ html.light[data-floating="1"] .hud-text-refining .hud-text-scroll {
 }
 
 .hud-text-refined .hud-text-scroll {
-  color: #30d158;
-  transition: color 280ms ease;
+  color: var(--success);
+  transition: color 200ms ease;
 }
 
 html.light[data-floating="1"] .hud-text-refined .hud-text-scroll {
-  color: #248a3d;
+  color: var(--success-soft-foreground);
 }
 
 .hud-capsule-refining .audio-bar {

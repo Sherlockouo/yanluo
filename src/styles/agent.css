@@ -23,13 +23,10 @@
 
 .agent-job-head {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-center;
   gap: 0.75rem;
 }
 
-.agent-job-back {
-  margin-top: 0.2rem;
-}
 
 .agent-msg-block,
 .agent-chat-bubble,
@@ -77,8 +74,59 @@
   opacity: 1;
 }
 
-.agent-chat-bubble .agent-md {
+.agent-chat-bubble .agent-md,
+.agent-msg-block .agent-md {
   padding-right: 1.5rem;
+}
+
+/* Mono meta — timestamps, session ids, durations (IBM Plex Mono) */
+.type-mono-meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* Copper pulse — "job is alive" cue. Opacity only, reduced-motion guarded. */
+@keyframes agent-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.agent-live-pulse {
+  animation: agent-pulse 1.6s ease-in-out infinite;
+}
+
+/* Timeline row enter — opacity + transform only, ≤220ms, enter-only */
+@keyframes agent-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.agent-chat-row {
+  animation: agent-row-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-live-pulse {
+    animation: none;
+  }
+  .agent-chat-row {
+    animation: none;
+  }
 }
 
 .agent-profile-trigger {
@@ -114,13 +162,17 @@
   );
 }
 
-/* Job list rows — no card chrome; status color = focus */
+/* Job list — manuscript-index language: mono-meta rows on hairlines */
+.agent-job-list {
+  border-top: 1px solid var(--separator);
+}
+
 .agent-job-row {
   display: flex;
   align-items: flex-start;
   gap: 0.5rem;
   padding: 0.7rem 0.65rem;
-  border-radius: 12px;
+  border-bottom: 1px solid var(--separator);
   transition: background 140ms ease;
 }
 
@@ -136,6 +188,37 @@
   background: color-mix(in oklab, var(--danger) 6%, transparent);
 }
 
+/* Kicker: agent · status · time — mono meta, status carries the color */
+.agent-job-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.agent-job-kicker .is-status-active {
+  color: var(--accent-soft-foreground);
+}
+
+.agent-job-kicker .is-status-done {
+  color: var(--success);
+}
+
+.agent-job-kicker .is-status-error {
+  color: var(--danger);
+}
+
+.agent-job-prompt {
+  margin-top: 0.2rem;
+  font-size: var(--text-ui);
+  line-height: 1.45;
+  color: var(--foreground);
+}
+
 .agent-job-status-dot {
   width: 7px;
   height: 7px;
@@ -147,6 +230,13 @@
 .agent-job-status-dot.is-active {
   background: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+  animation: agent-pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-job-status-dot.is-active {
+    animation: none;
+  }
 }
 
 .agent-job-status-dot.is-done {
@@ -203,6 +293,7 @@
 }
 
 .agent-chat {
+  border-radius: 14px;
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 55%, transparent);
 }
 
@@ -237,7 +328,8 @@
 
 .agent-chat-bubble {
   padding: 0.65rem 0.95rem;
-  border-radius: 1.15rem;
+  border-radius: 14px;
+  border-bottom-right-radius: 4px;
   background: var(--surface-secondary);
   color: var(--foreground);
 }
@@ -282,6 +374,21 @@
 
 .agent-tool-card-head + * {
   margin-top: 0.35rem;
+}
+
+.agent-tool-brief {
+  margin-top: 0.25rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-tool-brief.is-failed {
+  color: var(--danger);
 }
 
 .agent-tool-card-name {
@@ -462,40 +569,20 @@
   background: var(--surface);
 }
 
-/* Continue composer (Cursor-like) */
+/* Continue composer (Cursor-like) — hairline border, no drop shadow */
 .agent-composer {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 0;
   border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
-  border-radius: 16px;
+  border-radius: 14px;
   background: var(--surface);
-  box-shadow:
-    0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent) inset,
-    0 8px 24px color-mix(in oklab, var(--foreground) 4%, transparent);
+  transition: border-color 140ms ease;
 }
 
-.agent-composer-attach-hint {
-  position: absolute;
-  left: 10px;
-  top: -11px;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in oklab, var(--border) 85%, transparent);
-  background: var(--surface);
-  font-size: 11px;
-  color: color-mix(in oklab, var(--foreground) 65%, transparent);
-  transition: background 120ms ease, color 120ms ease;
-}
-
-.agent-composer-attach-hint:hover {
-  background: color-mix(in oklab, var(--muted) 12%, var(--surface));
-  color: var(--foreground);
+.agent-composer:focus-within {
+  border-color: var(--field-border-focus);
 }
 
 .agent-composer-field {
@@ -503,7 +590,7 @@
   gap: 0;
 }
 
-/* Attachment chips — small removable rows above the composer input */
+/* Attachment chips — quiet mono tokens, not boxed pills */
 .agent-attach-chips {
   display: flex;
   flex-wrap: wrap;
@@ -518,10 +605,11 @@
   max-width: 220px;
   height: 24px;
   padding: 0 6px 0 8px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
-  background: var(--surface-secondary);
-  font-size: 12px;
+  border-radius: 6px;
+  border: 0;
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11px;
   color: var(--foreground);
 }
 
@@ -648,8 +736,68 @@
   cursor: not-allowed;
 }
 
-.agent-composer-meta {
-  margin-right: auto;
+/* Reply attachment chips — quiet mono tokens (same language as .agent-attach-chip) */
+.agent-reply-chip {
+  display: inline-flex;
+  max-width: 10rem;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 2px 2px 6px;
+  border-radius: 6px;
+  border: 0;
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+  font-family: var(--font-mono);
   font-size: 11px;
-  color: color-mix(in oklab, var(--foreground) 55%, transparent);
+  color: var(--foreground);
+  transition: background 120ms ease;
+}
+
+.agent-reply-chip:hover {
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.agent-reply-chip.is-selected {
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+}
+
+/* Per-event timestamp — IBM Plex Mono, micro size */
+.agent-chat-ts {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  line-height: 1.3;
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+.agent-chat-row > .agent-chat-ts {
+  margin-top: 0.25rem;
+  padding-inline: 0.25rem;
+}
+
+/* Empty states */
+.agent-list-empty {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: 1.5rem 0;
+}
+
+.agent-list-empty .dropzone {
+  width: 100%;
+  min-height: 220px;
+}
+
+.agent-chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 3rem 1rem;
+  text-align: center;
+}
+
+/* Sidebar 文件 — hairline section, not a boxed card */
+.agent-side-files {
+  padding-top: 0.25rem;
 }

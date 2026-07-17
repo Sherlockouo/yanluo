@@ -253,19 +253,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void loadConfig();
-    // History / agent jobs can be multi‑MiB on disk. Defer past first paint.
+    // History / agent jobs can be multi‑MiB on disk. Defer past first paint,
+    // and split into two idle batches so the setState re-renders don't pile
+    // into the first-click window.
     let idleId: number | null = null;
+    let idleId2: number | null = null;
     let timeoutId: number | null = null;
-    const deferred = () => {
+    let timeoutId2: number | null = null;
+    const deferredHistory = () => {
       void loadHistory();
+    };
+    const deferredAgent = () => {
       void loadAgentJobs();
       void loadAgentModels();
       void refreshAgentModels(false);
     };
     if (typeof window.requestIdleCallback === "function") {
-      idleId = window.requestIdleCallback(deferred, { timeout: 1200 });
+      idleId = window.requestIdleCallback(deferredHistory, { timeout: 1200 });
+      idleId2 = window.requestIdleCallback(deferredAgent, { timeout: 2700 });
     } else {
-      timeoutId = window.setTimeout(deferred, 0);
+      timeoutId = window.setTimeout(deferredHistory, 0);
+      timeoutId2 = window.setTimeout(deferredAgent, 1500);
     }
 
     const unlisteners: UnlistenFn[] = [];
@@ -515,7 +523,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (idleId != null && typeof window.cancelIdleCallback === "function") {
         window.cancelIdleCallback(idleId);
       }
+      if (idleId2 != null && typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(idleId2);
+      }
       if (timeoutId != null) window.clearTimeout(timeoutId);
+      if (timeoutId2 != null) window.clearTimeout(timeoutId2);
       unlisteners.forEach((unlisten) => unlisten());
     };
   }, [loadConfig, loadHistory, loadAgentJobs, loadAgentModels, refreshAgentModels, navigate]);

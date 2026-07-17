@@ -21,7 +21,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { PageHeader, PageShell } from "@/components/shared/page-shell";
+import { PageHeader, PageShell, Reveal } from "@/components/shared/page-shell";
 import { defaultConfig, agentModelsFor } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import type { AgentJob, AgentKind, AgentProfile } from "@/types";
@@ -48,6 +48,31 @@ function isActive(status: AgentJob["status"]) {
   return status === "queued" || status === "running";
 }
 
+/** "14:32" — IBM Plex Mono slot in the kicker. */
+function fmtClock(ts?: string | null): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+/** "42s" / "3m" / "1h 05m" — elapsed or total duration. */
+function fmtDuration(start?: string | null, end?: string | null): string {
+  if (!start) return "";
+  const a = new Date(start).getTime();
+  const b = end ? new Date(end).getTime() : Date.now();
+  if (Number.isNaN(a) || Number.isNaN(b) || b < a) return "";
+  const s = Math.round((b - a) / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+}
+
 function normalizeProfiles(list: AgentProfile[] | undefined): AgentProfile[] {
   return list?.length ? list : defaultConfig.agent_profiles;
 }
@@ -67,6 +92,11 @@ function AgentJobCard({
 }) {
   const active = isActive(job.status);
   const attachCount = job.attachments?.length ?? 0;
+  const clock = fmtClock(job.started_at);
+  const duration = fmtDuration(
+    job.started_at,
+    active ? null : job.finished_at,
+  );
 
   return (
     <div
@@ -87,43 +117,36 @@ function AgentJobCard({
         )}
         onPress={onOpen}
       >
-        <span
-          className={cn(
-            "agent-job-status-dot mt-1.5",
-            active && "is-active",
-            job.status === "error" && "is-error",
-            job.status === "done" && "is-done",
-            job.status === "cancelled" && "is-muted",
-          )}
-        />
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className="text-sm font-semibold capitalize text-foreground">
-              {job.agent}
-            </span>
+          <div className="agent-job-kicker">
             <span
               className={cn(
-                "text-[12px]",
-                active && "text-accent-soft-foreground",
-                job.status === "error" && "text-danger",
-                job.status === "done" && "text-success",
-                !active &&
-                  job.status !== "error" &&
-                  job.status !== "done" &&
-                  "text-muted",
+                "agent-job-status-dot",
+                active && "is-active",
+                job.status === "error" && "is-error",
+                job.status === "done" && "is-done",
+                job.status === "cancelled" && "is-muted",
+              )}
+            />
+            <span className="capitalize">{job.agent}</span>
+            <span
+              className={cn(
+                active && "is-status-active",
+                job.status === "error" && "is-status-error",
+                job.status === "done" && "is-status-done",
               )}
             >
               {jobStatusLabel(job.status)}
             </span>
-            {attachCount > 0 ? (
-              <span className="type-meta">{attachCount} 附件</span>
-            ) : null}
+            {clock ? <span>{clock}</span> : null}
+            {duration ? <span>{duration}</span> : null}
+            {attachCount > 0 ? <span>{attachCount} 附件</span> : null}
           </div>
-          <div className="select-text mt-0.5 line-clamp-2 text-sm leading-snug text-foreground/90">
+          <div className="agent-job-prompt select-text line-clamp-2">
             {job.prompt}
           </div>
           {job.progress && active ? (
-            <div className="mt-1 truncate text-[12px] text-accent-soft-foreground">
+            <div className="mt-1 truncate type-meta text-accent-soft-foreground">
               {job.progress}
             </div>
           ) : null}
@@ -292,7 +315,7 @@ export function AgentPage() {
   };
 
   return (
-    <PageShell className="agent-list-shell max-w-4xl h-full min-h-0 gap-3 pb-0">
+    <PageShell className="agent-list-shell max-w-3xl h-full min-h-0 gap-3 pb-0">
       <PageHeader
         title="派活"
         status={
@@ -323,24 +346,29 @@ export function AgentPage() {
 
       <div className="agent-list-body min-h-0 flex-1 overflow-auto">
         {agentJobs.length === 0 ? (
-          <div className="dropzone" style={{ minHeight: 220 }}>
-            <span className="dropzone-ic">
-              <Bot size={22} aria-hidden />
-            </span>
-            <span className="dropzone-t">暂无任务</span>
-            <span className="dropzone-fmt">下方派个活 · 或 Fn+Space 语音召唤</span>
+          <div className="agent-list-empty">
+            <div className="dropzone">
+              <span className="dropzone-ic">
+                <Bot size={22} aria-hidden />
+              </span>
+              <span className="dropzone-t">开口派活</span>
+              <span className="dropzone-fmt">
+                Fn+Space 说一声，或下面打字 — 声音不出电脑
+              </span>
+            </div>
           </div>
         ) : (
-          <div className="flex flex-col gap-0.5 pb-2">
-            {agentJobs.map((job) => (
-              <AgentJobCard
-                key={job.id}
-                job={job}
-                onOpen={() => navigate(`/dispatch/${job.id}`)}
-                onCancel={() => void cancelAgentJob(job.id)}
-                onDelete={() => void removeJob(job.id)}
-                onCopy={() => void copyResult(job)}
-              />
+          <div className="agent-job-list flex flex-col pb-2">
+            {agentJobs.map((job, i) => (
+              <Reveal key={job.id} index={i}>
+                <AgentJobCard
+                  job={job}
+                  onOpen={() => navigate(`/dispatch/${job.id}`)}
+                  onCancel={() => void cancelAgentJob(job.id)}
+                  onDelete={() => void removeJob(job.id)}
+                  onCopy={() => void copyResult(job)}
+                />
+              </Reveal>
             ))}
           </div>
         )}

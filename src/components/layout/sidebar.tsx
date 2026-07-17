@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { AudioLines, Bot, Moon, Settings, Sun } from "lucide-react";
 import type { Page } from "@/types";
-import { navIndicatorTransition } from "@/lib/motion";
+import { duration, easeOut } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/app-context";
 import { Button } from "@heroui/react";
@@ -56,9 +56,10 @@ export function Sidebar() {
                 <>
                   {isActive && !reduce ? (
                     <motion.span
-                      layoutId="rail-active"
                       className="rail-item-indicator"
-                      transition={navIndicatorTransition}
+                      initial={{ opacity: 0.6 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: duration.fast, ease: easeOut }}
                     />
                   ) : isActive ? (
                     <span className="rail-item-indicator" />
@@ -86,9 +87,10 @@ export function Sidebar() {
             <>
               {isActive && !reduce ? (
                 <motion.span
-                  layoutId="rail-active"
                   className="rail-item-indicator"
-                  transition={navIndicatorTransition}
+                  initial={{ opacity: 0.6 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: duration.fast, ease: easeOut }}
                 />
               ) : isActive ? (
                 <span className="rail-item-indicator" />

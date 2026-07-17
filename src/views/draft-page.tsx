@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PageShell } from "@/components/shared/page-shell";
 import { AsrPage } from "@/views/asr-page";
 import { TranscribePage } from "@/views/transcribe-page";
 import { HistoryPage } from "@/views/history-page";
 import { TranslatePage } from "@/views/translate-page";
-import { providerLabel } from "@/lib/constants";
+import { providerLabel, LANGUAGES } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/app-context";
 type DraftMode = "file" | "live" | "translate" | "history";
@@ -38,24 +38,56 @@ export function DraftPage() {
   // Masthead top-right slot. Each mode's active panel portals its contextual
   // action here (keeps the panel's own state fresh — no node-in-effect churn).
   const [actionEl, setActionEl] = useState<HTMLDivElement | null>(null);
+  // Set when selectMode initiates the URL change — the searchParams effect
+  // must ignore that navigation, otherwise it reads the STALE param in the
+  // render between setMode and the router commit and reverts the click
+  // (first click on 文件 deleted `mode`, next=null never corrected it back).
+  const urlFromClick = useRef(false);
 
   useEffect(() => {
+    if (urlFromClick.current) {
+      urlFromClick.current = false;
+      return;
+    }
     const next = searchParams.get("mode") as DraftMode | null;
     if (next && MODES.some((m) => m.id === next) && next !== mode) {
       setMode(next);
+      // URL-driven switch (deep link) — not the click path, but keep the
+      // mount off the urgent render anyway.
+      startTransition(() => {
+        setVisited((v) => (v.has(next) ? v : new Set(v).add(next)));
+      });
     }
   }, [searchParams, mode]);
 
-  useEffect(() => {
-    setVisited((v) => (v.has(mode) ? v : new Set(v).add(mode)));
-  }, [mode]);
-
   const selectMode = (id: DraftMode) => {
     if (id === mode) return; // no-op click must not churn URL / re-render
-    setMode(id);
-    if (id === "file") setSearchParams({}, { replace: true });
-    else setSearchParams({ mode: id }, { replace: true });
+    setMode(id); // urgent — tab underline paints first
+    // Panel mount is heavy (first visit): transition so it never blocks the
+    // click task. Mounting in an effect would flush synchronously for
+    // discrete clicks and stall the underline paint.
+    startTransition(() => {
+      setVisited((v) => (v.has(id) ? v : new Set(v).add(id)));
+    });
+    // Preserve sibling params (view/id used by keep-alive TranscribePage) —
+    // wiping them re-derives + re-renders the hidden panel on every switch.
+    urlFromClick.current = true;
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (id === "file") p.delete("mode");
+        else p.set("mode", id);
+        return p;
+      },
+      { replace: true },
+    );
   };
+
+  const languageLabel =
+    config.language === "auto"
+      ? "自动检测语言"
+      : (LANGUAGES.find(([v]) => v === config.language)?.[1] ??
+        config.language);
 
   return (
     <PageShell className="max-w-3xl">
@@ -87,13 +119,24 @@ export function DraftPage() {
             })}
           </nav>
         </div>
+        <div className="dmast-sub">
+          <span>
+            <b>{config.hotkey_transcribe.label}</b> 出稿
+          </span>
+          <span className="dot" />
+          <span>
+            <b>{config.hotkey_translate.label}</b> 翻译
+          </span>
+          <span className="dot" />
+          <span>{languageLabel}</span>
+        </div>
       </div>
 
       {MODES.map((item) =>
         visited.has(item.id) ? (
           <div
             key={item.id}
-            className={mode === item.id ? "contents" : "hidden"}
+            className={mode === item.id ? "dpanel contents" : "hidden"}
             aria-hidden={mode !== item.id}
           >
             {item.id === "file" ? (

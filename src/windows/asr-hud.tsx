@@ -11,7 +11,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { AnimatePresence, motion } from "framer-motion";
+import { motion } from "framer-motion";
 import { Button, TextArea, TextField } from "@heroui/react";
 import {
   AtSign,
@@ -35,6 +35,9 @@ import { defaultConfig } from "@/lib/constants";
 import { useSmoothedRms } from "@/hooks/useAudioBars";
 import { AudioBars } from "@/components/ui/audio-bars";
 import { cn } from "@/lib/cn";
+import { duration, easeOut } from "@/lib/motion";
+
+import { useApp } from "@/app-context";
 
 const CAPSULE_W = 400;
 const CAPSULE_H = 56;
@@ -74,6 +77,7 @@ async function loadPathInfo(path: string, at: boolean): Promise<Attachment> {
  * Floating HUD: ASR capsule + agent extras (rail / edit / dispatch).
  */
 export function AsrHud() {
+  const { config } = useApp();
   const [payload, setPayload] = useState<FloatingPayload>({
     visible: false,
     state: "idle",
@@ -706,64 +710,56 @@ export function AsrHud() {
         void getCurrentWindow().startDragging().catch(() => {});
       }}
     >
-      <AnimatePresence mode="wait">
-        {show ? (
-          <motion.div
-            key="hud"
-            className={cn(
-              "flex h-full w-full items-center justify-center",
-              isAgent && "px-0",
-            )}
-            initial={{ opacity: 0, scale: 0.92, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{
-              opacity: 0,
-              scale: 0.94,
-              y: 6,
-              transition: { duration: 0.18 },
-            }}
-            transition={{ type: "spring", stiffness: 420, damping: 28 }}
-          >
-            {isAgent ? (
-              <AgentCapsule
-                payload={payload}
-                agentLabel={agentLabel}
-                cwd={cwd}
-                pickerMode={pickerMode}
-                editText={editText}
-                editing={agentEditing}
-                busy={busy}
-                error={error}
-                editRef={editRef}
-                attachments={attachments}
-                onToggleAgent={() => toggleMenu("agent")}
-                onToggleCwd={() => toggleMenu("cwd")}
-                onStop={() => void stopVoice()}
-                onEditChange={setEditText}
-                onEditKey={onEditKey}
-                onSend={() => void dispatch(editText)}
-                onAddFile={() => void addAttach(false)}
-                onAddDir={() => void addAttach(true)}
-                onSelectAttach={openAttach}
-                onRemoveAttach={(path) => {
-                  setAttachments((prev) => prev.filter((x) => x.path !== path));
-                }}
-              />
-            ) : (
-              <FloatingCapsule
-                payload={payload}
-                editText={editText}
-                editing={confirmEditing}
-                busy={busy}
-                error={error}
-                editRef={editRef}
-                onEditChange={setEditText}
-                onEditKey={onEditKey}
-              />
-            )}
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+      {show ? (
+        <motion.div
+          className={cn(
+            "flex h-full w-full items-center justify-center",
+            isAgent && "px-0",
+          )}
+          initial={{ opacity: 0.7, scale: 0.96, y: 6 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: duration.normal, ease: easeOut }}
+        >
+          {isAgent ? (
+            <AgentCapsule
+              payload={payload}
+              agentLabel={agentLabel}
+              cwd={cwd}
+              pickerMode={pickerMode}
+              editText={editText}
+              editing={agentEditing}
+              busy={busy}
+              error={error}
+              editRef={editRef}
+              attachments={attachments}
+              onToggleAgent={() => toggleMenu("agent")}
+              onToggleCwd={() => toggleMenu("cwd")}
+              onStop={() => void stopVoice()}
+              onEditChange={setEditText}
+              onEditKey={onEditKey}
+              onSend={() => void dispatch(editText)}
+              onAddFile={() => void addAttach(false)}
+              onAddDir={() => void addAttach(true)}
+              onSelectAttach={openAttach}
+              onRemoveAttach={(path) => {
+                setAttachments((prev) => prev.filter((x) => x.path !== path));
+              }}
+            />
+          ) : (
+            <FloatingCapsule
+              payload={payload}
+              editText={editText}
+              editing={confirmEditing}
+              busy={busy}
+              error={error}
+              editRef={editRef}
+              fnLabel={config.hotkey_transcribe.label}
+              onEditChange={setEditText}
+              onEditKey={onEditKey}
+            />
+          )}
+        </motion.div>
+      ) : null}
     </div>
   );
 }
@@ -1011,6 +1007,7 @@ function FloatingCapsule({
   busy,
   error,
   editRef,
+  fnLabel,
   onEditChange,
   onEditKey,
 }: {
@@ -1020,6 +1017,7 @@ function FloatingCapsule({
   busy: boolean;
   error: string | null;
   editRef: RefObject<HTMLTextAreaElement | null>;
+  fnLabel?: string;
   onEditChange: (v: string) => void;
   onEditKey: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
 }) {
@@ -1052,7 +1050,6 @@ function FloatingCapsule({
     !editing && (refining || switching || (processing && !justRefined));
 
   const [overflowing, setOverflowing] = useState(false);
-  const smoothed = useSmoothedRms(payload.rms, recording && !switching);
 
   useEffect(() => {
     if (sizedRef.current) return;
@@ -1093,11 +1090,13 @@ function FloatingCapsule({
         ) : busy ? (
           <span className="hud-spinner" aria-label="确认中" />
         ) : (
-          <AudioBars
-            rms={smoothed}
-            bands={payload.bands}
-            active={recording}
-          />
+          <div className="hud-brand-bars" aria-hidden>
+            <div className="hud-brand-bar" />
+            <div className="hud-brand-bar" />
+            <div className="hud-brand-bar" />
+            <div className="hud-brand-bar" />
+            <div className="hud-brand-bar" />
+          </div>
         )}
         <span className="hud-colon" aria-hidden>
           :
@@ -1130,46 +1129,40 @@ function FloatingCapsule({
               justRefined && "hud-text-refined",
             )}
           >
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.span
-                key={switching ? "switching" : "content"}
-                className="hud-text-scroll"
-                initial={
-                  switching
-                    ? { opacity: 0, filter: "blur(4px)" }
-                    : { opacity: 0.7 }
-                }
-                animate={{ opacity: 1, filter: "blur(0px)" }}
-                exit={{ opacity: 0, filter: "blur(3px)" }}
-                transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
-              >
-                {switching ? (
-                  "切换中"
-                ) : hasSplit && recording && !loading ? (
-                  <>
-                    {committed ? (
-                      <span className="hud-text-committed">{committed}</span>
-                    ) : null}
-                    {committed && active ? " " : null}
-                    {active ? (
-                      <span className="hud-text-active">{active}</span>
-                    ) : null}
-                  </>
-                ) : (
-                  displayText ||
-                  (loading ? (translating ? "翻译中" : "处理中") : "")
-                )}
-                {(loading || switching) && (displayText || switching) ? (
-                  <span className="hud-loading-dots" aria-hidden>
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                ) : null}
-              </motion.span>
-            </AnimatePresence>
+            <motion.span
+              key={switching ? "switching" : "content"}
+              className="hud-text-scroll"
+              initial={{ opacity: 0.7 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: duration.fast, ease: easeOut }}
+            >
+              {switching ? (
+                "切换中"
+              ) : hasSplit && recording && !loading ? (
+                <>
+                  {committed ? (
+                    <span className="hud-text-committed">{committed}</span>
+                  ) : null}
+                  {committed && active ? " " : null}
+                  {active ? (
+                    <span className="hud-text-active">{active}</span>
+                  ) : null}
+                </>
+              ) : (
+                displayText ||
+                (loading ? (translating ? "翻译中" : "处理中") : "")
+              )}
+              {(loading || switching) && (displayText || switching) ? (
+                <span className="hud-loading-dots" aria-hidden>
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              ) : null}
+            </motion.span>
           </div>
         )}
+        {fnLabel ? <span className="hud-fn-badge">{fnLabel}</span> : null}
       </div>
     </div>
   );

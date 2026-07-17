@@ -12,6 +12,13 @@ export type DiffPart = {
   text: string;
 };
 
+/**
+ * Cell budget for the (n+1)x(m+1) DP table. Multi-thousand-char transcripts
+ * would allocate tens of millions of cells and block the main thread for
+ * seconds — over budget we skip the diff and render the after text plain.
+ */
+const DIFF_CELL_BUDGET = 250_000;
+
 /** Myers-ish LCS on Unicode code points; merges adjacent same-type runs. */
 export function diffTexts(before: string, after: string): DiffPart[] {
   if (before === after) {
@@ -19,6 +26,9 @@ export function diffTexts(before: string, after: string): DiffPart[] {
   }
   if (!before) return after ? [{ type: "ins", text: after }] : [];
   if (!after) return [{ type: "del", text: before }];
+  if (before.length * after.length > DIFF_CELL_BUDGET) {
+    return [{ type: "eq", text: after }];
+  }
 
   const a = Array.from(before);
   const b = Array.from(after);

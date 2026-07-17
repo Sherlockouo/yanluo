@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button, Dropdown, Label, ListBox, Select, TextArea, TextField, toast } from "@heroui/react";
+import { motion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -8,6 +9,7 @@ import {
   AtSign,
   Bot,
   ChevronDown,
+  Clipboard,
   FileText,
   FolderOpen,
   Image as ImageIcon,
@@ -34,6 +36,7 @@ import {
 } from "@/lib/agent-tool-md";
 import { defaultConfig, agentModelsFor } from "@/lib/constants";
 import { cn } from "@/lib/cn";
+import { easeOut } from "@/lib/motion";
 import type {
   AgentJob,
   AgentJobEvent,
@@ -75,6 +78,37 @@ function jobStatusLabel(status: AgentJob["status"]): string {
 
 function isActive(status: AgentJob["status"]) {
   return status === "queued" || status === "running";
+}
+
+/** "14:32" — per-event / header timestamp slot (IBM Plex Mono). */
+function fmtClock(ts?: string | null): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+/** "42s" / "3m" / "1h 05m" — elapsed or total duration. */
+function fmtDuration(start?: string | null, end?: string | null): string {
+  if (!start) return "";
+  const a = new Date(start).getTime();
+  const b = end ? new Date(end).getTime() : Date.now();
+  if (Number.isNaN(a) || Number.isNaN(b) || b < a) return "";
+  const s = Math.round((b - a) / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
+}
+
+function copyText(text: string) {
+  void navigator.clipboard
+    .writeText(text)
+    .then(() => toast.success("已复制"), () => toast.danger("复制失败"));
 }
 
 function extractPaths(text: string): string[] {
@@ -125,7 +159,61 @@ function eventBodyMarkdown(event: AgentJobEvent): string {
   return raw;
 }
 
-function EventRow({
+function oneLine(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+function clip(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+}
+
+/** tool call → one-line brief (key arg first), derived from the same event data. */
+function toolCallBrief(event: AgentJobEvent): string {
+  const raw = event.text.trim();
+  if (!raw) return "";
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const o = parsed as Record<string, unknown>;
+      const keys = [
+        "command",
+        "cmd",
+        "file_path",
+        "filePath",
+        "path",
+        "pattern",
+        "query",
+        "url",
+        "description",
+        "prompt",
+      ];
+      for (const k of keys) {
+        const v = o[k];
+        if (typeof v === "string" && v.trim()) return clip(oneLine(v), 60);
+      }
+      return clip(oneLine(JSON.stringify(parsed)), 60);
+    }
+    if (typeof parsed === "string") return clip(oneLine(parsed), 60);
+  } catch {
+    /* fall through to raw */
+  }
+  return clip(oneLine(raw), 60);
+}
+
+/** tool_result → one-line brief + failure heuristic. */
+function toolResultBrief(event: AgentJobEvent): {
+  text: string;
+  failed: boolean;
+} {
+  const line = oneLine(event.text);
+  if (!line) return { text: "", failed: false };
+  const failed =
+    /^(error|failed|exception|traceback)\b/i.test(line) ||
+    /\b(exit code [1-9]\d*|command failed|permission denied)\b/i.test(line);
+  return { text: clip(line, 80), failed };
+}
+
+const EventRow = memo(function EventRow({
   event,
   streaming,
   jobActive,
@@ -144,6 +232,7 @@ function EventRow({
   const toolLabel = (event.title || "").replace(/^tool\s*·\s*/i, "") || "tool";
   const preferOpen = Boolean(jobActive || streaming);
   const [foldOpen, setFoldOpen] = useState(preferOpen);
+  const clock = fmtClock(event.ts);
 
   useEffect(() => {
     setFoldOpen(preferOpen);
@@ -151,7 +240,10 @@ function EventRow({
 
   if (isStatus && !body) {
     return (
-      <p className="agent-chat-meta">{event.title || kind}</p>
+      <p className="agent-chat-meta">
+        {event.title || kind}
+        {clock ? <span className="agent-chat-ts"> · {clock}</span> : null}
+      </p>
     );
   }
 
@@ -160,7 +252,18 @@ function EventRow({
       <article className="agent-chat-row is-user">
         <div className="agent-chat-bubble">
           {body ? <MarkdownBody text={body} /> : null}
+          {body ? (
+            <button
+              type="button"
+              className="agent-msg-copy"
+              aria-label="复制"
+              onClick={() => copyText(event.text)}
+            >
+              <Clipboard size={12} />
+            </button>
+          ) : null}
         </div>
+        {clock ? <span className="agent-chat-ts">{clock}</span> : null}
       </article>
     );
   }
@@ -177,11 +280,15 @@ function EventRow({
           >
             <Wrench size={13} strokeWidth={2} className="shrink-0 opacity-50" />
             <span className="agent-tool-card-name">{toolLabel}</span>
+            {clock ? (
+              <span className="agent-chat-ts ml-auto">{clock}</span>
+            ) : null}
             <ChevronDown
               size={13}
               strokeWidth={2}
               className={cn(
-                "ml-auto shrink-0 opacity-40 transition-transform duration-150",
+                "shrink-0 opacity-40 transition-transform duration-150",
+                !clock && "ml-auto",
                 foldOpen && "rotate-180",
               )}
             />
@@ -189,12 +296,16 @@ function EventRow({
           <SoftCollapse open={foldOpen && Boolean(body)}>
             <MarkdownBody text={body} className="agent-tool-card-body" />
           </SoftCollapse>
+          {!foldOpen && (
+            <div className="agent-tool-brief">{toolCallBrief(event)}</div>
+          )}
         </div>
       </article>
     );
   }
 
   if (isToolResult) {
+    const brief = toolResultBrief(event);
     return (
       <article className="agent-chat-row is-tool-result w-full">
         <div className="agent-tool-card w-full">
@@ -206,11 +317,15 @@ function EventRow({
           >
             <FileText size={13} strokeWidth={2} className="shrink-0 opacity-50" />
             <span className="agent-tool-card-name">结果</span>
+            {clock ? (
+              <span className="agent-chat-ts ml-auto">{clock}</span>
+            ) : null}
             <ChevronDown
               size={13}
               strokeWidth={2}
               className={cn(
-                "ml-auto shrink-0 opacity-40 transition-transform duration-150",
+                "shrink-0 opacity-40 transition-transform duration-150",
+                !clock && "ml-auto",
                 foldOpen && "rotate-180",
               )}
             />
@@ -221,6 +336,11 @@ function EventRow({
               className="agent-tool-result max-w-full"
             />
           </SoftCollapse>
+          {!foldOpen && (
+            <div className={cn("agent-tool-brief", brief.failed && "is-failed")}>
+              {brief.text}
+            </div>
+          )}
         </div>
       </article>
     );
@@ -240,10 +360,32 @@ function EventRow({
         {body ? (
           <MarkdownBody className="w-full" text={body} streaming={streaming} />
         ) : null}
+        {body && !streaming ? (
+          <button
+            type="button"
+            className="agent-msg-copy"
+            aria-label="复制"
+            onClick={() => copyText(event.text)}
+          >
+            <Clipboard size={12} />
+          </button>
+        ) : null}
       </div>
+      {clock ? <span className="agent-chat-ts">{clock}</span> : null}
     </article>
   );
-}
+}, (prev, next) => {
+  if (prev.streaming !== next.streaming) return false;
+  if (prev.jobActive !== next.jobActive) return false;
+  const a = prev.event, b = next.event;
+  return (
+    a.seq === b.seq &&
+    a.ts === b.ts &&
+    a.kind === b.kind &&
+    a.text === b.text &&
+    a.title === b.title
+  );
+});
 
 function AttachPreview({
   item,
@@ -291,7 +433,7 @@ function AttachPreview({
                   ? preview
                   : toolResultToMarkdown(preview)
               }
-              className="pointer-events-none text-[11px] leading-snug"
+              className="pointer-events-none"
             />
           </div>
         )}
@@ -395,6 +537,12 @@ export function AgentJobPage() {
       : [];
 
   const events = useMemo(() => dedupeEvents(rawEvents), [rawEvents]);
+  const [showAllEvents, setShowAllEvents] = useState(false);
+  const MAX_VISIBLE_EVENTS = 50;
+  const visibleEvents = showAllEvents
+    ? events
+    : events.slice(-MAX_VISIBLE_EVENTS);
+  const hiddenEventCount = events.length - visibleEvents.length;
 
   const paths = useMemo(() => {
     if (!job) return [] as string[];
@@ -585,12 +733,17 @@ export function AgentJobPage() {
   }
 
   const active = isActive(job.status);
+  const startedClock = fmtClock(job.started_at);
+  const jobDuration = fmtDuration(
+    job.started_at,
+    active ? null : job.finished_at,
+  );
 
   return (
     <PageShell className="agent-job-shell max-w-5xl h-full min-h-0 gap-3 pb-0">
-      <header className="agent-job-head shrink-0">
+      <header className="agent-job-head shrink-0 items-center ">
         <Button
-          size="sm"
+          size="lg"
           variant="secondary"
           className="agent-job-back"
           onPress={() => navigate("/dispatch")}
@@ -599,20 +752,36 @@ export function AgentJobPage() {
           返回
         </Button>
         <div className="min-w-0 flex-1">
-          <h1 className="type-display truncate capitalize">
-            {job.agent}
-            <span className="font-normal text-muted">
-              {" "}
-              · {jobStatusLabel(job.status)}
+          <div className="flex items-center gap-2">
+            <h1 className="type-display truncate capitalize">{job.agent}</h1>
+            <span
+              className="badge-soft"
+              data-tone={
+                active
+                  ? "accent"
+                  : job.status === "error"
+                    ? "danger"
+                    : job.status === "done"
+                      ? "success"
+                      : "neutral"
+              }
+            >
+              {jobStatusLabel(job.status)}
             </span>
-          </h1>
+          </div>
           <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 type-meta">
+            {startedClock ? (
+              <span className="font-mono">
+                {startedClock}
+                {jobDuration ? ` · ${jobDuration}` : ""}
+              </span>
+            ) : null}
             <span className="truncate" title={job.cwd}>
               {job.cwd.replace(/^\/Users\/[^/]+/, "~")}
             </span>
             {job.session_id ? (
-              <span className="font-mono text-[11px]" title={job.session_id}>
-                {job.session_id}
+              <span className="font-mono" title={job.session_id}>
+                {job.session_id.slice(0, 8)}
               </span>
             ) : null}
           </div>
@@ -648,9 +817,14 @@ export function AgentJobPage() {
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <section className="agent-chat flex min-h-0 flex-1 flex-col rounded-2xl bg-surface">
+          <section className="agent-chat flex min-h-0 flex-1 flex-col bg-surface">
             <div className="flex shrink-0 items-center gap-2 px-4 pt-3.5 pb-1">
-              <Bot size={13} className={active ? "text-accent" : "text-muted"} />
+              <Bot
+                size={13}
+                className={cn(
+                  active ? "text-accent agent-live-pulse" : "text-muted",
+                )}
+              />
               <span className="text-sm font-medium">对话</span>
               <span className="type-meta">{events.length}</span>
               {job.progress && active ? (
@@ -663,20 +837,41 @@ export function AgentJobPage() {
             >
               <div className="flex flex-col gap-4">
               {events.length === 0 ? (
-                <p className="type-meta">{active ? "运行中…" : "无输出"}</p>
-              ) : (
-                events.map((e, i) => (
-                  <EventRow
-                    key={`${e.seq}-${e.ts}-${e.kind}`}
-                    event={e}
-                    jobActive={active}
-                    streaming={
-                      active &&
-                      i === events.length - 1 &&
-                      e.kind === "assistant"
-                    }
+                <div className="agent-chat-empty">
+                  <span
+                    className={cn(
+                      "agent-job-status-dot",
+                      active && "is-active",
+                    )}
                   />
-                ))
+                  <p className="type-meta">
+                    {active ? "运行中，输出会实时出现在这里" : "无输出"}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {hiddenEventCount > 0 ? (
+                    <button
+                      type="button"
+                      className="dlink self-center py-2"
+                      onClick={() => setShowAllEvents(true)}
+                    >
+                      ↑ 还有 {hiddenEventCount} 条更早的消息
+                    </button>
+                  ) : null}
+                  {visibleEvents.map((e, i) => (
+                    <EventRow
+                      key={`${e.seq}-${e.ts}-${e.kind}`}
+                      event={e}
+                      jobActive={active}
+                      streaming={
+                        active &&
+                        i === visibleEvents.length - 1 &&
+                        e.kind === "assistant"
+                      }
+                    />
+                  ))}
+                </>
               )}
               </div>
             </div>
@@ -694,14 +889,13 @@ export function AgentJobPage() {
                           key={a.path}
                           title={a.path}
                           className={cn(
-                            "inline-flex max-w-40 items-center gap-0.5 rounded-full border border-border py-0.5 pl-1.5 pr-0.5 text-[11px] transition hover:bg-default/40",
-                            preview?.path === a.path &&
-                              "border-accent/40 bg-accent/10",
+                            "agent-reply-chip",
+                            preview?.path === a.path && "is-selected",
                           )}
                         >
                           <Button
                             variant="ghost"
-                            className="h-auto min-h-0 min-w-0 flex-1 gap-1 rounded-none bg-transparent px-0.5 py-0.5 text-[11px] font-normal shadow-none hover:bg-transparent data-[hovered=true]:bg-transparent data-[pressed=true]:scale-100"
+                            className="h-auto min-h-0 min-w-0 flex-1 gap-1 rounded-none bg-transparent px-0.5 py-0.5 font-normal shadow-none hover:bg-transparent data-[hovered=true]:bg-transparent data-[pressed=true]:scale-100"
                             onPress={() => setPreview(a)}
                           >
                             {a.at || a.kind === "dir" ? (
@@ -744,10 +938,16 @@ export function AgentJobPage() {
 
                   {preview &&
                   replyAttach.some((a) => a.path === preview.path) ? (
-                    <AttachPreview
-                      item={preview as Attachment}
-                      onClose={() => setPreview(null)}
-                    />
+                    <motion.div
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.18, ease: easeOut }}
+                    >
+                      <AttachPreview
+                        item={preview as Attachment}
+                        onClose={() => setPreview(null)}
+                      />
+                    </motion.div>
                   ) : null}
 
                   <div className="agent-composer">
@@ -892,7 +1092,7 @@ export function AgentJobPage() {
                   </div>
                 </div>
               ) : active ? (
-                <p className="type-meta text-accent">运行中，完成后可续聊</p>
+                <p className="type-meta text-accent-soft-foreground">运行中，完成后可续聊</p>
               ) : (
                 <p className="type-meta">
                   无 session id，无法续聊（需 Claude 新任务或 Codex 回报会话）
@@ -904,9 +1104,11 @@ export function AgentJobPage() {
 
         {sideOpen ? (
           <aside className="flex w-full shrink-0 flex-col gap-2 overflow-auto border-t border-border pt-3 lg:w-72 lg:border-t-0 lg:border-l lg:pl-3 lg:pt-0">
-            <div className="rounded-xl border border-border bg-surface px-3 py-2.5">
+            <div className="agent-side-files">
               <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium">文件</span>
+                <span className="type-meta font-medium text-foreground">
+                  文件
+                </span>
                 <Button
                   isIconOnly
                   size="sm"
@@ -921,7 +1123,7 @@ export function AgentJobPage() {
               {paths.length === 0 ? (
                 <p className="type-meta">附件与结果路径会出现在这里</p>
               ) : (
-                <ul className="flex max-h-64 flex-col gap-1 overflow-auto">
+                <ul className="flex flex-col gap-0.5">
                   {paths.map((p) => {
                     const name = p.split("/").filter(Boolean).pop() || p;
                     const pending = replyAttach.some((a) => a.path === p);
@@ -962,7 +1164,13 @@ export function AgentJobPage() {
             </div>
 
             {preview && !replyAttach.some((a) => a.path === preview.path) ? (
-              <AttachPreview item={preview} onClose={() => setPreview(null)} />
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.18, ease: easeOut }}
+              >
+                <AttachPreview item={preview} onClose={() => setPreview(null)} />
+              </motion.div>
             ) : null}
           </aside>
         ) : null}

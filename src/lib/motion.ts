@@ -81,7 +81,7 @@ function softCollapse(reduce: boolean | null | undefined): SoftCollapseMotion {
     };
   }
   return {
-    initial: { opacity: 0.92, y: -6 },
+    initial: { opacity: 0.92, y: 6 },
     animate: { opacity: 1, y: 0 },
     exit: { opacity: 0, y: -4 },
     transition: { duration: duration.fast, ease: easeOut },

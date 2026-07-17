@@ -15,14 +15,12 @@
   gap: 0.5rem;
   padding: 1rem 0.5rem;
   border-right: 1px solid var(--border);
-  background: color-mix(in oklab, var(--surface) 88%, transparent);
-  backdrop-filter: blur(24px) saturate(140%);
+  background: var(--background);
 }
 
 .light .app-rail,
 [data-theme="light"] .app-rail {
   background: color-mix(in oklab, var(--surface) 92%, var(--background));
-  backdrop-filter: none;
 }
 
 .app-rail-mark {
@@ -31,11 +29,11 @@
   width: 2.5rem;
   height: 2.5rem;
   border-radius: 0.7rem;
-  background: color-mix(in oklab, var(--accent) 14%, transparent);
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--background);
   font-family: var(--font-display);
   font-size: 1.25rem;
-  font-weight: 600;
+  font-weight: 400;
   line-height: 1;
   transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -57,11 +55,6 @@
   overflow: auto;
   padding: 1.5rem 1.5rem 1.75rem;
   background: var(--background);
-}
-
-.light .app-content,
-[data-theme="light"] .app-content {
-  background: transparent;
 }
 
 .rail-item {
@@ -142,6 +135,18 @@
     0 1px 2px rgba(0, 0, 0, 0.04),
     0 10px 28px rgba(0, 0, 0, 0.06);
   padding: 1.25rem;
+  transition:
+    border-color 160ms ease,
+    transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.panel:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
+}
+
+.panel:active {
+  transform: scale(0.985);
 }
 
 .light .panel,
@@ -151,9 +156,7 @@
 
 .dark .panel,
 [data-theme="dark"] .panel {
-  box-shadow:
-    0 1px 0 color-mix(in oklab, #fff 8%, transparent) inset,
-    0 12px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 1px 0 color-mix(in oklab, #fff 8%, transparent) inset;
 }
 
 /* List / case cards — lift without heavy chrome */
@@ -178,11 +181,16 @@
 }
 
 .surface-card:hover {
+  transform: translateY(-1px);
   border-color: color-mix(in oklab, var(--foreground) 14%, transparent);
   box-shadow:
     0 1px 0 color-mix(in oklab, var(--foreground) 5%, transparent) inset,
     0 2px 4px rgba(0, 0, 0, 0.04),
     0 10px 24px rgba(0, 0, 0, 0.06);
+}
+
+.surface-card:active {
+  transform: scale(0.985);
 }
 
 .light .surface-card:hover,
@@ -193,17 +201,13 @@
 
 .dark .surface-card,
 [data-theme="dark"] .surface-card {
-  box-shadow:
-    0 1px 0 color-mix(in oklab, #fff 6%, transparent) inset,
-    0 8px 22px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 0 color-mix(in oklab, #fff 6%, transparent) inset;
 }
 
 .dark .surface-card:hover,
 [data-theme="dark"] .surface-card:hover {
   border-color: color-mix(in oklab, #fff 18%, transparent);
-  box-shadow:
-    0 1px 0 color-mix(in oklab, #fff 8%, transparent) inset,
-    0 10px 28px rgba(0, 0, 0, 0.42);
+  box-shadow: 0 1px 0 color-mix(in oklab, #fff 8%, transparent) inset;
 }
 
 @media (max-width: 640px) {

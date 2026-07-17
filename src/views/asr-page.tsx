@@ -61,7 +61,10 @@ export function AsrPage({
       {providerLabel(config.asr_provider)}
       {isQwen ? (modelLoaded ? " · 已加载" : " · 未加载") : null}
       {" · "}
-      <Link to="/settings?tab=asr" className="text-accent hover:underline">
+      <Link
+        to="/settings?tab=asr"
+        className="text-accent-soft-foreground hover:underline"
+      >
         设置
       </Link>
     </>
@@ -132,7 +135,7 @@ export function AsrPage({
                 }}
               >
                 <Label>型号</Label>
-                <Select.Trigger className="flex items-center justify-between p-4">
+                <Select.Trigger>
                   <Select.Value />
                   <Select.Indicator />
                 </Select.Trigger>
@@ -175,7 +178,7 @@ export function AsrPage({
                   未安装模型 ·{" "}
                   <Link
                     to="/settings?tab=asr"
-                    className="text-accent hover:underline"
+                    className="text-accent-soft-foreground hover:underline"
                   >
                     去设置下载
                   </Link>
@@ -212,7 +215,7 @@ export function AsrPage({
                 API Key 在{" "}
                 <Link
                   to="/settings?tab=asr"
-                  className="text-accent hover:underline"
+                  className="text-accent-soft-foreground hover:underline"
                 >
                   设置
                 </Link>
@@ -246,25 +249,32 @@ export function AsrPage({
         <div className="recs">
           {entries.map((entry, i) => {
             const showDiff = hasRefineDiff(entry.raw_text, entry.text);
-            return (
-              <Reveal key={entry.id} index={i}>
-                <article className="rec">
-                  <div className="rec-l">
-                    <span>{new Date(entry.created_at).toLocaleString()}</span>
-                    <span>{entry.duration_seconds.toFixed(1)}s</span>
-                    {entry.language ? <span>{entry.language}</span> : null}
+            const row = (
+              <article className="rec">
+                <div className="rec-l">
+                  <span>{new Date(entry.created_at).toLocaleString()}</span>
+                  <span>{entry.duration_seconds.toFixed(1)}s</span>
+                  {entry.language ? <span>{entry.language}</span> : null}
+                </div>
+                {showDiff ? (
+                  <div className="rec-c">
+                    <RefineDiff before={entry.raw_text} after={entry.text} />
                   </div>
-                  {showDiff ? (
-                    <div className="rec-c">
-                      <RefineDiff before={entry.raw_text} after={entry.text} />
-                    </div>
-                  ) : (
-                    <p className="rec-c whitespace-pre-wrap">
-                      {entry.text || "（空）"}
-                    </p>
-                  )}
-                </article>
+                ) : (
+                  <p className="rec-c whitespace-pre-wrap">
+                    {entry.text || "（空）"}
+                  </p>
+                )}
+              </article>
+            );
+            // Reveal (framer, willChange) only for the first screenful —
+            // beyond that a plain div keeps long lists cheap.
+            return i < 8 ? (
+              <Reveal key={entry.id} index={i}>
+                {row}
               </Reveal>
+            ) : (
+              <div key={entry.id}>{row}</div>
             );
           })}
         </div>
