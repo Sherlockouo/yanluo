@@ -1,0 +1,394 @@
+/*
+  出稿 — editorial / results-first single surface (design: doc/design/v2/draft-a.html).
+  Kills the fat equal-weight tab strip: mode = quiet typographic switch on the
+  masthead baseline (ink + 2px copper underline). Tokens from theme.css.
+*/
+
+/* editorial masthead — sticks to top of the page scroll (.app-content) */
+.dmast {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  margin: -1.5rem 0 20px;
+  padding: 1.5rem 0 14px;
+  background: var(--background);
+}
+.dmast-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 20px;
+  margin-bottom: 10px;
+}
+.dmast-kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent-soft-foreground);
+}
+.dmast-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 28px;
+}
+.dmast-action .dlink {
+  font-size: 12.5px;
+}
+.dmast-meta {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.dmast-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+.dmast-title {
+  font-family: var(--font-display);
+  font-size: 52px;
+  font-weight: 400;
+  line-height: 0.92;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+/* modes: plain type on the masthead baseline — NOT a segmented box */
+.dmodes {
+  display: flex;
+  align-items: baseline;
+  gap: 22px;
+  padding-bottom: 4px;
+}
+.dmode {
+  position: relative;
+  font-size: 15px;
+  color: var(--muted);
+  cursor: pointer;
+  padding-bottom: 10px;
+  margin-bottom: -13px;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  transition: color 0.14s;
+}
+.dmode:hover {
+  color: var(--foreground);
+}
+.dmode.is-active {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.dmode.is-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+/* quiet inline text switch (本地/链接 · 音频/视频 · 专注/全文) */
+.tswitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 13.5px;
+}
+.tswitch .o {
+  color: color-mix(in oklab, var(--foreground) 42%, transparent);
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+.tswitch .o.is-active {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.tswitch .sep {
+  color: var(--field-border);
+}
+
+/* manuscript index (results) */
+.rlist {
+  display: flex;
+  flex-direction: column;
+}
+.ritem {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 20px 4px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: opacity 0.14s;
+  text-align: left;
+  background: none;
+  border-left: 0;
+  border-right: 0;
+  border-top: 0;
+  width: 100%;
+}
+.ritem:hover {
+  opacity: 0.72;
+}
+.ritem.is-open {
+  cursor: default;
+}
+.ritem-n {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: color-mix(in oklab, var(--foreground) 42%, transparent);
+  padding-top: 3px;
+  width: 22px;
+  flex: 0 0 auto;
+}
+.ritem-body {
+  min-width: 0;
+  flex: 1;
+}
+.rmeta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: color-mix(in oklab, var(--foreground) 42%, transparent);
+}
+.rmeta .tag {
+  color: var(--accent-soft-foreground);
+}
+.rtext {
+  margin-top: 8px;
+  font-size: 15.5px;
+  line-height: 1.7;
+  color: var(--foreground);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.rchev {
+  color: color-mix(in oklab, var(--foreground) 42%, transparent);
+  flex: 0 0 auto;
+  padding-top: 4px;
+}
+
+/* record list (live / translate / history) */
+.recs {
+  display: flex;
+  flex-direction: column;
+}
+.rec {
+  padding: 18px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.rec-l {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: color-mix(in oklab, var(--foreground) 42%, transparent);
+}
+.rec-l .tag {
+  color: var(--accent-soft-foreground);
+}
+.rec-c {
+  margin-top: 9px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--foreground);
+}
+.rec-pair {
+  margin-top: 9px;
+}
+.rec-pair .a {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.rec-pair .b {
+  color: var(--foreground);
+  font-size: 15.5px;
+  line-height: 1.7;
+  margin-top: 4px;
+}
+.rdiff .del {
+  color: var(--danger);
+  text-decoration: line-through;
+  opacity: 0.72;
+}
+.rdiff .ins {
+  color: var(--success);
+}
+
+/* quiet inline link (＋新转写 / ← 转写记录 / 模型 ▾) */
+.dlink {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--accent-soft-foreground);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.14s;
+}
+.dlink:hover {
+  color: var(--accent);
+}
+.dlink.muted {
+  color: var(--muted);
+}
+.dlink.muted:hover {
+  color: var(--foreground);
+}
+
+/* settings — quiet secondary tabs (配置/纠错学习/词库 · 快捷键/权限) */
+.set-subtabs {
+  display: flex;
+  gap: 22px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 2px;
+}
+.set-subtab {
+  position: relative;
+  padding: 0 0 10px;
+  font-size: 13.5px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: color 0.14s;
+}
+.set-subtab:hover {
+  color: var(--foreground);
+}
+.set-subtab.is-active {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.set-subtab.is-active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* settings — switch row inside a card */
+.settings-switchrow {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-secondary);
+}
+
+/* settings — provider / choice rows (S3 服务商 CRUD, S6 内置 agent) */
+.set-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  transition: border-color 0.14s;
+}
+.set-row.is-active {
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+}
+/* expandable provider row: row + inline editor read as one card when open */
+.set-row-wrap.is-open {
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.set-row-wrap.is-open .set-row {
+  border: 0;
+  border-radius: 12px 12px 0 0;
+  background: transparent;
+}
+.set-row-body {
+  min-width: 0;
+  flex: 1;
+}
+.set-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+.set-row-sub {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.set-row-tag {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--accent-soft-foreground);
+}
+
+/* editorial dropzone */
+.dropzone {
+  min-height: 260px;
+  border: 1.5px dashed var(--field-border);
+  border-radius: 18px;
+  background: var(--surface-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--muted);
+  text-align: center;
+  padding: 40px;
+}
+.dropzone.is-drag {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.dropzone-ic {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--accent-soft-foreground);
+}
+.dropzone-t {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.dropzone-fmt {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: color-mix(in oklab, var(--foreground) 42%, transparent);
+}

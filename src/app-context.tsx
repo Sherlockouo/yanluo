@@ -27,7 +27,6 @@ import {
   harvestFromTriples,
 } from "@/lib/learn-cases";
 import {
-  extractLearnCandidates,
   type LearnCandidate,
 } from "@/lib/learn-from-refine";
 import {
@@ -731,38 +730,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let unlisten: UnlistenFn | undefined;
     void listen<{ entry_id: string; before: string; after: string }>(
       "learn-from-hud",
-      (event) => {
-        const { entry_id, before, after } = event.payload;
-        const terms = extractLearnCandidates(before, after);
-        if (!terms.length) {
-          void loadHistory();
-          return;
-        }
-        const entry: HistoryEntry = {
-          id: entry_id,
-          text: after,
-          raw_text: before,
-          user_text: after,
-          language: "",
-          duration_seconds: 0,
-          created_at: new Date().toISOString(),
-          refined: false,
-          source: "fn",
-          learn_status: "suggested",
-          quality_rating: "bad",
-        };
-        void offerLearnFromEntries([entry], terms).then((n) => {
-          void loadHistory();
-          if (n > 0) {
-            toast.success(`已加入学习待确认 ${n} 条`);
-          }
-        });
+      () => {
+        // Pair already in history (raw_text ↔ user_text). Vocab only via 本地/AI 提炼.
+        void loadHistory();
+        toast.success("已加入学习 case（识别稿 ↔ 修正稿）");
       },
     ).then((u) => {
       unlisten = u;
     });
     return () => unlisten?.();
-  }, [offerLearnFromEntries, loadHistory]);
+  }, [loadHistory]);
 
   const abortPendingLearn = useCallback(async () => {
     const ids = pendingLearnRef.current?.sourceIds ?? [];

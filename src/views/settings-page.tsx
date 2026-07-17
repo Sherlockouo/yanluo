@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { LayoutGroup, motion, useReducedMotion } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   Button,
   Checkbox,
@@ -15,9 +15,11 @@ import {
   toast,
 } from "@heroui/react";
 import {
+  Bot,
   CheckCircle2,
   ChevronDown,
   CircleAlert,
+  Cpu,
   Download,
   Ear,
   ExternalLink,
@@ -29,12 +31,13 @@ import {
   RefreshCw,
   Save,
   Shield,
+  SlidersHorizontal,
   Trash2,
+  Wand2,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-shell";
-import { Link } from "react-router-dom";
 import {
   CollapseTrigger,
   PageHeader,
@@ -46,20 +49,25 @@ import {
 import { cn } from "@/lib/cn";
 import { useApp } from "@/app-context";
 import {
+  activateLlmProviderPatch,
   agentModelsFor,
   defaultConfig,
   hotkeySegments,
-  LLM_PROVIDER_PRESETS,
+  listLlmProviders,
+  llmPreset,
+  llmProviderLabel,
+  newCustomProviderId,
   LANGUAGES,
   QWEN_ASR_MODELS,
   resolveLlmCreds,
 } from "@/lib/constants";
-import { navIndicatorTransition, useFade } from "@/lib/motion";
+import { useFade } from "@/lib/motion";
 import type {
   AgentKind,
   AgentProfile,
   AsrProvider,
   HotkeyBinding,
+  LlmCredential,
   LlmProvider,
 } from "@/types";
 import {
@@ -167,13 +175,13 @@ type DownloadInstallResult = {
   message: string;
 };
 
-const TABS: { id: SettingsTab; label: string }[] = [
-  { id: "general", label: "常规" },
-  { id: "asr", label: "识别" },
-  { id: "polish", label: "润色" },
-  { id: "agent", label: "派活" },
-  { id: "system", label: "系统" },
-  { id: "updates", label: "更新" },
+const TABS: { id: SettingsTab; label: string; icon: typeof Shield }[] = [
+  { id: "general", label: "常规", icon: SlidersHorizontal },
+  { id: "asr", label: "识别", icon: Mic },
+  { id: "polish", label: "润色", icon: Wand2 },
+  { id: "agent", label: "派活", icon: Bot },
+  { id: "system", label: "系统", icon: Cpu },
+  { id: "updates", label: "更新", icon: Download },
 ];
 
 const POLISH_SUBS: { id: PolishSub; label: string }[] = [
@@ -236,47 +244,32 @@ function SubTabs<T extends string>({
   items,
   active,
   onSelect,
-  layoutId,
 }: {
   items: { id: T; label: string }[];
   active: T;
   onSelect: (id: T) => void;
-  layoutId: string;
+  /** kept for call-site compatibility; no longer used. */
+  layoutId?: string;
 }) {
-  const reduce = useReducedMotion();
   return (
-    <LayoutGroup id={layoutId}>
-      <div className="settings-tabs settings-tabs-sub">
-        {items.map((item) => {
-          const isActive = active === item.id;
-          return (
-            <Button
-              key={item.id}
-              size="sm"
-              variant="ghost"
-              data-selected={isActive || undefined}
-              aria-current={isActive ? "true" : undefined}
-              className={cn(
-                "settings-tab settings-tab-sub h-auto min-h-0 shadow-none data-[pressed=true]:scale-100",
-                isActive && "settings-tab-active",
-              )}
-              onPress={() => onSelect(item.id)}
-            >
-              {isActive && !reduce ? (
-                <motion.span
-                  layoutId={`${layoutId}-active`}
-                  className="settings-tab-indicator"
-                  transition={navIndicatorTransition}
-                />
-              ) : isActive ? (
-                <span className="settings-tab-indicator" />
-              ) : null}
-              <span className="relative z-10">{item.label}</span>
-            </Button>
-          );
-        })}
-      </div>
-    </LayoutGroup>
+    <div className="set-subtabs" role="tablist">
+      {items.map((item) => {
+        const isActive = active === item.id;
+        return (
+          <button
+            key={item.id}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            aria-current={isActive ? "true" : undefined}
+            className={cn("set-subtab", isActive && "is-active")}
+            onClick={() => onSelect(item.id)}
+          >
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -323,68 +316,62 @@ export function SettingsPage() {
   };
 
   const fade = useFade();
-  const reduce = useReducedMotion();
+
+  const activeLabel = TABS.find((t) => t.id === tab)?.label ?? "设置";
 
   return (
-    <PageShell>
+    <PageShell className="max-w-none!">
       <PageHeader title="设置" />
 
-      <LayoutGroup id="settings-tabs">
-        <div className="settings-tabs max-w-3xl">
+      {/* macOS System-Settings-style two-pane: left source list, right detail. */}
+      <div className="set">
+        <nav className="setnav" aria-label="设置分类">
           {TABS.map((item) => {
             const active = tab === item.id;
+            const Icon = item.icon;
             return (
-              <Button
+              <button
                 key={item.id}
-                variant="ghost"
-                data-selected={active || undefined}
+                type="button"
                 aria-current={active ? "true" : undefined}
-                className={cn(
-                  "settings-tab h-auto min-h-0 shadow-none data-[pressed=true]:scale-100",
-                  active && "settings-tab-active",
-                )}
-                onPress={() => selectTab(item.id)}
+                className={cn("setnav-item", active && "setnav-item-active")}
+                onClick={() => selectTab(item.id)}
               >
-                {active && !reduce ? (
-                  <motion.span
-                    layoutId="settings-tab-active"
-                    className="settings-tab-indicator"
-                    transition={navIndicatorTransition}
-                  />
-                ) : active ? (
-                  <span className="settings-tab-indicator" />
-                ) : null}
+                <Icon size={15} className="setnav-icon" aria-hidden />
                 <span className="relative z-10">{item.label}</span>
-              </Button>
+              </button>
             );
           })}
-        </div>
-      </LayoutGroup>
+        </nav>
 
-      <motion.div
-        key={tab}
-        initial={fade.initial}
-        animate={fade.animate}
-        transition={fade.transition}
-        style={{ willChange: "opacity" }}
-      >
-        {tab === "general" ? <GeneralPanel /> : null}
-        {tab === "asr" ? <AsrProviderPanel /> : null}
-        {tab === "polish" ? (
-          <PolishPanel
-            sub={POLISH_SUBS.some((s) => s.id === sub) ? (sub as PolishSub) : "config"}
-            onSelectSub={selectSub}
-          />
-        ) : null}
-        {tab === "agent" ? <AgentPanel /> : null}
-        {tab === "system" ? (
-          <SystemPanel
-            sub={SYSTEM_SUBS.some((s) => s.id === sub) ? (sub as SystemSub) : "hotkeys"}
-            onSelectSub={selectSub}
-          />
-        ) : null}
-        {tab === "updates" ? <UpdatesPanel /> : null}
-      </motion.div>
+        <div className="setbody">
+          <h2 className="set-sechead">{activeLabel}</h2>
+          <motion.div
+            key={tab}
+            initial={fade.initial}
+            animate={fade.animate}
+            transition={fade.transition}
+            style={{ willChange: "opacity" }}
+          >
+            {tab === "general" ? <GeneralPanel /> : null}
+            {tab === "asr" ? <AsrProviderPanel /> : null}
+            {tab === "polish" ? (
+              <PolishPanel
+                sub={POLISH_SUBS.some((s) => s.id === sub) ? (sub as PolishSub) : "config"}
+                onSelectSub={selectSub}
+              />
+            ) : null}
+            {tab === "agent" ? <AgentPanel /> : null}
+            {tab === "system" ? (
+              <SystemPanel
+                sub={SYSTEM_SUBS.some((s) => s.id === sub) ? (sub as SystemSub) : "hotkeys"}
+                onSelectSub={selectSub}
+              />
+            ) : null}
+            {tab === "updates" ? <UpdatesPanel /> : null}
+          </motion.div>
+        </div>
+      </div>
     </PageShell>
   );
 }
@@ -550,10 +537,12 @@ function AsrProviderPanel() {
 
   const alignReady = Boolean(config.align_model_dir?.trim());
 
+  const isQwen = config.asr_provider === "qwen";
+
   return (
     <div className="flex max-w-2xl flex-col gap-4">
       <Reveal index={0}>
-      <SectionCard className="flex flex-col gap-5" title="识别引擎">
+      <SectionCard className="flex flex-col gap-5">
         <Select
           className="w-full flex"
           selectedKey={config.asr_provider}
@@ -562,7 +551,7 @@ function AsrProviderPanel() {
             selectProvider(String(key) as AsrProvider);
           }}
         >
-          <Label>引擎</Label>
+          <Label>识别引擎</Label>
           <Select.Trigger className="flex items-center justify-between p-4">
             <Select.Value />
             <Select.Indicator />
@@ -587,13 +576,6 @@ function AsrProviderPanel() {
           </Select.Popover>
         </Select>
 
-        <p className="text-[12px] text-muted">
-          <Link to="/draft?mode=live" className="text-accent hover:underline">
-            出稿 → 实时
-          </Link>
-          {" · 选择型号 / 对齐开关"}
-        </p>
-
         {config.asr_provider === "elevenlabs" ? (
           <TextField
             fullWidth
@@ -610,168 +592,186 @@ function AsrProviderPanel() {
         {config.asr_provider === "apple" ? (
           <p className="type-meta">系统语音识别，无需额外配置。</p>
         ) : null}
+
+        {isQwen ? (
+          <>
+            <Select
+              className="w-full flex"
+              selectedKey={config.asr_model_id || "Qwen3-ASR-0.6B"}
+              onSelectionChange={(key) => {
+                if (key == null) return;
+                updateConfig("asr_model_id", String(key));
+              }}
+            >
+              <Label>型号</Label>
+              <Select.Trigger className="flex items-center justify-between p-4">
+                <Select.Value />
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover>
+                <ListBox className="gap-2 p-2">
+                  {QWEN_ASR_MODELS.map((m) => (
+                    <ListBox.Item key={m.id} id={m.id} textValue={m.label}>
+                      {m.label}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+            {status?.installed ? (
+              <p className="-mt-2 truncate type-meta">
+                <span className="rounded-md bg-success/10 px-1.5 py-0.5 text-success">
+                  已安装
+                </span>{" "}
+                {status.path}
+              </p>
+            ) : null}
+
+            <div className="settings-switchrow">
+              <Switch
+                isSelected={alignReady && config.align_enabled}
+                isDisabled={!alignReady}
+                onChange={(value) => updateConfig("align_enabled", value)}
+              >
+                <Switch.Content className="w-full justify-between gap-2 p-3">
+                  <div className="min-w-0 pr-2">
+                    <div className="type-ui">逐字对齐</div>
+                    <div className="mt-0.5 type-meta">
+                      {alignReady
+                        ? "字级时间戳 · 已配置"
+                        : "在下方高级设置配置对齐模型目录后可用"}
+                    </div>
+                  </div>
+                  <Switch.Control>
+                    <Switch.Thumb />
+                  </Switch.Control>
+                </Switch.Content>
+              </Switch>
+            </div>
+          </>
+        ) : null}
       </SectionCard>
       </Reveal>
 
-      {config.asr_provider === "qwen" ? (
+      {isQwen ? (
         <Reveal index={1}>
-        <SectionCard className="flex flex-col gap-5" title="本机模型与对齐">
-          <Select
-            className="w-full flex"
-            selectedKey={config.asr_model_id || "Qwen3-ASR-0.6B"}
-            onSelectionChange={(key) => {
-              if (key == null) return;
-              updateConfig("asr_model_id", String(key));
-            }}
-          >
-            <Label>型号</Label>
-            <Select.Trigger className="flex items-center justify-between p-4">
-              <Select.Value />
-              <Select.Indicator />
-            </Select.Trigger>
-            <Select.Popover>
-              <ListBox className="gap-2 p-2">
-                {QWEN_ASR_MODELS.map((m) => (
-                  <ListBox.Item key={m.id} id={m.id} textValue={m.label}>
-                    {m.label}
-                    <ListBox.ItemIndicator />
-                  </ListBox.Item>
-                ))}
-              </ListBox>
-            </Select.Popover>
-          </Select>
-
-          {status?.installed ? (
-            <p className="truncate type-meta">已安装 · {status.path}</p>
-          ) : null}
-
-          {downloading && progress ? (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between type-meta">
-                <span>
-                  {progress.file}（{progress.file_index}/{progress.file_count}）
-                </span>
-                <span>
-                  {progress.percent != null
-                    ? `${progress.percent.toFixed(0)}%`
-                    : formatBytes(progress.downloaded)}
-                  {progress.total ? ` / ${formatBytes(progress.total)}` : ""}
-                </span>
-              </div>
-              <div className="update-progress-track">
-                <div
-                  className="update-progress-bar"
-                  style={{
-                    width:
-                      progress.percent != null
-                        ? `${Math.min(100, Math.max(0, progress.percent))}%`
-                        : "30%",
-                  }}
-                />
-              </div>
-            </div>
-          ) : null}
-
-          <TextField
-            fullWidth
-            variant="secondary"
-            value={config.asr_model_dir}
-            onChange={(value) => updateConfig("asr_model_dir", value)}
-          >
-            <Label>模型目录</Label>
-            <div className="flex gap-2">
-              <Input className="min-w-0 flex items-center font-mono text-[13px]" />
-              <Button variant="secondary" onPress={() => void chooseModelDir()}>
-                <FolderOpen size={16} />
-                浏览
-              </Button>
-            </div>
-          </TextField>
-
-          <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface-secondary/40 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="type-ui">逐字对齐（ForcedAligner）</div>
-              <span
-                className={cn(
-                  "type-micro rounded-md px-1.5 py-0.5",
-                  alignReady
-                    ? "bg-success/10 text-success"
-                    : "bg-default/50 text-muted",
-                )}
-              >
-                {alignReady ? "已配置" : "未配置"}
-              </span>
-            </div>
-            <Checkbox
-              isSelected={downloadAligner}
-              onChange={setDownloadAligner}
-            >
-              <Checkbox.Content className="flex items-center gap-2 type-meta">
-                <Checkbox.Control>
-                  <Checkbox.Indicator />
-                </Checkbox.Control>
-                下载时一并获取逐字对齐模型（ForcedAligner）
-              </Checkbox.Content>
-            </Checkbox>
-            <TextField
-              fullWidth
-              variant="secondary"
-              value={config.align_model_dir ?? ""}
-              onChange={(value) => updateConfig("align_model_dir", value)}
-            >
-              <Label>对齐模型目录</Label>
-              <Input className="min-w-0 flex items-center font-mono text-[13px]" />
-            </TextField>
-            <p className="type-meta">
-              配置后可在 出稿 → 实时 开启逐字对齐；留空则对齐开关不可用。
-            </p>
-          </div>
-
+        <SectionCard className="flex flex-col gap-3">
           <CollapseTrigger
             open={advancedOpen}
             onToggle={() => setAdvancedOpen((v) => !v)}
-            className="rounded-xl border border-border/60 px-3"
           >
-            高级设置
+            模型目录与高级参数
           </CollapseTrigger>
+          {!advancedOpen ? (
+            <p className="-mt-1 type-meta">
+              模型 / 对齐目录、VAD 后端与分段参数收在此处 · 多数用户无需调整。
+            </p>
+          ) : null}
           <SoftCollapse open={advancedOpen}>
-            <VadAdvancedFields config={config} updateConfig={updateConfig} />
-          </SoftCollapse>
+            <div className="flex flex-col gap-5 pt-1">
+              {downloading && progress ? (
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between type-meta">
+                    <span>
+                      {progress.file}（{progress.file_index}/
+                      {progress.file_count}）
+                    </span>
+                    <span>
+                      {progress.percent != null
+                        ? `${progress.percent.toFixed(0)}%`
+                        : formatBytes(progress.downloaded)}
+                      {progress.total
+                        ? ` / ${formatBytes(progress.total)}`
+                        : ""}
+                    </span>
+                  </div>
+                  <div className="update-progress-track">
+                    <div
+                      className="update-progress-bar"
+                      style={{
+                        width:
+                          progress.percent != null
+                            ? `${Math.min(100, Math.max(0, progress.percent))}%`
+                            : "30%",
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : null}
 
-          <div className="form-actions">
-            <div className="form-actions-secondary">
-              <Button
-                size="sm"
+              <TextField
+                fullWidth
                 variant="secondary"
-                isPending={downloading}
-                onPress={() => void startDownload()}
+                value={config.asr_model_dir}
+                onChange={(value) => updateConfig("asr_model_dir", value)}
               >
-                <Download size={14} />
-                {status?.needs_download ?? true ? "下载模型" : "重新下载"}
-              </Button>
+                <Label>模型目录</Label>
+                <div className="flex gap-2">
+                  <Input className="min-w-0 flex items-center font-mono text-[13px]" />
+                  <Button
+                    variant="secondary"
+                    onPress={() => void chooseModelDir()}
+                  >
+                    <FolderOpen size={16} />
+                    浏览
+                  </Button>
+                </div>
+              </TextField>
+
+              <Checkbox
+                isSelected={downloadAligner}
+                onChange={setDownloadAligner}
+              >
+                <Checkbox.Content className="flex items-center gap-2 type-meta">
+                  <Checkbox.Control>
+                    <Checkbox.Indicator />
+                  </Checkbox.Control>
+                  下载时一并获取逐字对齐模型（ForcedAligner）
+                </Checkbox.Content>
+              </Checkbox>
+
+              <TextField
+                fullWidth
+                variant="secondary"
+                value={config.align_model_dir ?? ""}
+                onChange={(value) => updateConfig("align_model_dir", value)}
+              >
+                <Label>对齐模型目录</Label>
+                <Input className="min-w-0 flex items-center font-mono text-[13px]" />
+              </TextField>
+
+              <VadAdvancedFields config={config} updateConfig={updateConfig} />
             </div>
+          </SoftCollapse>
+        </SectionCard>
+        </Reveal>
+      ) : null}
+
+      <div className="form-actions">
+        {isQwen ? (
+          <div className="form-actions-secondary">
             <Button
-              className="form-actions-primary btn-press"
-              fullWidth
-              variant="primary"
-              onPress={() => void saveConfig()}
+              size="sm"
+              variant="secondary"
+              isPending={downloading}
+              onPress={() => void startDownload()}
             >
-              <Save size={16} />
-              保存
+              <Download size={14} />
+              {status?.needs_download ?? true ? "下载模型" : "重新下载"}
             </Button>
           </div>
-        </SectionCard>
-        </Reveal>
-      ) : (
-        <Reveal index={1}>
-        <SectionCard>
-          <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
-            <Save size={16} />
-            保存
-          </Button>
-        </SectionCard>
-        </Reveal>
-      )}
+        ) : null}
+        <Button
+          className="form-actions-primary btn-press"
+          fullWidth
+          variant="primary"
+          onPress={() => void saveConfig()}
+        >
+          <Save size={16} />
+          保存
+        </Button>
+      </div>
     </div>
   );
 }
@@ -990,81 +990,255 @@ function VadAdvancedFields({
 
 function LlmProviderPanel() {
   const { config, updateConfig, saveConfig } = useApp();
-  const [editProvider, setEditProvider] = useState<LlmProvider>(
-    config.llm_provider,
-  );
+  // Which provider's editor is open. null = collapsed list (no flat form).
+  const [openId, setOpenId] = useState<LlmProvider | null>(null);
 
-  const creds = resolveLlmCreds(config, editProvider);
-  const isActive = editProvider === config.llm_provider;
+  const providers = listLlmProviders(config);
 
-  const patchCreds = (patch: Partial<typeof creds>) => {
-    const nextCred = { ...resolveLlmCreds(config, editProvider), ...patch };
+  const patchCreds = (
+    provider: LlmProvider,
+    patch: Partial<LlmCredential>,
+  ) => {
+    const nextCred = { ...resolveLlmCreds(config, provider), ...patch };
     updateConfig("llm_credentials", {
       ...config.llm_credentials,
-      [editProvider]: nextCred,
+      [provider]: nextCred,
     });
     // Mirror into flat fields the backend reads when editing the active provider.
-    if (isActive) {
+    if (provider === config.llm_provider) {
       if (patch.api_base_url !== undefined) {
         updateConfig("llm_api_base_url", nextCred.api_base_url);
       }
       if (patch.api_key !== undefined) {
         updateConfig("llm_api_key", nextCred.api_key);
       }
+      if (patch.model !== undefined) {
+        updateConfig("llm_model", nextCred.model);
+      }
     }
   };
 
-  return (
-    <SectionCard className="max-w-2xl flex flex-col gap-5" title="润色引擎">
-      <div className="rounded-2xl border border-border bg-surface-secondary/50 px-3 py-2">
-        <Switch
-          isSelected={config.llm_enabled}
-          onChange={(value) => updateConfig("llm_enabled", value)}
-        >
-          <Switch.Content className="w-full justify-between gap-2 p-2">
-            <div className="min-w-0 pr-2">
-              <div className="text-sm font-semibold text-foreground">
-                启用纠错
-              </div>
-            </div>
-            <Switch.Control>
-              <Switch.Thumb />
-            </Switch.Control>
-          </Switch.Content>
-        </Switch>
-      </div>
+  const activate = (provider: LlmProvider) => {
+    const patch = activateLlmProviderPatch(config, provider);
+    updateConfig("llm_provider", patch.llm_provider);
+    updateConfig("llm_api_base_url", patch.llm_api_base_url);
+    updateConfig("llm_api_key", patch.llm_api_key);
+    updateConfig("llm_model", patch.llm_model);
+    void saveConfig(
+      {
+        ...config,
+        ...patch,
+      },
+      { silent: true },
+    );
+    toast.success(`已设为当前 · ${llmProviderLabel(config, provider)}`);
+  };
 
-      <Select
-        className="w-full flex"
-        selectedKey={editProvider}
-        onSelectionChange={(key) => {
-          if (key == null) return;
-          setEditProvider(String(key) as LlmProvider);
-        }}
-      >
-        <Label>服务商</Label>
-        <Select.Trigger className="flex items-center justify-between p-4">
-          <Select.Value />
-          <Select.Indicator />
-        </Select.Trigger>
-        <Select.Popover>
-          <ListBox className="gap-2 p-2">
-            {LLM_PROVIDER_PRESETS.map((p) => (
-              <ListBox.Item key={p.id} id={p.id} textValue={p.label}>
-                {p.label}
-                {p.id === config.llm_provider ? " · 当前" : ""}
-                <ListBox.ItemIndicator />
-              </ListBox.Item>
-            ))}
-          </ListBox>
-        </Select.Popover>
-      </Select>
+  const resetBuiltin = (provider: LlmProvider) => {
+    const rest = { ...config.llm_credentials };
+    delete rest[provider];
+    updateConfig("llm_credentials", rest);
+    void saveConfig({ ...config, llm_credentials: rest }, { silent: true });
+    toast.success("已重置该服务商");
+  };
+
+  const deleteCustom = (provider: LlmProvider) => {
+    if (!window.confirm("删除该自定义服务商？")) return;
+    const rest = { ...config.llm_credentials };
+    delete rest[provider];
+    const next = { ...config, llm_credentials: rest };
+    // Fall back to OpenAI if the deleted provider was current.
+    if (provider === config.llm_provider) {
+      Object.assign(next, activateLlmProviderPatch(next, "openai"));
+    }
+    void saveConfig(next, { silent: true });
+    updateConfig("llm_credentials", rest);
+    if (provider === config.llm_provider) {
+      updateConfig("llm_provider", next.llm_provider);
+      updateConfig("llm_api_base_url", next.llm_api_base_url);
+      updateConfig("llm_api_key", next.llm_api_key);
+      updateConfig("llm_model", next.llm_model);
+    }
+    if (openId === provider) setOpenId(null);
+    toast.success("已删除");
+  };
+
+  const addProvider = () => {
+    const id = newCustomProviderId();
+    updateConfig("llm_credentials", {
+      ...config.llm_credentials,
+      [id]: { api_base_url: "", api_key: "", model: "", label: "新服务商" },
+    });
+    setOpenId(id);
+  };
+
+  const save = () => {
+    void saveConfig();
+    toast.success("已保存");
+  };
+
+  return (
+    <div className="flex max-w-2xl flex-col gap-4">
+      <SectionCard className="flex flex-col gap-4">
+        <div className="settings-switchrow">
+          <Switch
+            isSelected={config.llm_enabled}
+            onChange={(value) => updateConfig("llm_enabled", value)}
+          >
+            <Switch.Content className="w-full justify-between gap-2 p-3">
+              <div className="min-w-0 pr-2">
+                <div className="type-ui">启用纠错</div>
+                <div className="mt-0.5 type-meta">
+                  用所选服务商润色识别稿 · 关闭则出原始识别文字
+                </div>
+              </div>
+              <Switch.Control>
+                <Switch.Thumb />
+              </Switch.Control>
+            </Switch.Content>
+          </Switch>
+        </div>
+      </SectionCard>
+
+      <SectionCard className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <h2 className="type-section">服务商</h2>
+          <span className="type-meta">点开编辑 · 设为当前</span>
+        </div>
+
+        <div className="set-rows">
+          {providers.map((p) => {
+            const isCur = p.id === config.llm_provider;
+            const isOpen = openId === p.id;
+            const local = p.id === "ollama";
+            const stored = config.llm_credentials?.[p.id];
+            const hasKey = Boolean(stored?.api_key?.trim());
+            const rc = resolveLlmCreds(config, p.id);
+            const badge = isCur
+              ? "当前"
+              : local
+                ? "本地"
+                : hasKey
+                  ? "有 Key"
+                  : "未配";
+            return (
+              <div key={p.id} className={cn("set-row-wrap", isOpen && "is-open")}>
+                <button
+                  type="button"
+                  aria-expanded={isOpen}
+                  className={cn("set-row text-left", isOpen && "is-active")}
+                  onClick={() => setOpenId(isOpen ? null : p.id)}
+                >
+                  <div className="set-row-body">
+                    <div className="set-row-meta">
+                      {p.label}
+                      {isCur ? (
+                        <span className="set-row-tag">· 当前</span>
+                      ) : null}
+                    </div>
+                    <div className="set-row-sub">
+                      {rc.api_base_url || "未设置地址"}
+                      {rc.model ? ` · ${rc.model}` : ""}
+                    </div>
+                  </div>
+                  <span className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "type-micro rounded-md px-1.5 py-0.5",
+                        isCur
+                          ? "bg-accent-soft text-accent-soft-foreground"
+                          : local || hasKey
+                            ? "bg-success/10 text-success"
+                            : "bg-default/60 text-muted",
+                      )}
+                    >
+                      {badge}
+                    </span>
+                    <ChevronDown
+                      size={15}
+                      className={cn(
+                        "shrink-0 text-muted transition-transform duration-200",
+                        isOpen && "rotate-180",
+                      )}
+                    />
+                  </span>
+                </button>
+
+                <SoftCollapse open={isOpen}>
+                  <ProviderEditor
+                    provider={p.id}
+                    builtin={p.builtin}
+                    isCurrent={isCur}
+                    config={config}
+                    onPatch={(patch) => patchCreds(p.id, patch)}
+                    onActivate={() => activate(p.id)}
+                    onSave={save}
+                    onReset={() => resetBuiltin(p.id)}
+                    onDelete={() => deleteCustom(p.id)}
+                  />
+                </SoftCollapse>
+              </div>
+            );
+          })}
+        </div>
+
+        <Button
+          size="sm"
+          variant="secondary"
+          className="self-start"
+          onPress={addProvider}
+        >
+          <Plus size={14} />
+          添加服务商
+        </Button>
+      </SectionCard>
+    </div>
+  );
+}
+
+function ProviderEditor({
+  provider,
+  builtin,
+  isCurrent,
+  config,
+  onPatch,
+  onActivate,
+  onSave,
+  onReset,
+  onDelete,
+}: {
+  provider: LlmProvider;
+  builtin: boolean;
+  isCurrent: boolean;
+  config: ReturnType<typeof useApp>["config"];
+  onPatch: (patch: Partial<LlmCredential>) => void;
+  onActivate: () => void;
+  onSave: () => void;
+  onReset: () => void;
+  onDelete: () => void;
+}) {
+  const creds = resolveLlmCreds(config, provider);
+  const preset = llmPreset(provider);
+
+  return (
+    <div className="flex flex-col gap-4 px-3 pb-4 pt-3">
+      {!builtin ? (
+        <TextField
+          fullWidth
+          variant="secondary"
+          value={creds.label ?? ""}
+          onChange={(value) => onPatch({ label: value })}
+        >
+          <Label>名称</Label>
+          <Input placeholder="自定义服务商名称" />
+        </TextField>
+      ) : null}
 
       <TextField
         fullWidth
         variant="secondary"
         value={creds.api_base_url}
-        onChange={(value) => patchCreds({ api_base_url: value })}
+        onChange={(value) => onPatch({ api_base_url: value })}
       >
         <Label>API Base URL</Label>
         <Input placeholder="https://api.openai.com/v1" />
@@ -1075,25 +1249,67 @@ function LlmProviderPanel() {
         variant="secondary"
         type="password"
         value={creds.api_key}
-        onChange={(value) => patchCreds({ api_key: value })}
+        onChange={(value) => onPatch({ api_key: value })}
       >
         <Label>API Key</Label>
         <Input placeholder="可留空（Ollama 等本地服务）" />
       </TextField>
 
-      <p className="text-[12px] text-muted">
-        模型可在上方「纠错学习」「词库」两个子页，或{" "}
-        <Link to="/draft?mode=translate" className="text-accent hover:underline">
-          出稿 → 翻译
-        </Link>
-        {" 中选择。"}
-      </p>
+      <TextField
+        fullWidth
+        variant="secondary"
+        value={creds.model}
+        onChange={(value) => onPatch({ model: value })}
+      >
+        <Label>模型</Label>
+        <Input
+          placeholder={preset.models[0] ?? "模型名称"}
+          className="font-mono text-[13px]"
+        />
+      </TextField>
+      {preset.models.length > 0 ? (
+        <div className="-mt-1 flex flex-wrap gap-1.5">
+          {preset.models.map((m) => (
+            <button
+              key={m}
+              type="button"
+              className="rounded-md border border-border bg-surface-secondary px-2 py-1 font-mono text-[11px] text-muted transition-colors hover:border-foreground/20 hover:text-foreground"
+              onClick={() => onPatch({ model: m })}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
-      <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
-        <Save size={16} />
-        保存
-      </Button>
-    </SectionCard>
+      <div className="form-actions">
+        <div className="form-actions-secondary flex gap-2">
+          {!isCurrent ? (
+            <Button size="sm" variant="secondary" onPress={onActivate}>
+              设为当前
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted hover:text-danger data-[hovered=true]:text-danger"
+            onPress={builtin ? onReset : onDelete}
+          >
+            <Trash2 size={14} />
+            {builtin ? "重置" : "删除"}
+          </Button>
+        </div>
+        <Button
+          className="form-actions-primary btn-press"
+          fullWidth
+          variant="primary"
+          onPress={onSave}
+        >
+          <Save size={16} />
+          保存
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -1127,9 +1343,9 @@ function GeneralPanel() {
         </Select.Popover>
       </Select>
 
-      <div className="flex flex-col gap-2">
-        <div className="text-[13px] font-medium text-foreground">录音源</div>
-        <div className="grid gap-2">
+      <div className="flex flex-col gap-2.5">
+        <div className="type-ui">录音源</div>
+        <div className="flex flex-col gap-2" role="radiogroup" aria-label="录音源">
           {(
             [
               { id: "external" as const, title: "只录外部" },
@@ -1140,19 +1356,21 @@ function GeneralPanel() {
             const active =
               (config.audio_capture_mode ?? "external") === item.id;
             return (
-              <Button
+              <button
                 key={item.id}
-                variant="ghost"
+                type="button"
+                role="radio"
+                aria-checked={active}
                 className={cn(
-                  "h-auto min-h-0 justify-start rounded-xl border px-3.5 py-3 text-left text-sm font-medium shadow-none transition-colors data-[pressed=true]:scale-100",
+                  "w-full rounded-[10px] border px-3.5 py-3 text-left text-sm font-medium transition-colors",
                   active
-                    ? "border-foreground/20 bg-default text-foreground"
-                    : "border-border bg-transparent text-muted hover:bg-default/50 data-[hovered=true]:bg-default/50",
+                    ? "border-foreground/20 bg-surface-secondary text-foreground"
+                    : "border-border text-muted hover:border-foreground/15 hover:bg-surface-secondary/60",
                 )}
-                onPress={() => updateConfig("audio_capture_mode", item.id)}
+                onClick={() => updateConfig("audio_capture_mode", item.id)}
               >
                 {item.title}
-              </Button>
+              </button>
             );
           })}
         </div>
@@ -1759,6 +1977,12 @@ function shortBin(path: string): string {
   return `…/${parts.slice(-3).join("/")}`;
 }
 
+const BUILTIN_AGENTS: { kind: AgentKind; name: string; desc: string }[] = [
+  { kind: "claude", name: "Claude", desc: "Anthropic CLI" },
+  { kind: "codex", name: "Codex", desc: "OpenAI CLI" },
+  { kind: "pi", name: "Pi", desc: "Pi CLI" },
+];
+
 function AgentPanel() {
   const { config, updateConfig, saveConfig, agentModels, refreshAgentModels } =
     useApp();
@@ -1826,182 +2050,169 @@ function AgentPanel() {
     void saveConfig({ ...config, agent_profiles: next }, { silent: true });
   };
 
-  const addProfile = () => {
-    const id = `agent-${Date.now().toString(36)}`;
-    persistProfiles([
-      ...profiles,
-      { id, name: "新 Agent", kind: "claude", bin: "", model: "sonnet" },
-    ]);
-  };
-
-  const removeProfile = (id: string) => {
-    if (profiles.length <= 1) {
-      toast.warning("至少保留一个");
-      return;
-    }
-    persistProfiles(profiles.filter((p) => p.id !== id));
-  };
-
   const patchProfile = (id: string, patch: Partial<AgentProfile>) => {
     persistProfiles(profiles.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   };
 
+  const setDefaultAgent = (profile: AgentProfile) => {
+    updateConfig("agent_profile_id", profile.id);
+    updateConfig("agent_kind", profile.kind);
+    void saveConfig(
+      { ...config, agent_profile_id: profile.id, agent_kind: profile.kind },
+      { silent: true },
+    );
+  };
+
   return (
     <div className="flex max-w-2xl flex-col gap-4">
-      <Reveal index={0}>
-      <SectionCard className="flex flex-col gap-4" title="派活能力">
-        <div className="flex items-center justify-end">
-          <Button
-            size="sm"
-            variant="secondary"
-            className="h-7 min-h-7 gap-1 px-2 text-[12px]"
-            onPress={addProfile}
-          >
-            <Plus size={12} />
-            添加
-          </Button>
-        </div>
+      <p className="-mb-1 type-meta">
+        言落内置支持 Claude · Codex · Pi 三种 CLI。填好路径与默认模型，选一个作为默认派活 Agent。
+      </p>
 
-        <ul className="flex flex-col gap-2">
-          {profiles.map((p) => {
-            const hit = detectedForKind(detected, p.kind);
-            const models = agentModelsFor(p.kind, agentModels);
-            const modelKey = models.some((m) => m.id === (p.model ?? ""))
-              ? p.model || "__default__"
-              : p.model
-                ? p.model
-                : "__default__";
-            return (
-              <li key={p.id} className="rounded-xl bg-default/25 px-3 py-2.5">
-                <div className="mb-2 flex items-center gap-2">
-                  <span className="type-micro rounded-md bg-default/50 px-2 py-0.5 text-muted">
-                    {p.kind}
-                  </span>
-                  <Button
-                    isIconOnly
-                    variant="ghost"
-                    className="ml-auto h-6 w-6 min-h-6 min-w-6 rounded-md p-0 text-muted shadow-none hover:bg-default/50 hover:text-danger data-[hovered=true]:bg-default/50 data-[hovered=true]:text-danger data-[pressed=true]:scale-100"
-                    aria-label={`删除 ${p.name || p.kind}`}
-                    onPress={() => removeProfile(p.id)}
-                  >
-                    <Trash2 size={12} aria-hidden />
-                  </Button>
+      {BUILTIN_AGENTS.map((meta, idx) => {
+        const p =
+          profiles.find((x) => x.kind === meta.kind) ??
+          (defaultConfig.agent_profiles.find(
+            (x) => x.kind === meta.kind,
+          ) as AgentProfile);
+        const hit = detectedForKind(detected, meta.kind);
+        const configured = Boolean((p.bin ?? "").trim() || hit);
+        const isDefault = config.agent_profile_id === p.id;
+        const models = agentModelsFor(meta.kind, agentModels);
+        const modelKey = models.some((m) => m.id === (p.model ?? ""))
+          ? p.model || "__default__"
+          : p.model
+            ? p.model
+            : "__default__";
+        return (
+          <Reveal key={meta.kind} index={idx}>
+          <SectionCard className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="type-section">
+                  {meta.name}
+                  <span className="ml-2 type-meta font-normal">{meta.desc}</span>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <TextField
-                    value={p.name}
-                    onChange={(v) => patchProfile(p.id, { name: v })}
-                  >
-                    <Label>名称</Label>
-                    <Input />
-                  </TextField>
+                <div className="mt-0.5 type-meta">
+                  {configured ? (
+                    <span className="text-success-soft-foreground">
+                      已检测到路径
+                    </span>
+                  ) : (
+                    <span className="text-muted">未检测到路径</span>
+                  )}
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant={isDefault ? "primary" : "secondary"}
+                isDisabled={isDefault}
+                onPress={() => setDefaultAgent(p)}
+              >
+                {isDefault ? "默认" : "设为默认"}
+              </Button>
+            </div>
 
-                  <div className="flex items-end gap-1">
-                    <Select
-                      className="min-w-0 flex-1"
-                      selectedKey={modelKey}
-                      onSelectionChange={(key) => {
-                        if (key == null) return;
-                        const model =
-                          String(key) === "__default__" ? "" : String(key);
-                        patchProfile(p.id, { model });
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="flex items-end gap-1">
+                <Select
+                  className="min-w-0 flex-1"
+                  selectedKey={modelKey}
+                  onSelectionChange={(key) => {
+                    if (key == null) return;
+                    const model =
+                      String(key) === "__default__" ? "" : String(key);
+                    patchProfile(p.id, { model });
+                  }}
+                >
+                  <Label>默认模型</Label>
+                  <Select.Trigger className="flex items-center justify-between">
+                    <Select.Value>
+                      {() => {
+                        const cur = p.model ?? "";
+                        const opt = models.find((m) => m.id === cur);
+                        return (
+                          <span className="truncate">
+                            {opt?.label ?? (cur || "默认")}
+                          </span>
+                        );
                       }}
-                    >
-                      <Label>模型</Label>
-                      <Select.Trigger className="flex items-center justify-between">
-                        <Select.Value>
-                          {() => {
-                            const cur = p.model ?? "";
-                            const opt = models.find((m) => m.id === cur);
-                            return (
-                              <span className="truncate">
-                                {opt?.label ?? (cur || "默认")}
-                              </span>
-                            );
-                          }}
-                        </Select.Value>
-                        <ChevronDown size={12} className="shrink-0 opacity-50" />
-                      </Select.Trigger>
-                      <Select.Popover className="min-w-40">
-                        <ListBox>
-                          {models.map((m) => (
-                            <ListBox.Item
-                              key={m.id || "__default__"}
-                              id={m.id || "__default__"}
-                              textValue={m.label}
-                            >
-                              <span>{m.label}</span>
-                              <ListBox.ItemIndicator />
-                            </ListBox.Item>
-                          ))}
-                          {p.model &&
-                          !models.some((m) => m.id === p.model) ? (
-                            <ListBox.Item id={p.model} textValue={p.model}>
-                              <span>{p.model}</span>
-                              <ListBox.ItemIndicator />
-                            </ListBox.Item>
-                          ) : null}
-                        </ListBox>
-                      </Select.Popover>
-                    </Select>
+                    </Select.Value>
+                    <ChevronDown size={12} className="shrink-0 opacity-50" />
+                  </Select.Trigger>
+                  <Select.Popover className="min-w-40">
+                    <ListBox>
+                      {models.map((m) => (
+                        <ListBox.Item
+                          key={m.id || "__default__"}
+                          id={m.id || "__default__"}
+                          textValue={m.label}
+                        >
+                          <span>{m.label}</span>
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                      ))}
+                      {p.model && !models.some((m) => m.id === p.model) ? (
+                        <ListBox.Item id={p.model} textValue={p.model}>
+                          <span>{p.model}</span>
+                          <ListBox.ItemIndicator />
+                        </ListBox.Item>
+                      ) : null}
+                    </ListBox>
+                  </Select.Popover>
+                </Select>
+                <Button
+                  isIconOnly
+                  variant="secondary"
+                  className="mb-0.5 h-8 w-8 min-h-8 min-w-8 shrink-0"
+                  aria-label="刷新模型列表"
+                  isDisabled={modelsRefreshing}
+                  onPress={() => void refreshModels()}
+                >
+                  <RefreshCw
+                    size={13}
+                    className={modelsRefreshing ? "animate-spin" : ""}
+                  />
+                </Button>
+              </div>
+
+              <TextField
+                value={p.bin ?? ""}
+                onChange={(v) => patchProfile(p.id, { bin: v })}
+              >
+                <Label>路径</Label>
+                <InputGroup>
+                  <InputGroup.Prefix className="pl-0">
                     <Button
-                      isIconOnly
-                      variant="secondary"
-                      className="mb-0.5 h-8 w-8 min-h-8 min-w-8 shrink-0"
-                      aria-label="刷新模型列表"
-                      isDisabled={modelsRefreshing}
-                      onPress={() => void refreshModels()}
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 min-h-7 gap-1 rounded-md px-2 text-[11px] font-medium"
+                      isDisabled={detecting}
+                      onPress={() => void whichBin(p.id, meta.kind)}
                     >
                       <RefreshCw
-                        size={13}
-                        className={modelsRefreshing ? "animate-spin" : ""}
+                        size={11}
+                        className={detecting ? "animate-spin" : ""}
                       />
+                      which
                     </Button>
-                  </div>
-
-                  <TextField
-                    value={p.bin ?? ""}
-                    onChange={(v) => patchProfile(p.id, { bin: v })}
-                  >
-                    <Label>路径</Label>
-                    <InputGroup>
-                      <InputGroup.Prefix className="pl-0">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 min-h-7 gap-1 rounded-md px-2 text-[11px] font-medium"
-                          isDisabled={detecting}
-                          onPress={() => void whichBin(p.id, p.kind)}
-                        >
-                          <RefreshCw
-                            size={11}
-                            className={detecting ? "animate-spin" : ""}
-                          />
-                          which
-                        </Button>
-                      </InputGroup.Prefix>
-                      <InputGroup.Input
-                        placeholder={hit ?? `which ${p.kind}`}
-                        className="p-2 font-mono text-[12px]"
-                      />
-                    </InputGroup>
-                  </TextField>
-                </div>
-                {!hit && !(p.bin ?? "").trim() ? (
-                  <div className="type-meta mt-1.5 text-warning">
-                    未找到 {p.kind}
-                  </div>
-                ) : hit && (p.bin ?? "").trim() !== hit ? (
-                  <div className="type-meta mt-1.5 truncate">
-                    which → {shortBin(hit)}
-                  </div>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      </SectionCard>
-      </Reveal>
+                  </InputGroup.Prefix>
+                  <InputGroup.Input
+                    placeholder={hit ?? `which ${meta.kind}`}
+                    className="p-2 font-mono text-[12px]"
+                  />
+                </InputGroup>
+              </TextField>
+            </div>
+            {hit && (p.bin ?? "").trim() !== hit ? (
+              <div className="type-meta truncate">
+                which → {shortBin(hit)}
+              </div>
+            ) : null}
+          </SectionCard>
+          </Reveal>
+        );
+      })}
 
 
       {config.agent_trusted_dirs.length > 0 ? (

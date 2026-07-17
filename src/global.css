@@ -14,4 +14,5 @@
 @import "./styles/utilities.css";
 @import "./styles/layout.css";
 @import "./styles/components.css";
+@import "./styles/draft.css";
 @import "./styles/agent.css";

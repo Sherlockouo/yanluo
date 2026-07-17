@@ -169,16 +169,16 @@
   padding: 0 8px;
   border-radius: 8px;
   border: 0;
-  background: color-mix(in oklab, var(--accent) 10%, transparent);
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
   font-size: 12px;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--foreground);
   cursor: pointer;
   transition: background 120ms ease;
 }
 
 .agent-model-trigger:hover {
-  background: color-mix(in oklab, var(--accent) 16%, transparent);
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
 }
 
 .agent-model-trigger[data-disabled="true"],
@@ -501,6 +501,53 @@
 .agent-composer-field {
   width: 100%;
   gap: 0;
+}
+
+/* Attachment chips — small removable rows above the composer input */
+.agent-attach-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 8px 2px;
+}
+
+.agent-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 220px;
+  height: 24px;
+  padding: 0 6px 0 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--border) 90%, transparent);
+  background: var(--surface-secondary);
+  font-size: 12px;
+  color: var(--foreground);
+}
+
+.agent-attach-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-attach-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.agent-attach-chip-x:hover {
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  color: var(--foreground);
 }
 
 .agent-composer-input {

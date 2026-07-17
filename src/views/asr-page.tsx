@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Button,
   Input,
@@ -12,10 +13,8 @@ import { Link } from "react-router-dom";
 import { Mic, Save } from "lucide-react";
 import { LANGUAGES, QWEN_ASR_MODELS, providerLabel } from "@/lib/constants";
 import {
-  EmptyState,
   PageHeader,
   PageShell,
-  PanelHeader,
   Reveal,
   SoftCollapse,
 } from "@/components/shared/page-shell";
@@ -23,7 +22,15 @@ import { hasRefineDiff, RefineDiff } from "@/components/ui/refine-diff";
 import { useApp } from "@/app-context";
 
 /** Live-draft mode panel — recent Fn transcriptions + engine config. Used standalone or embedded in 出稿. */
-export function AsrPage({ embedded = false }: { embedded?: boolean } = {}) {
+export function AsrPage({
+  embedded = false,
+  active = true,
+  actionSlot,
+}: {
+  embedded?: boolean;
+  active?: boolean;
+  actionSlot?: HTMLElement | null;
+} = {}) {
   const {
     config,
     history,
@@ -71,9 +78,19 @@ export function AsrPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   const content = (
     <>
-      {embedded ? (
-        <PanelHeader status={header} action={headerAction} />
-      ) : (
+      {embedded && active && actionSlot
+        ? createPortal(
+            <button
+              type="button"
+              className="dlink muted"
+              onClick={() => setEngineOpen((v) => !v)}
+            >
+              模型{engineOpen ? " ▴" : " ▾"}
+            </button>,
+            actionSlot,
+          )
+        : null}
+      {embedded ? null : (
         <PageHeader title="实时" status={header} action={headerAction} />
       )}
 
@@ -218,33 +235,31 @@ export function AsrPage({ embedded = false }: { embedded?: boolean } = {}) {
       </SoftCollapse>
 
       {entries.length === 0 ? (
-        <EmptyState
-          title="还没有识别记录"
-          description="Fn 开始"
-          icon={<Mic size={18} />}
-        />
+        <div className="dropzone" style={{ minHeight: 200 }}>
+          <span className="dropzone-ic">
+            <Mic size={22} aria-hidden />
+          </span>
+          <span className="dropzone-t">还没有识别记录</span>
+          <span className="dropzone-fmt">按住 Fn 开始</span>
+        </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="recs">
           {entries.map((entry, i) => {
             const showDiff = hasRefineDiff(entry.raw_text, entry.text);
             return (
               <Reveal key={entry.id} index={i}>
-                <article className="surface-card px-4 py-3.5">
-                  <div className="mb-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 type-meta">
+                <article className="rec">
+                  <div className="rec-l">
                     <span>{new Date(entry.created_at).toLocaleString()}</span>
-                    <span className="text-muted/40">·</span>
                     <span>{entry.duration_seconds.toFixed(1)}s</span>
-                    {entry.language ? (
-                      <>
-                        <span className="text-muted/40">·</span>
-                        <span>{entry.language}</span>
-                      </>
-                    ) : null}
+                    {entry.language ? <span>{entry.language}</span> : null}
                   </div>
                   {showDiff ? (
-                    <RefineDiff before={entry.raw_text} after={entry.text} />
+                    <div className="rec-c">
+                      <RefineDiff before={entry.raw_text} after={entry.text} />
+                    </div>
                   ) : (
-                    <p className="type-body whitespace-pre-wrap">
+                    <p className="rec-c whitespace-pre-wrap">
                       {entry.text || "（空）"}
                     </p>
                   )}

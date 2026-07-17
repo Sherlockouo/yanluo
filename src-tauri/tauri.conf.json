@@ -30,6 +30,7 @@
         "scope": [
           "$APPDATA/**",
           "$HOME/**",
+          "$HOME/Library/Application Support/Yanluo/**",
           "$HOME/Library/Application Support/ASR Workshop/**"
         ]
       }

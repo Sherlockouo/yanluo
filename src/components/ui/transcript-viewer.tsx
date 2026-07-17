@@ -194,10 +194,12 @@ function TranscriptRoot({
 
       let idx = -1;
       if (words.length) {
-        // Words are time-ordered — walk until past playhead.
+        // Current word = last one already started. DON'T break on the first
+        // future word: streaming segments overlap (rollback/overlap), so a
+        // boundary can dip startTime backward — an early break would freeze the
+        // highlight for the rest of playback.
         for (let i = 0; i < words.length; i++) {
           if (t + 1e-3 >= words[i].startTime) idx = i;
-          else break;
         }
         if (end) idx = words.length - 1;
       }
@@ -716,7 +718,9 @@ function TranscriptContent({
                             data-status={status}
                             aria-label={`${word.text}, ${formatClock(word.startTime)}`}
                             className={cn(
-                              "inline cursor-pointer rounded-sm px-px transition-colors duration-100 outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
+                              "inline cursor-pointer rounded-sm transition-colors duration-100 outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
+                              // Latin click targets need a sliver of padding; CJK must stay flush.
+                              /[A-Za-z0-9]/.test(word.text) && "px-px",
                               status === "spoken" && "text-muted",
                               status === "current" &&
                                 "bg-accent/25 font-medium text-accent",

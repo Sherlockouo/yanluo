@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Button,
-  Kbd,
   ListBox,
   Select,
   TextArea,
@@ -10,34 +9,23 @@ import {
   toast,
 } from "@heroui/react";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   Bot,
   ChevronDown,
   Clipboard,
-  Mic,
+  Paperclip,
   Send,
   Settings2,
   Square,
   Trash2,
+  X,
 } from "lucide-react";
-import { EmptyState, PageHeader, PageShell } from "@/components/shared/page-shell";
-import { defaultConfig, hotkeySegments, agentModelsFor } from "@/lib/constants";
+import { PageHeader, PageShell } from "@/components/shared/page-shell";
+import { defaultConfig, agentModelsFor } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import type { AgentJob, AgentKind, AgentProfile } from "@/types";
 import { useApp } from "@/app-context";
-
-function HotkeyKbd({ label }: { label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1">
-      {hotkeySegments(label).map((part, i) => (
-        <span key={`${part}-${i}`} className="inline-flex items-center gap-1">
-          {i > 0 ? <span className="text-border">+</span> : null}
-          <Kbd>{part}</Kbd>
-        </span>
-      ))}
-    </span>
-  );
-}
 
 function jobStatusLabel(status: AgentJob["status"]): string {
   switch (status) {
@@ -116,7 +104,7 @@ function AgentJobCard({
             <span
               className={cn(
                 "text-[12px]",
-                active && "text-accent",
+                active && "text-accent-soft-foreground",
                 job.status === "error" && "text-danger",
                 job.status === "done" && "text-success",
                 !active &&
@@ -135,7 +123,7 @@ function AgentJobCard({
             {job.prompt}
           </div>
           {job.progress && active ? (
-            <div className="mt-1 truncate text-[12px] text-accent/80">
+            <div className="mt-1 truncate text-[12px] text-accent-soft-foreground">
               {job.progress}
             </div>
           ) : null}
@@ -194,6 +182,7 @@ export function AgentPage() {
     agentModels,
   } = useApp();
   const [prompt, setPrompt] = useState("");
+  const [attachments, setAttachments] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
 
   const profiles = useMemo(
@@ -208,7 +197,25 @@ export function AgentPage() {
 
   const activeCount = agentJobs.filter((j) => isActive(j.status)).length;
   const finishedCount = agentJobs.length - activeCount;
-  const canSend = Boolean(prompt.trim()) && !sending;
+  const canSend = (Boolean(prompt.trim()) || attachments.length > 0) && !sending;
+
+  const pickAttachments = async () => {
+    const selected = await openDialog({
+      multiple: true,
+      defaultPath: config.agent_cwd || undefined,
+    }).catch(() => null);
+    const picked = Array.isArray(selected)
+      ? selected
+      : typeof selected === "string"
+        ? [selected]
+        : [];
+    if (!picked.length) return;
+    setAttachments((prev) => [...new Set([...prev, ...picked])]);
+  };
+
+  const removeAttachment = (path: string) => {
+    setAttachments((prev) => prev.filter((p) => p !== path));
+  };
 
   const selectProfile = (id: string) => {
     const p = profiles.find((x) => x.id === id);
@@ -246,7 +253,7 @@ export function AgentPage() {
 
   const dispatch = async () => {
     const text = prompt.trim();
-    if (!text || sending) return;
+    if ((!text && attachments.length === 0) || sending) return;
     setSending(true);
     try {
       const kind = activeProfile?.kind ?? "claude";
@@ -254,9 +261,10 @@ export function AgentPage() {
         agent: kind,
         prompt: text,
         cwd: config.agent_cwd || "",
-        attachments: [] as string[],
+        attachments,
       });
       setPrompt("");
+      setAttachments([]);
     } catch (e) {
       toast.danger(e instanceof Error ? e.message : String(e));
     } finally {
@@ -288,19 +296,17 @@ export function AgentPage() {
       <PageHeader
         title="派活"
         status={
-          agentJobs.length ? (
-            <>
-              {activeCount > 0 ? (
-                <span className="text-accent">{activeCount} 运行</span>
-              ) : null}
-              {activeCount > 0 && finishedCount > 0 ? " · " : null}
-              {finishedCount > 0 ? `${finishedCount} 完成` : null}
-              {!activeCount && !finishedCount ? null : " · "}
-              <HotkeyKbd label={config.hotkey_agent?.label ?? "Fn+Space"} />
-            </>
-          ) : (
-            <HotkeyKbd label={config.hotkey_agent?.label ?? "Fn+Space"} />
-          )
+          <span className="font-mono">
+            {activeCount > 0 ? (
+              <span className="text-accent-soft-foreground">
+                {activeCount} 运行
+              </span>
+            ) : null}
+            {activeCount > 0 && finishedCount > 0 ? " · " : null}
+            {finishedCount > 0 ? `${finishedCount} 完成` : null}
+            {activeCount || finishedCount ? " · " : null}
+            {config.hotkey_agent?.label ?? "Fn+Space"}
+          </span>
         }
         action={
           <Button
@@ -317,11 +323,13 @@ export function AgentPage() {
 
       <div className="agent-list-body min-h-0 flex-1 overflow-auto">
         {agentJobs.length === 0 ? (
-          <EmptyState
-            icon={<Bot size={20} />}
-            title="暂无任务"
-            description="下方输入派活，或 Fn+Space 语音召唤"
-          />
+          <div className="dropzone" style={{ minHeight: 220 }}>
+            <span className="dropzone-ic">
+              <Bot size={22} aria-hidden />
+            </span>
+            <span className="dropzone-t">暂无任务</span>
+            <span className="dropzone-fmt">下方派个活 · 或 Fn+Space 语音召唤</span>
+          </div>
         ) : (
           <div className="flex flex-col gap-0.5 pb-2">
             {agentJobs.map((job) => (
@@ -340,6 +348,26 @@ export function AgentPage() {
 
       <div className="agent-list-composer shrink-0 pt-1">
         <div className="agent-composer p-2">
+          {attachments.length > 0 ? (
+            <div className="agent-attach-chips">
+              {attachments.map((path) => (
+                <span key={path} className="agent-attach-chip" title={path}>
+                  <Paperclip size={11} className="shrink-0 opacity-60" />
+                  <span className="agent-attach-chip-name">
+                    {path.split("/").filter(Boolean).pop() ?? path}
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`移除 ${path}`}
+                    className="agent-attach-chip-x"
+                    onClick={() => removeAttachment(path)}
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
           <TextField
             fullWidth
             aria-label="派活"
@@ -362,6 +390,16 @@ export function AgentPage() {
             />
           </TextField>
           <div className="agent-composer-bar">
+            <Button
+              isIconOnly
+              variant="ghost"
+              aria-label="添加文件"
+              className="agent-composer-icon btn-press h-7 w-7 min-h-7 min-w-7 p-0"
+              onPress={() => void pickAttachments()}
+            >
+              <Paperclip size={14} />
+            </Button>
+
             <Select
               className="inline-flex min-w-24"
               aria-label="Agent"
@@ -435,16 +473,6 @@ export function AgentPage() {
                 </ListBox>
               </Select.Popover>
             </Select>
-
-            <Button
-              isIconOnly
-              variant="ghost"
-              aria-label="语音召唤"
-              className="agent-composer-icon btn-press h-7 w-7 min-h-7 min-w-7 p-0"
-              onPress={() => void invoke("show_agent_hud")}
-            >
-              <Mic size={14} />
-            </Button>
 
             <Button
               isIconOnly

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Button,
   Kbd,
@@ -10,10 +11,8 @@ import {
 } from "@heroui/react";
 import { ChevronDown, Languages, RotateCcw, Save } from "lucide-react";
 import {
-  EmptyState,
   PageHeader,
   PageShell,
-  PanelHeader,
   Reveal,
   SoftCollapse,
 } from "@/components/shared/page-shell";
@@ -28,7 +27,15 @@ import { useApp } from "@/app-context";
 import { cn } from "@/lib/cn";
 
 /** Translate mode panel — ⇧Fn results. Used standalone or embedded in 出稿. */
-export function TranslatePage({ embedded = false }: { embedded?: boolean } = {}) {
+export function TranslatePage({
+  embedded = false,
+  active = true,
+  actionSlot,
+}: {
+  embedded?: boolean;
+  active?: boolean;
+  actionSlot?: HTMLElement | null;
+} = {}) {
   const { config, updateConfig, saveConfig, history } = useApp();
   const [configOpen, setConfigOpen] = useState(false);
   const translateValue =
@@ -54,52 +61,56 @@ export function TranslatePage({ embedded = false }: { embedded?: boolean } = {})
     );
   };
 
+  const targetSelect = (
+    <Select
+      className="inline-flex w-auto"
+      aria-label="翻译到"
+      selectedKey={config.translate_target_language}
+      onSelectionChange={(key) => {
+        if (key == null) return;
+        setTargetLanguage(String(key));
+      }}
+    >
+      <Select.Trigger
+        className={cn(
+          "h-7 gap-1 rounded-lg border border-border/80 bg-surface px-2.5",
+          "shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)_inset]",
+          "text-[12px] font-medium text-foreground items-center",
+          "transition-[border-color,background-color] duration-150",
+          "hover:border-foreground/20 hover:bg-surface-secondary/60",
+        )}
+      >
+        <Select.Value>
+          {() => (
+            <span className="inline-flex items-center gap-1.5">
+              <span>{targetLabel}</span>
+            </span>
+          )}
+        </Select.Value>
+        <ChevronDown size={12} className="shrink-0 text-muted" />
+      </Select.Trigger>
+      <Select.Popover className="min-w-[10rem]">
+        <ListBox>
+          {TRANSLATE_LANGUAGES.map(([value, label]) => (
+            <ListBox.Item
+              key={value}
+              id={value}
+              textValue={`${label} ${value}`}
+            >
+              <span>{label}</span>
+              <ListBox.ItemIndicator />
+            </ListBox.Item>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
+  );
+
   const header = (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
       <Kbd>{config.hotkey_translate.label}</Kbd>
       <span className="text-muted/40">·</span>
-      <Select
-        className="inline-flex w-auto"
-        aria-label="翻译到"
-        selectedKey={config.translate_target_language}
-        onSelectionChange={(key) => {
-          if (key == null) return;
-          setTargetLanguage(String(key));
-        }}
-      >
-        <Select.Trigger
-          className={cn(
-            "h-7 gap-1 rounded-lg border border-border/80 bg-surface px-2.5",
-            "shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)_inset]",
-            "text-[12px] font-medium text-foreground items-center",
-            "transition-[border-color,background-color] duration-150",
-            "hover:border-foreground/20 hover:bg-surface-secondary/60",
-          )}
-        >
-          <Select.Value>
-            {() => (
-              <span className="inline-flex items-center gap-1.5">
-                <span>{targetLabel}</span>
-              </span>
-            )}
-          </Select.Value>
-          <ChevronDown size={12} className="shrink-0 text-muted" />
-        </Select.Trigger>
-        <Select.Popover className="min-w-[10rem]">
-          <ListBox>
-            {TRANSLATE_LANGUAGES.map(([value, label]) => (
-              <ListBox.Item
-                key={value}
-                id={value}
-                textValue={`${label} ${value}`}
-              >
-                <span>{label}</span>
-                <ListBox.ItemIndicator />
-              </ListBox.Item>
-            ))}
-          </ListBox>
-        </Select.Popover>
-      </Select>
+      {targetSelect}
       <span className="text-muted/40">·</span>
       <LlmProviderSelect />
     </div>
@@ -116,9 +127,23 @@ export function TranslatePage({ embedded = false }: { embedded?: boolean } = {})
 
   const content = (
     <>
-      {embedded ? (
-        <PanelHeader status={header} action={headerAction} />
-      ) : (
+      {embedded && active && actionSlot
+        ? createPortal(
+            <>
+              {targetSelect}
+              <LlmProviderSelect />
+              <button
+                type="button"
+                className="dlink muted"
+                onClick={() => setConfigOpen((v) => !v)}
+              >
+                配置{configOpen ? " ▴" : " ▾"}
+              </button>
+            </>,
+            actionSlot,
+          )
+        : null}
+      {embedded ? null : (
         <PageHeader title="翻译" status={header} action={headerAction} />
       )}
 
@@ -163,32 +188,32 @@ export function TranslatePage({ embedded = false }: { embedded?: boolean } = {})
       </SoftCollapse>
 
       {entries.length === 0 ? (
-        <EmptyState
-          title="还没有翻译"
-          description={`${config.hotkey_translate.label} 开始`}
-          icon={<Languages size={18} />}
-        />
+        <div className="dropzone" style={{ minHeight: 200 }}>
+          <span className="dropzone-ic">
+            <Languages size={22} aria-hidden />
+          </span>
+          <span className="dropzone-t">还没有翻译</span>
+          <span className="dropzone-fmt">{config.hotkey_translate.label} 开始</span>
+        </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="recs">
           {entries.map((entry, i) => (
             <Reveal key={entry.id} index={i}>
-              <article className="surface-card px-4 py-3.5">
-                <div className="mb-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 type-meta">
-                  <span>
-                    {new Date(entry.created_at).toLocaleString()}
-                  </span>
-                  <span className="text-muted/40">·</span>
+              <article className="rec">
+                <div className="rec-l">
+                  <span>{new Date(entry.created_at).toLocaleString()}</span>
                   <span>{entry.duration_seconds.toFixed(1)}s</span>
-                  <span className="text-muted/40">·</span>
-                  <span>
+                  <span className="tag">
                     {translateTargetLabel(entry.translate_target_language) ||
                       targetLabel}
                   </span>
                 </div>
-                <SemanticPair
-                  before={entry.raw_text || "（空）"}
-                  after={entry.text || "（空）"}
-                />
+                <div className="rec-pair">
+                  <SemanticPair
+                    before={entry.raw_text || "（空）"}
+                    after={entry.text || "（空）"}
+                  />
+                </div>
               </article>
             </Reveal>
           ))}

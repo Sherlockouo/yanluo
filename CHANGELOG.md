@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to ASR Workshop are documented in this file.
+All notable changes to 言落 (Yanluo) are documented in this file.
 
 ## [0.8.0] — 2026-07-16
 

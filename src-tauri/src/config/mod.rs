@@ -401,6 +401,9 @@ pub(crate) struct LlmCredential {
     pub(crate) api_key: String,
     #[serde(default)]
     pub(crate) model: String,
+    /// Display name for user-added custom providers. Empty for built-in presets.
+    #[serde(default)]
+    pub(crate) label: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -505,10 +508,38 @@ pub(crate) fn default_align_model_dir() -> String {
     String::new()
 }
 
+const APP_DATA_DIR_NAME: &str = "Yanluo";
+const LEGACY_APP_DATA_DIR_NAME: &str = "ASR Workshop";
+const DEFAULTS_DOMAIN: &str = "com.sherlockouo.yanluo";
+const LEGACY_DEFAULTS_DOMAIN: &str = "com.template.asr-workshop";
+
 pub(crate) fn app_data_dir() -> PathBuf {
-    dirs::data_dir()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-        .join("ASR Workshop")
+    let base = dirs::data_dir()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let canonical = base.join(APP_DATA_DIR_NAME);
+    if canonical.exists() {
+        return canonical;
+    }
+    let legacy = base.join(LEGACY_APP_DATA_DIR_NAME);
+    if legacy.exists() {
+        match fs::rename(&legacy, &canonical) {
+            Ok(()) => {
+                eprintln!(
+                    "[config] migrated data dir {:?} → {:?}",
+                    legacy, canonical
+                );
+                return canonical;
+            }
+            Err(e) => {
+                eprintln!(
+                    "[config] migrate data dir failed ({e}); using legacy {:?}",
+                    legacy
+                );
+                return legacy;
+            }
+        }
+    }
+    canonical
 }
 
 /// Default agent working directory: `{app_data_dir}/agent` (created on demand).
@@ -642,15 +673,20 @@ pub(crate) fn save_config_to_disk(config: &AppConfig) -> Result<(), String> {
 pub(crate) fn read_user_default_language() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
-        let output = Command::new("defaults")
-            .args(["read", "com.template.asr-workshop", "language"])
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
+        for domain in [DEFAULTS_DOMAIN, LEGACY_DEFAULTS_DOMAIN] {
+            let output = Command::new("defaults")
+                .args(["read", domain, "language"])
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                continue;
+            }
+            let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !value.is_empty() {
+                return Some(value);
+            }
         }
-        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        (!value.is_empty()).then_some(value)
+        None
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -662,7 +698,7 @@ pub(crate) fn write_user_default_language(language: &str) {
     #[cfg(target_os = "macos")]
     {
         let _ = Command::new("defaults")
-            .args(["write", "com.template.asr-workshop", "language", language])
+            .args(["write", DEFAULTS_DOMAIN, "language", language])
             .status();
     }
     #[cfg(not(target_os = "macos"))]

@@ -673,9 +673,50 @@ pub(crate) fn finalize_successful_result(
         }
     }
 
+    // Preserve true ASR for learn triples (worker sets raw_text = committed).
+    // Never fill raw from post-vocab/LLM text.
+    if result.raw_text.trim().is_empty() {
+        result.raw_text = result.text.clone();
+    }
+
     if AsrEngine::finalize_aborted(app, gen) {
         eprintln!("[asr] finalize aborted before paste (gen={gen})");
         return None;
+    }
+
+    // Fn: optional LLM 纠错 after vocab. Translate has its own stream; agent stays raw for edit.
+    if source == "fn"
+        && config.llm_enabled
+        && !result.text.trim().is_empty()
+        && !(is_transcribe && has_timed)
+    {
+        emit_floating_status(app, true, "refining", &result.text, 0.0);
+        let before_llm = result.text.clone();
+        match refine_transcript(&config, &before_llm) {
+            Ok(out) => {
+                if out != before_llm {
+                    result.llm_text = Some(out.clone());
+                    result.text = out;
+                    result.refined = true;
+                    // Deterministic pairs win over LLM drift.
+                    result.text = apply_vocabulary(&result.text, &config.vocabulary);
+                    eprintln!(
+                        "[llm] fn refine applied chars={}→{}",
+                        before_llm.chars().count(),
+                        result.text.chars().count()
+                    );
+                } else {
+                    eprintln!("[llm] fn refine unchanged");
+                }
+            }
+            Err(e) => {
+                eprintln!("[llm] fn refine skipped: {e}");
+            }
+        }
+        if AsrEngine::finalize_aborted(app, gen) {
+            eprintln!("[asr] finalize aborted after refine (gen={gen})");
+            return None;
+        }
     }
 
     // Agent voice: no paste, no history — stay on floating HUD for text edit + dispatch.
@@ -765,16 +806,14 @@ pub(crate) fn finalize_successful_result(
     }
 
     // Fn / ⇧Fn: hold editable text on HUD — paste + history on confirm.
-    // Ensure raw_text stays ASR for learn compare (fn: pre-vocab already in raw if set).
-    if source == "fn" && result.raw_text.trim().is_empty() {
-        result.raw_text = result.text.clone();
-    }
-    let asr_text = result.text.clone();
+    // pending.asr_text = text shown at edit start (post-vocab / LLM), for edit detection.
+    // result.raw_text stays true ASR for learn triples.
+    let shown_text = result.text.clone();
     AsrEngine::set_pending_hud_confirm(
         app,
         Some(crate::state::PendingHudConfirm {
             mode: source.clone(),
-            asr_text: asr_text.clone(),
+            asr_text: shown_text.clone(),
             result: result.clone(),
             gen,
             media_kind: media_kind.to_string(),
@@ -788,7 +827,7 @@ pub(crate) fn finalize_successful_result(
         "hud-edit-ready",
         serde_json::json!({
             "mode": source,
-            "asr_text": asr_text,
+            "asr_text": result.raw_text,
             "text": result.text,
         }),
     );
@@ -797,13 +836,15 @@ pub(crate) fn finalize_successful_result(
         "hud-edit-ready",
         serde_json::json!({
             "mode": source,
-            "asr_text": asr_text,
+            "asr_text": result.raw_text,
             "text": result.text,
         }),
     );
     eprintln!(
-        "[asr] hud confirm-wait mode={source} chars={}",
-        result.text.chars().count()
+        "[asr] hud confirm-wait mode={source} chars={} refined={} raw_chars={}",
+        result.text.chars().count(),
+        result.refined,
+        result.raw_text.chars().count()
     );
     // Some(true) = caller must NOT emit idle (HUD stays editing).
     Some(true)

@@ -77,6 +77,7 @@ export type LlmProviderPreset = {
   models: string[];
 };
 
+/** Built-in provider presets. User-added providers are stored in llm_credentials. */
 export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
   {
     id: "openai",
@@ -102,20 +103,67 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     baseUrl: "http://127.0.0.1:11434/v1",
     models: ["qwen3:1.7b", "qwen3:4b", "qwen2.5", "llama3.2"],
   },
-  {
-    id: "custom",
-    label: "自定义",
-    baseUrl: "",
-    models: [],
-  },
 ];
 
-/** Preset for a provider, falling back to the "custom" entry. */
+const BUILTIN_PROVIDER_IDS = new Set(LLM_PROVIDER_PRESETS.map((p) => p.id));
+
+/** A provider id that isn't a built-in preset = user-added custom provider. */
+export function isCustomProvider(provider: LlmProvider): boolean {
+  return !BUILTIN_PROVIDER_IDS.has(provider);
+}
+
+/** Preset for a provider; custom ids get a synthetic empty preset. */
 export function llmPreset(provider: LlmProvider): LlmProviderPreset {
   return (
-    LLM_PROVIDER_PRESETS.find((p) => p.id === provider) ??
-    LLM_PROVIDER_PRESETS[LLM_PROVIDER_PRESETS.length - 1]
+    LLM_PROVIDER_PRESETS.find((p) => p.id === provider) ?? {
+      id: provider,
+      label: "自定义",
+      baseUrl: "",
+      models: [],
+    }
   );
+}
+
+/** Human label for a provider — preset label, else the stored custom name. */
+export function llmProviderLabel(
+  config: Pick<AppConfig, "llm_credentials">,
+  provider: LlmProvider,
+): string {
+  const preset = LLM_PROVIDER_PRESETS.find((p) => p.id === provider);
+  if (preset) return preset.label;
+  return config.llm_credentials?.[provider]?.label?.trim() || "自定义服务商";
+}
+
+export type LlmProviderEntry = {
+  id: LlmProvider;
+  label: string;
+  builtin: boolean;
+};
+
+/** All selectable providers: built-in presets + user-added customs (config order). */
+export function listLlmProviders(
+  config: Pick<AppConfig, "llm_credentials">,
+): LlmProviderEntry[] {
+  const builtins: LlmProviderEntry[] = LLM_PROVIDER_PRESETS.map((p) => ({
+    id: p.id,
+    label: p.label,
+    builtin: true,
+  }));
+  const customs: LlmProviderEntry[] = Object.keys(config.llm_credentials ?? {})
+    .filter((id) => !BUILTIN_PROVIDER_IDS.has(id))
+    .map((id) => ({
+      id,
+      label: config.llm_credentials?.[id]?.label?.trim() || "自定义服务商",
+      builtin: false,
+    }));
+  return [...builtins, ...customs];
+}
+
+/** Fresh id for a new custom provider. */
+export function newCustomProviderId(): string {
+  return `custom-${Date.now().toString(36)}${Math.floor(Math.random() * 1e3)
+    .toString(36)
+    .padStart(2, "0")}`;
 }
 
 /**
@@ -134,6 +182,7 @@ export function resolveLlmCreds(
       : preset.baseUrl,
     api_key: stored?.api_key ?? "",
     model: stored?.model?.trim() ? stored.model : (preset.models[0] ?? ""),
+    label: stored?.label ?? "",
   };
 }
 
@@ -163,7 +212,7 @@ export function activateLlmProviderPatch(
  */
 export function seedLlmCredentials(
   config: AppConfig,
-): Partial<Record<LlmProvider, LlmCredential>> {
+): Record<string, LlmCredential> {
   const existing = config.llm_credentials ?? {};
   if (Object.keys(existing).length > 0) return existing;
   const provider = config.llm_provider || "openai";

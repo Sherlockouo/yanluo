@@ -127,7 +127,7 @@ jobs:
                       continue
               elif capture:
                   out.append(line)
-          body = "\n".join(out).strip() or f"ASR Workshop v{version}"
+          body = "\n".join(out).strip() or f"言落 v{version}"
           Path("release-notes.md").write_text(body + "\n", encoding="utf-8")
           print(body)
           PY
@@ -139,7 +139,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ steps.ver.outputs.tag }}
-          releaseName: ASR Workshop ${{ steps.ver.outputs.tag }}
+          releaseName: 言落 ${{ steps.ver.outputs.tag }}
           releaseBodyFile: release-notes.md
           releaseDraft: false
           prerelease: false

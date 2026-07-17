@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 
 const REPO: &str = "XBCoder128/asr-cli";
-const USER_AGENT: &str = "ASR-Workshop-Updater";
+const USER_AGENT: &str = "Yanluo-Updater";
 
 static DOWNLOAD_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
@@ -449,17 +449,17 @@ mod tests {
     fn picks_platform_dmg() {
         let assets = vec![
             ReleaseAsset {
-                name: "ASR Workshop_0.2.0_x64.dmg".into(),
+                name: "言落_0.2.0_x64.dmg".into(),
                 browser_download_url: "https://example.com/x64.dmg".into(),
                 size: 1,
             },
             ReleaseAsset {
-                name: "ASR Workshop_0.2.0_aarch64.dmg".into(),
+                name: "言落_0.2.0_aarch64.dmg".into(),
                 browser_download_url: "https://example.com/arm.dmg".into(),
                 size: 2,
             },
             ReleaseAsset {
-                name: "ASR Workshop_0.2.0_x64_en-US.msi".into(),
+                name: "言落_0.2.0_x64_en-US.msi".into(),
                 browser_download_url: "https://example.com/x.msi".into(),
                 size: 3,
             },

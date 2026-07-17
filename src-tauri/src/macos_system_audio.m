@@ -215,7 +215,7 @@ static dispatch_queue_t asr_system_audio_queue(void) {
   static dispatch_queue_t queue;
   static dispatch_once_t once;
   dispatch_once(&once, ^{
-    queue = dispatch_queue_create("app.asr-workshop.system-audio", DISPATCH_QUEUE_SERIAL);
+    queue = dispatch_queue_create("app.yanluo.system-audio", DISPATCH_QUEUE_SERIAL);
   });
   return queue;
 }

@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>言落 · UI 设计稿 v2（浅色 · 全页详版）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Serif+SC:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+/*
+  言落 UI 设计契约 v2 — 浅色 · 全页详版
+  在 v1（四页骨架）基础上，铺出每个功能页 + 每个设置页的详细 UI。
+  实现按此稿：令牌见 theme.css；页结构见各 view。契约优先级高于零散"美化"。
+*/
+:root{
+  --paper:#F4F2EE; --paper-2:#EDEAE4;
+  --surface:#FFFFFF; --surface-2:#F8F6F2;
+  --ink:#1C1A17; --muted:#6E6862; --faint:#9A938B;
+  --line:rgba(28,26,23,0.10); --line-strong:rgba(28,26,23,0.16);
+  --copper:#D9722E; --copper-hover:#BE611F; --copper-deep:#A0561F;
+  --copper-wash:rgba(217,114,46,0.11); --copper-line:rgba(217,114,46,0.40);
+  --ok:#2F7A4C; --warn:#A66C12; --danger:#C24238;
+  --radius:14px; --radius-sm:9px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper-2);color:var(--ink);font-family:"Noto Sans SC",-apple-system,system-ui,sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.doc{max-width:1220px;margin:0 auto;padding:40px 24px 120px}
+.doc-eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--copper-deep)}
+.doc h1{font-family:"Instrument Serif","Noto Serif SC",serif;font-size:56px;font-weight:400;letter-spacing:-.02em;line-height:1;margin-top:8px}
+.doc h1 em{font-style:italic;color:var(--copper)}
+.doc-sub{margin-top:14px;color:var(--muted);max-width:64ch}
+.doc-note{margin-top:20px;padding:16px 18px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);color:var(--muted);font-size:13px;line-height:1.7}
+.doc-note b{color:var(--ink)}
+.swatchbar{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.sw{width:92px;height:52px;border-radius:8px;border:1px solid var(--line);display:flex;align-items:flex-end;padding:6px;font-family:"IBM Plex Mono",monospace;font-size:9px}
+
+/* TOC */
+.toc{margin-top:28px;padding:18px 20px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);columns:2;column-gap:40px}
+.toc a{display:block;color:var(--ink);text-decoration:none;font-size:13px;padding:3px 0;border-bottom:1px dotted transparent}
+.toc a:hover{color:var(--copper-deep)}
+.toc .grp{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin:12px 0 4px}
+.toc .grp:first-child{margin-top:0}
+
+.frame-label{margin:56px 0 14px;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.frame-label b{color:var(--copper-deep);font-weight:500}
+.frame-note{margin:0 0 12px;color:var(--muted);font-size:12.5px;max-width:80ch}
+
+/* mac window */
+.win{border:1px solid var(--line-strong);border-radius:16px;overflow:hidden;background:var(--paper);box-shadow:0 24px 60px rgba(28,26,23,.10)}
+.titlebar{display:flex;align-items:center;gap:8px;padding:11px 14px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.dot{width:11px;height:11px;border-radius:50%}
+.dot.r{background:#ec6a5e}.dot.y{background:#f4bf4f}.dot.g{background:#61c554}
+.titlebar .title{margin-left:8px;font-size:12px;color:var(--muted);font-family:"IBM Plex Mono",monospace}
+.shell{display:grid;grid-template-columns:76px minmax(0,1fr);min-height:600px}
+
+/* rail */
+.rail{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 8px;border-right:1px solid var(--line);background:color-mix(in oklab,var(--surface) 60%,var(--paper))}
+.rail .mark{display:grid;place-items:center;width:40px;height:40px;border-radius:11px;background:var(--ink);color:var(--paper);font-family:"Instrument Serif","Noto Serif SC",serif;font-size:20px;line-height:1}
+.rail .it{display:flex;flex-direction:column;align-items:center;gap:3px;width:60px;padding:9px 4px;border-radius:11px;border:1px solid transparent;color:var(--muted);font-size:11px;cursor:pointer}
+.rail .it svg{width:17px;height:17px}
+.rail .it:hover{color:var(--ink);background:rgba(28,26,23,.04)}
+.rail .it.on{color:var(--ink);background:rgba(28,26,23,.06);border-color:var(--line-strong)}
+.rail .foot{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:8px}
+
+.content{overflow:auto;padding:26px 30px 30px;min-width:0}
+
+/* type */
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--copper-deep)}
+.mono{font-family:"IBM Plex Mono",monospace}
+.meta{font-size:12px;color:var(--muted)}
+.faint{color:var(--faint)}
+.kbd{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:2px 7px;white-space:nowrap}
+
+/* pagehead */
+.pagehead{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:18px}
+.pagehead .t{font-family:"Instrument Serif","Noto Serif SC",serif;font-size:34px;line-height:1}
+.pagehead .st{margin-top:8px;font-size:12px;color:var(--muted);font-family:"IBM Plex Mono",monospace}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 15px;border-radius:var(--radius-sm);border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:14px;font-weight:500;cursor:pointer}
+.btn:hover{border-color:var(--line-strong)}
+.btn.primary{background:var(--copper);border-color:var(--copper);color:#fff}
+.btn.primary:hover{background:var(--copper-hover)}
+.btn.primary.block{width:100%;justify-content:center;height:42px}
+.btn.primary[disabled],.btn[disabled]{background:var(--paper-2);border-color:var(--line);color:var(--faint);cursor:default}
+.btn.sm{height:30px;padding:0 12px;font-size:13px}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.ghost:hover{background:rgba(28,26,23,.05);color:var(--ink)}
+.btn.danger{color:var(--danger)}
+.iconbtn{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;cursor:pointer;color:var(--muted)}
+.iconbtn:hover{color:var(--ink);border-color:var(--line-strong)}
+.iconbtn.send{background:var(--copper);border-color:var(--copper);color:#fff}
+.spacer{flex:1}
+
+/* segmented */
+.seg{display:inline-flex;gap:2px;padding:3px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.seg .s{padding:6px 13px;border-radius:7px;font-size:13px;font-weight:500;color:var(--muted);cursor:pointer}
+.seg .s.on{background:var(--surface-2);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+.subtabs{display:flex;gap:16px;border-bottom:1px solid var(--line);margin-bottom:16px}
+.subtabs .s{padding:8px 2px;font-size:13px;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+.subtabs .s.on{color:var(--ink);border-color:var(--copper)}
+
+/* cards / fields */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+.card + .card{margin-top:14px}
+.card .h{font-family:"Instrument Serif","Noto Serif SC",serif;font-size:19px;margin-bottom:14px}
+.field{display:flex;flex-direction:column;gap:7px;margin-bottom:16px}
+.field:last-child{margin-bottom:0}
+.field label{font-size:13px;font-weight:500;color:var(--ink)}
+.field .hint{font-size:12px;color:var(--muted)}
+.field .hint a{color:var(--copper-deep)}
+.input{min-height:40px;border:1px solid var(--line-strong);border-radius:9px;background:#fff;padding:9px 12px;display:flex;align-items:center;color:var(--ink);font-size:14px}
+.input.ph{color:var(--faint)}
+.input.select{justify-content:space-between}
+.input.mono{font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+.textarea{min-height:76px;align-items:flex-start}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.withbtn{display:flex;gap:8px}
+.withbtn .input{flex:1}
+
+/* choices (vertical) */
+.choices{display:flex;flex-direction:column;gap:8px}
+.choice{padding:12px 14px;border:1px solid var(--line);border-radius:10px;font-size:14px;font-weight:500;color:var(--muted);cursor:pointer}
+.choice.on{border-color:var(--line-strong);background:var(--surface-2);color:var(--ink)}
+
+/* switch / checkbox / badge */
+.switchrow{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.switchrow .lb{font-size:14px;font-weight:500}
+.switch{width:38px;height:22px;border-radius:999px;background:var(--line-strong);position:relative;flex:0 0 auto}
+.switch.on{background:var(--copper)}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.15s}
+.switch.on::after{left:18px}
+.check{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--ink)}
+.box{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--line-strong);display:grid;place-items:center;color:#fff;font-size:11px}
+.box.on{background:var(--copper);border-color:var(--copper)}
+.badge{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.04em;padding:2px 7px;border-radius:6px;border:1px solid var(--line);color:var(--muted)}
+.badge.ok{color:var(--ok);border-color:color-mix(in oklab,var(--ok) 40%,transparent)}
+.badge.copper{color:var(--copper-deep);border-color:var(--copper-line)}
+
+/* collapsible header (高级设置 / 说明) */
+.adv{display:flex;align-items:center;justify-content:space-between;padding:10px 0;font-size:13px;font-weight:500;color:var(--ink);cursor:pointer;border-top:1px solid var(--line);margin-top:6px}
+.adv .chev{color:var(--muted)}
+
+/* warning banner */
+.banner{padding:9px 12px;border-radius:10px;font-size:12.5px}
+.banner.warn{background:color-mix(in oklab,var(--warn) 12%,transparent);color:var(--warn);border:1px solid color-mix(in oklab,var(--warn) 30%,transparent)}
+
+/* rows list (出稿 结果/历史) */
+.rows{display:flex;flex-direction:column;gap:8px}
+.row{display:flex;gap:10px;align-items:flex-start;padding:14px 16px;border:1px solid var(--line);border-radius:11px;background:var(--surface);cursor:pointer;transition:border-color .14s}
+.row:hover{border-color:var(--line-strong)}
+.row.on{border-color:var(--copper-line);background:var(--copper-wash)}
+.row .body{min-width:0;flex:1}
+.row .rmeta{display:flex;justify-content:space-between;gap:8px;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--faint)}
+.row .rmeta .tag{color:var(--copper-deep)}
+.row .rtext{margin-top:6px;font-size:14px;line-height:1.55;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.row .del{color:var(--faint)}
+.chev{width:16px;height:16px}
+
+/* dropzone */
+.dropzone{min-height:170px;border:1.5px dashed var(--line-strong);border-radius:14px;background:var(--surface-2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--muted);text-align:center;padding:22px}
+.dropzone .t{font-size:14px;font-weight:500;color:var(--ink)}
+
+/* processing */
+.proc{display:flex;flex-direction:column;align-items:center;gap:14px;padding:56px 20px;text-align:center}
+.proc .ic{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;background:var(--copper-wash);color:var(--copper-deep);border:1px solid var(--copper-line)}
+
+/* diff / semantic pair */
+.diff{font-size:14px;line-height:1.6}
+.diff .del{color:var(--danger);text-decoration:line-through;opacity:.7}
+.diff .ins{color:var(--ok)}
+.pair{display:flex;flex-direction:column;gap:6px}
+.pair .a{color:var(--muted);font-size:13px}
+.pair .b{color:var(--ink);font-size:14px}
+.pair .arrow{color:var(--faint);font-family:"IBM Plex Mono",monospace;font-size:11px}
+
+/* chips */
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px;color:var(--ink);background:var(--surface)}
+.chip .x{color:var(--faint);cursor:pointer}
+
+/* empty */
+.empty{display:flex;flex-direction:column;align-items:center;gap:10px;padding:56px 20px;text-align:center;color:var(--muted)}
+.empty .ic{width:48px;height:48px;border-radius:14px;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--line);color:var(--muted)}
+.empty .t{font-size:14px;font-weight:500;color:var(--ink)}
+
+/* ===== 派活 ===== */
+.chat{display:flex;flex-direction:column;height:540px}
+.joblist{flex:1;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:4px 0}
+.job{display:flex;gap:12px;padding:13px 14px;border-radius:11px;cursor:pointer}
+.job:hover{background:var(--surface-2)}
+.job .jd{width:8px;height:8px;border-radius:50%;margin-top:6px;flex:0 0 auto;background:var(--faint)}
+.job .jd.run{background:var(--copper);box-shadow:0 0 0 3px var(--copper-wash)}
+.job .jd.done{background:var(--ok)}
+.job .jd.err{background:var(--danger)}
+.job .jb{min-width:0;flex:1}
+.job .jh{display:flex;gap:8px;align-items:baseline}
+.job .jn{font-size:14px;font-weight:600;text-transform:capitalize}
+.job .js{font-size:12px;color:var(--muted)}
+.job .js.run{color:var(--copper-deep)}.job .js.done{color:var(--ok)}.job .js.err{color:var(--danger)}
+.job .jp{margin-top:2px;font-size:13px;color:var(--ink);opacity:.9;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.composer{border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);padding:10px;margin-top:8px}
+.composer .ta{width:100%;min-height:40px;border:0;background:transparent;color:var(--ink);font-size:14px;padding:2px}
+.composer .ta.ph{color:var(--faint)}
+.composer .bar{display:flex;align-items:center;gap:8px;margin-top:8px}
+.pill{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 11px;border:0;border-radius:8px;font-size:12px;font-weight:600;color:var(--ink);background:color-mix(in oklab,var(--ink) 6%,transparent);cursor:pointer}
+
+/* 派活 detail */
+.detail{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:20px}
+.timeline{display:flex;flex-direction:column;gap:12px;max-height:430px;overflow:auto;padding-right:4px}
+.subhead{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink);margin-bottom:6px}
+.subhead .c{color:var(--faint);font-weight:400;font-family:"IBM Plex Mono",monospace;font-size:11px}
+.msg{border-radius:12px;padding:12px 14px;font-size:13.5px;line-height:1.6}
+.msg.user{background:var(--copper-wash);border:1px solid var(--copper-line)}
+.msg.assistant{background:var(--surface);border:1px solid var(--line)}
+.msg.tool{background:var(--surface-2);border:1px solid var(--line);font-family:"IBM Plex Mono",monospace;font-size:12px}
+.msg .who{font-size:11px;color:var(--faint);font-family:"IBM Plex Mono",monospace;margin-bottom:5px;letter-spacing:.04em;text-transform:uppercase}
+.msg.error{background:color-mix(in oklab,var(--danger) 8%,transparent);border:1px solid color-mix(in oklab,var(--danger) 30%,transparent);color:var(--danger)}
+.sidepanel{border-left:1px solid var(--line);padding-left:18px}
+.sidepanel .h{font-size:13px;font-weight:600;margin-bottom:10px}
+.pathrow{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--muted);padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);margin-bottom:6px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pathrow:hover{border-color:var(--line-strong);color:var(--ink)}
+
+/* settings two-pane */
+.set{display:grid;grid-template-columns:180px minmax(0,1fr);gap:28px}
+.setnav{display:flex;flex-direction:column;gap:1px;padding-top:6px}
+.setnav .n{display:flex;align-items:center;gap:9px;padding:9px 11px;border-radius:9px;color:var(--muted);font-size:14px;font-weight:500;cursor:pointer}
+.setnav .n svg{width:15px;height:15px;opacity:.8}
+.setnav .n:hover{background:rgba(28,26,23,.04);color:var(--ink)}
+.setnav .n.on{background:var(--surface);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+.setnav .n.on svg{opacity:1;color:var(--copper-deep)}
+.setbody{min-width:0;max-width:600px;display:flex;flex-direction:column;gap:16px}
+.sechead{font-family:"Instrument Serif","Noto Serif SC",serif;font-size:26px;line-height:1;margin-bottom:2px}
+
+/* permission row */
+.perm{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.perm:last-child{border-bottom:0}
+.perm .pi{width:34px;height:34px;border-radius:9px;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;color:var(--muted);flex:0 0 auto}
+.perm .pb{flex:1;min-width:0}
+.perm .pt{font-size:13.5px;font-weight:500}
+.perm .pd{font-size:12px;color:var(--muted)}
+
+/* hotkey row */
+.hkrow{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line)}
+.hkrow:last-child{border-bottom:0}
+.hkrow .hkl{font-size:14px;font-weight:500}
+
+/* profile card (派活能力) */
+.profile{border:1px solid var(--line);border-radius:12px;padding:14px;background:var(--surface-2)}
+.profile + .profile{margin-top:10px}
+.profile .ph{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+
+/* release note */
+.release{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.release .rv{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink)}
+.release ul{margin:8px 0 0 18px;color:var(--muted);font-size:13px;line-height:1.7}
+
+/* stat bar (纠错学习) */
+.statbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--muted);padding:10px 0}
+.qseg{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.qseg .q{padding:3px 10px;border-radius:6px;font-size:12px;color:var(--muted);cursor:pointer}
+.qseg .q.on{background:var(--surface-2);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+
+/* HUD capsule — faithful to real frosted floating window (asr-hud.tsx / hud.css) */
+.hudwrap{display:flex;flex-direction:column;align-items:center;gap:16px;padding:30px 24px;background:linear-gradient(135deg,#2a2f3a,#3a3340 55%,#2c3138)}
+.hudcap{color:rgba(255,255,255,.94);background:rgba(30,30,34,.72);-webkit-backdrop-filter:blur(24px) saturate(1.3);backdrop-filter:blur(24px) saturate(1.3);border:.5px solid rgba(255,255,255,.10);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.42)}
+/* ASR capsule 400×56: bars + colon + committed/active text */
+.hud{width:400px;height:56px;display:flex;align-items:center;gap:12px;padding:0 18px 0 16px}
+.bars{display:flex;align-items:center;gap:3px;height:22px;flex:0 0 auto}
+.bars i{width:4px;border-radius:999px;background:#c4784a;align-self:center}
+.hud .colon{color:rgba(255,255,255,.9);font-size:15px;font-weight:600;flex:0 0 auto;margin-top:-1px}
+.hud .txt{flex:1;min-width:0;font-size:13px;font-weight:500;letter-spacing:.02em;white-space:nowrap;overflow:hidden}
+.hud .txt .committed{color:rgba(255,255,255,.55);font-weight:450}
+.hud .txt .active{color:rgba(255,255,255,.96);font-weight:560}
+.hud .spin{width:14px;height:14px;border-radius:999px;border:2px solid rgba(255,255,255,.28);border-top-color:rgba(255,255,255,.95);flex:0 0 auto}
+.hud .refined{color:#30d158}
+/* Agent capsule 520: pills row + main row (bars/text + tools) */
+.hudA{width:520px;display:flex;flex-direction:column;gap:6px;padding:8px 12px 6px}
+.hudA .pills{display:flex;gap:6px}
+.hudA .pill{display:inline-flex;align-items:center;gap:4px;height:22px;padding:2px 8px;border-radius:8px;background:rgba(255,255,255,.14);font-size:11px;font-weight:600}
+.hudA .pill svg{width:10px;height:10px;opacity:.75}
+.hudA .main{display:flex;align-items:center;gap:8px;min-height:44px}
+.hudA .txt{flex:1;min-width:0;font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden}
+.hudA .txt .hint,.hudA .ph{color:rgba(255,255,255,.44);font-weight:500}
+.hudA .tools{display:flex;align-items:center;gap:2px}
+.hudA .ib{width:30px;height:30px;display:grid;place-items:center;border-radius:9px;opacity:.72;color:inherit}
+.hudA .ib.danger{color:#ff6b60}
+.hudA .send{width:32px;height:32px;display:grid;place-items:center;border-radius:10px;background:rgba(255,255,255,.22);color:#fff;margin-left:2px}
+.hudcap-note{font-family:"IBM Plex Mono",monospace;font-size:10px;color:rgba(255,255,255,.5);letter-spacing:.04em}
+
+.legendfoot{margin-top:80px;padding-top:22px;border-top:1px solid var(--line);font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--faint);line-height:1.9}
+</style>
+</head>
+<body>
+<div class="doc">
+  <div class="doc-eyebrow">Design contract · 浅色 v2 全页详版 · 2026-07-16</div>
+  <h1>言落<em>.</em></h1>
+  <p class="doc-sub">开口有结果。声音留在本机，说完有稿、说完能派。本稿在 v1 四页骨架上铺出<b>每个功能页 + 每个设置页</b>的详细 UI，实现以此为准。</p>
+
+  <div class="doc-note">
+    <b>令牌：</b>暖净纸 #F4F2EE / 卡面白 #FFFFFF / 墨 #1C1A17 / 暖灰 #6E6862 / 亮橙 #D9722E（唯一主 CTA + 录音灯）/ 深橙小字 #A0561F（≥4.5:1）。<br/>
+    <b>字体：</b>Instrument Serif + Noto Serif SC（标题）· Noto Sans SC（正文）· IBM Plex Mono（热键/时间戳/状态）。<br/>
+    <b>纪律：</b>亮橙只给单个主行动与运行/录音点；小号铜字用深橙；发丝线优先于阴影；禁用主按钮为中性灰、绝不淡桃粉。<br/>
+    <b>结构：</b>窄轨 3 目的地（出稿/派活/设置）；出稿=结果优先 + 顶部 seg 模式；派活=任务列 + 常驻输入 + 详情对话；设置=双栏源列，每节裸字段/卡，单一主 CTA。
+  </div>
+
+  <div class="swatchbar">
+    <div class="sw" style="background:#F4F2EE">#F4F2EE 纸</div>
+    <div class="sw" style="background:#FFFFFF">#FFFFFF 面</div>
+    <div class="sw" style="background:#1C1A17;color:#F4F2EE">#1C1A17 墨</div>
+    <div class="sw" style="background:#D9722E;color:#fff">#D9722E 亮橙</div>
+    <div class="sw" style="background:#A0561F;color:#fff">#A0561F 深橙字</div>
+    <div class="sw" style="background:#F8F6F2">#F8F6F2 次面</div>
+  </div>
+
+  <div class="toc">
+    <div class="grp">功能页</div>
+    <a href="#f01">01 · 主页 — 海报</a>
+    <a href="#f02">02 · 出稿 · 文件/链接 — 本地文件</a>
+    <a href="#f03">03 · 出稿 · 文件/链接 — 网络链接</a>
+    <a href="#f04">04 · 出稿 · 处理中</a>
+    <a href="#f05">05 · 出稿 · 转写结果列表</a>
+    <a href="#f06">06 · 出稿 · 转写详情 Modal</a>
+    <a href="#f07">07 · 出稿 · 实时（页内 + HUD）</a>
+    <a href="#f08">08 · 出稿 · 翻译</a>
+    <a href="#f09">09 · 出稿 · 历史</a>
+    <a href="#f10">10 · 派活 — 任务列 + 输入</a>
+    <a href="#f11">11 · 派活 — 任务详情</a>
+    <div class="grp">设置页</div>
+    <a href="#s01">S1 · 常规</a>
+    <a href="#s02">S2 · 识别（含高级 VAD）</a>
+    <a href="#s03">S3 · 润色 · 配置</a>
+    <a href="#s04">S4 · 润色 · 纠错学习</a>
+    <a href="#s05">S5 · 润色 · 词库</a>
+    <a href="#s06">S6 · 派活能力</a>
+    <a href="#s07">S7 · 系统 · 快捷键</a>
+    <a href="#s08">S8 · 系统 · 权限</a>
+    <a href="#s09">S9 · 更新</a>
+  </div>
+
+<!-- ============================================================= FUNCTIONAL -->
+
+<!-- 01 主页 -->
+<div class="frame-label" id="f01"><b>01</b> · 主页 — 海报 · 二选一</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · Yanluo</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div>
+    <div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div>
+    <div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg><span>派活</span></div>
+    <div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg><span>设置</span></div></div>
+  </aside>
+  <div class="content">
+    <div style="display:flex;flex-direction:column;gap:26px;max-width:760px">
+      <div style="display:flex;flex-direction:column;gap:12px;padding-top:14px">
+        <div class="eyebrow">本机 · MAC</div>
+        <div style="font-family:'Instrument Serif','Noto Serif SC',serif;font-size:54px;line-height:1.04;letter-spacing:-.02em">今天开口<br/>要什么结果？</div>
+        <div style="color:var(--muted);font-size:16px">你的声音留在本机。开口出稿，开口派活。</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div class="card" style="background:var(--copper-wash);border-color:var(--copper-line);min-height:150px;display:flex;flex-direction:column;justify-content:space-between">
+          <div style="font-size:22px;font-weight:600;color:var(--copper-deep)">出稿</div>
+          <div style="display:flex;align-items:flex-end;justify-content:space-between"><span class="meta">开会 · 口述 · 文件转写</span><span class="kbd">Fn</span></div>
+        </div>
+        <div class="card" style="min-height:150px;display:flex;flex-direction:column;justify-content:space-between">
+          <div style="font-size:22px;font-weight:600">派活</div>
+          <div style="display:flex;align-items:flex-end;justify-content:space-between"><span class="meta">说完派给 Claude / Codex</span><span class="kbd">Fn+Space</span></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:22px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--muted)"><span><b style="color:var(--ink)">Fn</b> 出稿</span><span><b style="color:var(--ink)">⇧Fn</b> 翻译</span><span><b style="color:var(--ink)">Fn+Space</b> 派活</span></div>
+    </div>
+    <div class="meta" style="margin-top:22px">安装门槛态（Qwen 未装）：同版式，标题「先装本机识别」+ 卡「下载本机识别（约 2GB）· 型号 Qwen3-ASR-0.6B」+ 主按钮「下载本机识别 / 下载中…」。</div>
+  </div>
+</div></div>
+
+<!-- 02 出稿 文件 -->
+<div class="frame-label" id="f02"><b>02</b> · 出稿 · 文件/链接 — 本地文件（upload）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div>
+    <div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div>
+    <div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg><span>派活</span></div>
+    <div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div>
+  </aside>
+  <div class="content">
+    <div class="pagehead"><div><div class="t">出稿</div><div class="st">本机识别 · 已就绪 · 自动检测</div></div><button class="btn primary">＋ 新转写</button></div>
+    <div class="seg" style="margin-bottom:16px"><span class="s on">文件/链接</span><span class="s">实时</span><span class="s">翻译</span><span class="s">历史</span></div>
+    <div style="max-width:600px">
+      <div class="seg" style="margin-bottom:14px"><span class="s on">本地文件</span><span class="s">网络链接</span></div>
+      <div class="card">
+        <div class="dropzone"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg><div class="t">拖拽或点击选择</div><div class="meta">WAV · MP3 · M4A · FLAC · MP4 · MOV · MKV</div></div>
+        <div style="height:14px"></div>
+        <button class="btn primary block">开始转写</button>
+      </div>
+      <div class="meta" style="margin-top:10px">已选态：图标 + 文件名 + 「点击更换」；模型未就绪时顶部出黄条「模型未就绪」，主按钮禁用（中性灰）。</div>
+    </div>
+  </div>
+</div></div>
+
+<!-- 03 出稿 链接 -->
+<div class="frame-label" id="f03"><b>03</b> · 出稿 · 文件/链接 — 网络链接</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div><div class="t">出稿</div><div class="st">本机识别 · 已就绪 · 自动检测</div></div><button class="btn primary">＋ 新转写</button></div>
+    <div class="seg" style="margin-bottom:16px"><span class="s on">文件/链接</span><span class="s">实时</span><span class="s">翻译</span><span class="s">历史</span></div>
+    <div style="max-width:600px">
+      <div class="seg" style="margin-bottom:14px"><span class="s">本地文件</span><span class="s on">网络链接</span></div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><span class="meta">本机识别</span><span class="seg"><span class="s on">音频</span><span class="s">视频</span></span></div>
+        <div class="field"><label>媒体链接</label><div class="input ph">https://…</div></div>
+        <button class="btn primary block">开始转写</button>
+        <div class="meta" style="margin-top:10px">缺 yt-dlp：出提示「请先安装 yt-dlp」；缺 ffmpeg：「需要本机 ffmpeg（brew install ffmpeg）」，主按钮禁用。</div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- 04 处理中 -->
+<div class="frame-label" id="f04"><b>04</b> · 出稿 · 处理中（processing）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div><div class="t">出稿</div><div class="st">本机识别 · 已就绪 · 自动检测</div></div></div>
+    <div class="seg" style="margin-bottom:16px"><span class="s on">文件/链接</span><span class="s">实时</span><span class="s">翻译</span><span class="s">历史</span></div>
+    <div class="card" style="max-width:600px">
+      <div class="proc">
+        <div class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18V5l12-2v13M9 9l12-2"/></svg></div>
+        <div><div style="font-size:15px;font-weight:600">正在识别…</div><div class="meta" style="margin-top:6px">interview-0316.m4a</div><div class="meta">本机识别 · 自动检测</div></div>
+        <button class="btn sm">取消</button>
+      </div>
+    </div>
+    <div class="meta" style="margin-top:10px">下载媒体阶段：图标改「下载」，标题「正在下载…」，出百分比进度 + 下载信息行。</div>
+  </div>
+</div></div>
+
+<!-- 05 结果列表 -->
+<div class="frame-label" id="f05"><b>05</b> · 出稿 · 转写结果列表（result）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div><div class="t">出稿</div><div class="st">本机识别 · 已就绪 · 自动检测</div></div><button class="btn primary">＋ 新转写</button></div>
+    <div class="seg" style="margin-bottom:16px"><span class="s on">文件/链接</span><span class="s">实时</span><span class="s">翻译</span><span class="s">历史</span></div>
+    <div class="card" style="max-width:600px">
+      <div class="h">转写记录</div>
+      <div class="rows">
+        <div class="row"><div class="body"><div class="rmeta"><span>2026/3/16 14:38 · <span class="tag">音频</span></span><span>291.2s</span></div><div class="rtext">他来听我的演唱会，在十七岁的初恋第一次约会，男孩为了她彻夜排队，半年的积蓄买了门票……</div></div><svg class="chev del" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></div>
+        <div class="row"><div class="body"><div class="rmeta"><span>2026/3/15 20:35 · <span class="tag">视频</span></span><span>7.4s</span></div><div class="rtext">But I didn't forget. Na Jo. I've been married a long time ago. Where did you come from?</div></div><svg class="chev del" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></div>
+        <div class="row"><div class="body"><div class="rmeta"><span>2026/3/13 16:45 · <span class="tag">音频</span></span><span>1992.5s</span></div><div class="rtext">啊，so that's a rough. We got it. It's again. Uh, today's day five hundred and twelve……</div></div><svg class="chev del" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></div>
+      </div>
+      <div class="meta" style="margin-top:12px">空态：「还没有转写结果」+ 主按钮「开始转写」。点击行 → 转写详情 Modal（06）。</div>
+    </div>
+  </div>
+</div></div>
+
+<!-- 06 详情 Modal -->
+<div class="frame-label" id="f06"><b>06</b> · 出稿 · 转写详情 Modal</div>
+<p class="frame-note">点击结果/历史行打开。左媒体 + 播放条，右模式切换（专注/全文）+ 文稿正文。</p>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 转写详情</span></div>
+  <div style="background:rgba(28,26,23,.35);padding:26px;display:flex;justify-content:center">
+    <div style="width:820px;max-width:100%;background:var(--surface);border-radius:16px;border:1px solid var(--line-strong);padding:20px;box-shadow:0 30px 80px rgba(0,0,0,.25)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+        <div><div style="font-family:'Instrument Serif','Noto Serif SC',serif;font-size:24px">转写详情</div><div class="meta mono" style="margin-top:6px">2026/3/16 14:38 · 291.2s · <span class="badge">中文</span></div></div>
+        <button class="btn sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>复制</button>
+      </div>
+      <div style="display:grid;grid-template-columns:300px minmax(0,1fr);gap:22px">
+        <div style="display:flex;flex-direction:column;gap:14px;align-items:center">
+          <div style="width:100%;height:170px;border-radius:12px;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;color:var(--faint)"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+          <div style="width:100%;display:flex;align-items:center;gap:10px"><span class="iconbtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="var(--ink)"><path d="M8 5v14l11-7z"/></svg></span><div style="flex:1;height:4px;border-radius:2px;background:var(--line-strong);position:relative"><span style="position:absolute;left:0;top:0;height:4px;width:38%;background:var(--copper);border-radius:2px"></span></div><span class="mono meta">1:52 / 4:51</span></div>
+        </div>
+        <div style="min-width:0;display:flex;flex-direction:column;gap:12px">
+          <div class="seg" style="align-self:flex-start"><span class="s on">专注</span><span class="s">全文</span></div>
+          <div style="font-size:15px;line-height:1.85;color:var(--ink)">他来听我的演唱会，在十七岁的初恋第一次约会，男孩为了她彻夜排队，半年的积蓄买了门票，只为了在台下听她唱那一首歌……<span style="background:var(--copper-wash);border-radius:3px;padding:0 2px">当前一句高亮跟随</span>，全文模式可自由滚动阅读。</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 07 实时 -->
+<div class="frame-label" id="f07"><b>07</b> · 出稿 · 实时（页内引擎 + 历史；实时采集在 HUD）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div><div class="t">出稿</div><div class="st">本机识别 · 已加载 · <a href="#s02" style="color:var(--copper-deep)">设置</a></div></div><button class="btn sm">型号 ▾</button></div>
+    <div class="seg" style="margin-bottom:16px"><span class="s">文件/链接</span><span class="s on">实时</span><span class="s">翻译</span><span class="s">历史</span></div>
+    <div style="max-width:600px">
+      <div class="card" style="margin-bottom:14px">
+        <div class="row2">
+          <div class="field"><label>识别语言</label><div class="input select ph">自动检测 <span class="mono faint">▾</span></div></div>
+          <div class="field"><label>型号</label><div class="input select">Qwen3-ASR-0.6B（推荐） <span class="mono faint">▾</span></div></div>
+        </div>
+        <div class="switchrow" style="margin-top:4px"><div><div class="lb">逐字对齐</div><div class="hint">ForcedAligner 字级时间戳</div></div><span class="switch on"></span></div>
+        <div style="height:14px"></div>
+        <button class="btn primary block">保存并加载</button>
+      </div>
+      <div class="rows">
+        <div class="row" style="cursor:default"><div class="body"><div class="rmeta"><span>2026/3/16 14:20</span><span>3.2s · 中文</span></div><div class="rtext diff">今天<span class="del">要</span><span class="ins">开</span>会讨论一下方案。</div></div></div>
+      </div>
+      <div class="meta" style="margin-top:10px">空态：「还没有识别记录 · Fn 开始」（Mic 图标）。实时波形 + 部分识别文字在浮层 HUD（下）。</div>
+    </div>
+  </div>
+</div></div>
+<div class="hudwrap">
+  <span class="hudcap-note">ASR 胶囊 400×56 · 磨砂深色浮层（NSVisualEffect）· 录音中：铜色波形 + 冒号 + 已固定/活动文字</span>
+  <div class="hudcap hud">
+    <span class="bars"><i style="height:7px"></i><i style="height:15px"></i><i style="height:21px"></i><i style="height:11px"></i><i style="height:18px"></i><i style="height:9px"></i><i style="height:13px"></i></span>
+    <span class="colon">:</span>
+    <span class="txt"><span class="committed">今天开会讨论一下方案，</span><span class="active">下午两点……</span></span>
+  </div>
+  <span class="hudcap-note">处理中：波形替换为 spinner · 润色完成：文字转绿一瞬</span>
+  <div class="hudcap hud">
+    <span class="spin"></span><span class="colon">:</span>
+    <span class="txt"><span class="committed">今天开会讨论一下方案，下午两点对齐进度。</span></span>
+  </div>
+  <span class="hudcap-note">Agent 胶囊 520 · 顶排 pills（Agent ▲ / 工作目录 ▲）· 主排 波形/文字 + @目录 · 附件 · 停止 · 派发</span>
+  <div class="hudcap hudA">
+    <div class="pills">
+      <span class="pill">Claude <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 15l-6-6-6 6"/></svg></span>
+      <span class="pill"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 7h6l2 2h10v10H3z"/></svg> asrrrr <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 15l-6-6-6 6"/></svg></span>
+    </div>
+    <div class="main">
+      <span class="bars"><i style="height:6px"></i><i style="height:14px"></i><i style="height:20px"></i><i style="height:10px"></i><i style="height:16px"></i></span>
+      <span class="txt">把刚才录的会整理成纪要<span class="hint"> </span></span>
+      <span class="tools"><span class="ib"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/></svg></span><span class="ib"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12l-9 9a4 4 0 0 1-6-6l9-9a2.5 2.5 0 0 1 4 4l-9 9"/></svg></span><span class="ib danger"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2"/></svg></span><span class="send"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></span></span>
+    </div>
+  </div>
+</div>
+<p class="frame-note">HUD 真身：磨砂浮层，非页面卡片。<b>录音中</b>=铜色波形 + 冒号 + 已固定(暗)/活动(亮)文字；<b>处理中</b>=spinner；<b>编辑中</b>=输入框 + 占位「确认或修改后按 Fn / Enter」；<b>润色完成</b>=文字转绿。Agent 态：顶排 Agent/工作目录 pill，主排 @目录 · 附件(⌘V) · 停止 · 派发(Enter)；派发中占位「派发中…」。铜色只用于波形/录音灯。</p>
+
+<!-- 08 翻译 -->
+<div class="frame-label" id="f08"><b>08</b> · 出稿 · 翻译</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div><div class="t">出稿</div><div class="st"><span class="kbd">⇧Fn</span> · 翻译到 <b style="color:var(--ink)">English</b> · OpenAI · gpt-4o-mini</div></div><button class="btn sm">配置 ▾</button></div>
+    <div class="seg" style="margin-bottom:16px"><span class="s">文件/链接</span><span class="s">实时</span><span class="s on">翻译</span><span class="s">历史</span></div>
+    <div style="max-width:600px">
+      <div class="card" style="margin-bottom:14px">
+        <div class="field"><label>翻译 Prompt</label><div class="input textarea">将以下内容翻译为 English，保持口语与语气，不要解释。</div></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn sm">恢复默认</button><button class="btn primary sm">保存</button></div>
+      </div>
+      <div class="rows">
+        <div class="row" style="cursor:default"><div class="body"><div class="rmeta"><span>2026/3/16 15:02</span><span>5.1s · English</span></div><div class="pair" style="margin-top:6px"><div class="a">今天开会讨论一下方案。</div><div class="b">Let's have a meeting today to discuss the plan.</div></div></div></div>
+      </div>
+      <div class="meta" style="margin-top:10px">空态：「还没有翻译 · ⇧Fn 开始」。结果用 SemanticPair（原文→译文，无标签）。目标语言/Provider 在标题栏选。</div>
+    </div>
+  </div>
+</div></div>
+
+<!-- 09 历史 -->
+<div class="frame-label" id="f09"><b>09</b> · 出稿 · 历史</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div><div class="t">出稿</div><div class="st">全部记录 · 128 条</div></div><button class="btn sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg>清理 ▾</button></div>
+    <div class="seg" style="margin-bottom:16px"><span class="s">文件/链接</span><span class="s">实时</span><span class="s">翻译</span><span class="s on">历史</span></div>
+    <div class="rows" style="max-width:600px">
+      <div class="row on"><div class="body"><div class="rmeta"><span>2026/3/16 14:38 · <span class="tag">转写</span> · 中文</span><span>291.2s</span></div><div class="pair" style="margin-top:6px"><div class="a">原：今天要会讨论方案</div><div class="b">改：今天开会讨论方案</div></div></div><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 15l6-6 6 6"/></svg></div>
+      <div class="row"><div class="body"><div class="rmeta"><span>2026/3/16 12:05 · <span class="tag">Fn</span> · 中文</span><span>2.1s</span></div><div class="rtext">帮我把刚才那段整理成要点。</div></div><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
+      <div class="row"><div class="body"><div class="rmeta"><span>2026/3/15 20:35 · <span class="tag">翻译</span> · English</span><span>7.4s</span></div><div class="rtext">But I didn't forget. Where did you come from?</div></div><svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></div>
+    </div>
+    <div class="meta" style="margin-top:12px">清理菜单：保留最近 100 / 500 · 删除 30 / 90 天前 · 清空全部。展开行：媒体 + 全文 + 复制；Fn 条目有「在纠错学习页学习」。</div>
+  </div>
+</div></div>
+
+<!-- 10 派活 列表 -->
+<div class="frame-label" id="f10"><b>10</b> · 派活 — 任务列 + 常驻输入</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 派活</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg><span>派活</span></div><div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div><div class="t">派活</div><div class="st"><span style="color:var(--copper-deep)">1 运行</span> · 3 完成 · Fn+Space</div></div><button class="btn sm"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h13M3 12h9M3 18h13M18 15l3 3-3 3"/></svg>能力</button></div>
+    <div class="chat">
+      <div class="joblist">
+        <div class="job"><span class="jd run"></span><div class="jb"><div class="jh"><span class="jn">claude</span><span class="js run">运行中</span><span class="meta">2 附件</span></div><div class="jp">把这份访谈整理成一版能发的稿，去掉口水词，分小标题。</div></div></div>
+        <div class="job"><span class="jd done"></span><div class="jb"><div class="jh"><span class="jn">codex</span><span class="js done">完成</span></div><div class="jp">给 transcribe-page 的上传区加拖拽高亮，保持现有逻辑。</div></div></div>
+        <div class="job"><span class="jd err"></span><div class="jb"><div class="jh"><span class="jn">pi</span><span class="js err">失败</span></div><div class="jp">总结这段两小时会议的三个决定和负责人。</div></div></div>
+        <div class="job"><span class="jd"></span><div class="jb"><div class="jh"><span class="jn">claude</span><span class="js">完成</span></div><div class="jp">把纪要翻译成英文邮件。</div></div></div>
+      </div>
+      <div class="composer">
+        <div class="ta">把刚才录的会整理成纪要</div>
+        <div class="bar"><span class="iconbtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12l-9 9a4 4 0 0 1-6-6l9-9a2.5 2.5 0 0 1 4 4l-9 9"/></svg></span><span class="pill">🤖 Claude ▾</span><span class="pill">Sonnet ▾</span><span class="spacer"></span><span class="iconbtn send"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></span></div>
+      </div>
+    </div>
+  </div>
+</div></div>
+<p class="frame-note">行悬停操作：运行中=取消(■)；完成/失败=复制结果；始终=删除。空态「暂无任务 · 下方输入派活，或 Fn+Space 语音召唤」。</p>
+
+<!-- 11 派活 详情 -->
+<div class="frame-label" id="f11"><b>11</b> · 派活 — 任务详情 · 对话 + 文件</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 派活</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div style="display:flex;align-items:center;gap:12px"><button class="iconbtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button><div><div class="t" style="font-size:26px">claude · <span style="color:var(--copper-deep);font-family:'Noto Sans SC'">运行中</span></div><div class="st">~/repos/asrrrr · sess_9f2a…c1</div></div></div><div style="display:flex;gap:8px"><button class="btn sm">取消</button><button class="btn sm">文件</button></div></div>
+    <div class="detail">
+      <div>
+        <div class="subhead"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>对话 <span class="c">6 · 运行中…</span></div>
+        <div class="timeline">
+          <div class="msg user"><div class="who">USER</div>把这份访谈整理成一版能发的稿，去掉口水词，分小标题。</div>
+          <div class="msg tool"><div class="who">TOOL · read_file</div>doc/interview-0316.md（打开 · 可折叠）</div>
+          <div class="msg tool"><div class="who">TOOL RESULT · 结果</div>已读取 291 行（可折叠）</div>
+          <div class="msg assistant"><div class="who">ASSISTANT</div>已通读全文，拟分三节：<b>一、背景</b> / <b>二、关键观点</b> / <b>三、金句</b>。正在生成初稿…<span style="color:var(--faint)">▍</span></div>
+        </div>
+        <div class="composer" style="margin-top:14px">
+          <div class="ta ph">继续对话…</div>
+          <div class="bar"><span class="pill">＋ 添加 ▾</span><span class="pill">claude · Sonnet ▾</span><span class="spacer"></span><span class="iconbtn send"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></span></div>
+        </div>
+        <div class="meta" style="margin-top:8px">运行中：底部「运行中，完成后可续聊」。无 session：「无 session id，无法续聊」。添加菜单：文件和文件夹 / 仅文件夹。</div>
+      </div>
+      <div class="sidepanel">
+        <div class="h">文件</div>
+        <div class="pathrow">doc/interview-0316.md</div>
+        <div class="pathrow">out/纪要-0316.md</div>
+        <div class="meta" style="margin-top:8px">空态：「附件与结果路径会出现在这里」。点击路径 → 预览。可收起侧栏。</div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- ============================================================= SETTINGS -->
+
+<!-- S1 常规 -->
+<div class="frame-label" id="s01"><b>S1</b> · 设置 · 常规</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 设置</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div class="t">设置</div></div>
+    <div class="set">
+      <nav class="setnav">
+        <div class="n on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/></svg>常规</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM5 12a7 7 0 0 0 14 0"/></svg>识别</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg>润色</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg>派活</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>系统</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>更新</div>
+      </nav>
+      <div class="setbody">
+        <div class="sechead">常规</div>
+        <div class="field"><label>识别语言</label><div class="input select ph">自动检测（系统语言优先） <span class="mono faint">▾</span></div><div class="hint">简体中文 · 繁體中文 · English · 日本語 · 한국어</div></div>
+        <div class="field"><label>录音源</label><div class="choices"><div class="choice on">只录外部</div><div class="choice">只录系统</div><div class="choice">两者都录</div></div></div>
+        <button class="btn primary block">保存</button>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- S2 识别 -->
+<div class="frame-label" id="s02"><b>S2</b> · 设置 · 识别（精简：引擎/型号/对齐 三行 + 高级参数收起）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 设置</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div class="t">设置</div></div>
+    <div class="set">
+      <nav class="setnav">
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/></svg>常规</div>
+        <div class="n on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM5 12a7 7 0 0 0 14 0"/></svg>识别</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg>润色</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg>派活</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>系统</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>更新</div>
+      </nav>
+      <div class="setbody">
+        <div class="sechead">识别</div>
+        <div class="card">
+          <div class="field"><label>识别引擎</label><div class="input select">Qwen 本地 <span class="mono faint">▾</span></div><div class="hint">Apple Speech（仅 mac）· ElevenLabs Scribe · Qwen 本地</div></div>
+          <div class="field"><label>型号</label><div class="input select">Qwen3-ASR-1.7B（更大） <span class="mono faint">▾</span></div><div class="hint"><span class="badge ok" style="margin-right:6px">已安装</span>Qwen3-ASR-0.6B（推荐）· 1.7B（更大）</div></div>
+          <div class="switchrow"><div><div class="lb">逐字对齐</div><div class="hint">字级时间戳，随模型一并下载 · <span class="badge ok">已配置</span></div></div><span class="switch on"></span></div>
+        </div>
+        <div class="card">
+          <div class="adv" style="border-top:0;margin-top:0;padding-top:0"><span>模型目录与高级参数</span><span class="chev">▸</span></div>
+          <div class="hint" style="margin-top:2px">模型 / 对齐目录、VAD 后端与分段参数收在此处；多数用户无需调整。展开后为 模型目录 · 对齐目录 · 分片/未固定 · VAD 后端/灵敏度 · 段长/重叠/前缀。</div>
+        </div>
+        <div style="display:flex;gap:8px"><button class="btn">重新下载</button><button class="btn primary" style="flex:1;justify-content:center">保存</button></div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- S3 润色 配置 -->
+<div class="frame-label" id="s03"><b>S3</b> · 设置 · 润色 · 配置</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 设置</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div class="t">设置</div></div>
+    <div class="set">
+      <nav class="setnav">
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/></svg>常规</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/></svg>识别</div>
+        <div class="n on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg>润色</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg>派活</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>系统</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>更新</div>
+      </nav>
+      <div class="setbody">
+        <div class="sechead">润色</div>
+        <div class="subtabs"><span class="s on">配置</span><span class="s">纠错学习</span><span class="s">词库</span></div>
+        <div class="card">
+          <div class="switchrow" style="margin-bottom:16px"><div><div class="lb">启用纠错</div><div class="hint">用所选服务商润色识别稿；关闭则出原始识别文字</div></div><span class="switch on"></span></div>
+          <div class="row2">
+            <div class="field" style="margin:0"><label>当前服务商</label><div class="input select">Ollama（本地） <span class="mono faint">▾</span></div></div>
+            <div class="field" style="margin:0"><label>模型</label><div class="withbtn"><div class="input select" style="flex:1">qwen2.5:7b <span class="mono faint">▾</span></div><button class="iconbtn" title="拉取模型列表"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/></svg></button></div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div class="h" style="margin:0">服务商</div><button class="btn sm">＋ 新增</button></div>
+          <div class="rows">
+            <div class="row on" style="cursor:default"><div class="body"><div class="rmeta"><span>Ollama（本地）· <span class="tag">当前</span></span><span class="badge ok">连通</span></div><div class="rtext" style="-webkit-line-clamp:1;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--muted)">http://127.0.0.1:11434/v1</div></div><span style="display:flex;gap:4px"><span class="iconbtn" title="编辑"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg></span><span class="iconbtn" title="删除"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></span></span></div>
+            <div class="row" style="cursor:default"><div class="body"><div class="rmeta"><span>OpenAI</span><span class="badge ok">有 Key</span></div><div class="rtext" style="-webkit-line-clamp:1;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--muted)">https://api.openai.com/v1 · gpt-4o-mini</div></div><span style="display:flex;gap:4px"><span class="iconbtn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg></span><span class="iconbtn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></span></span></div>
+            <div class="row" style="cursor:default"><div class="body"><div class="rmeta"><span>DeepSeek</span><span class="badge">未测</span></div><div class="rtext" style="-webkit-line-clamp:1;font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--muted)">https://api.deepseek.com/v1 · deepseek-chat</div></div><span style="display:flex;gap:4px"><span class="iconbtn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg></span><span class="iconbtn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/></svg></span></span></div>
+          </div>
+        </div>
+        <div class="card" style="background:var(--surface-2)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><div class="h" style="margin:0">编辑服务商 · OpenAI</div><span class="meta faint">新增/编辑时展开</span></div>
+          <div class="row2"><div class="field" style="margin:0"><label>名称</label><div class="input">OpenAI</div></div><div class="field" style="margin:0"><label>类型（兼容模式）</label><div class="input select">OpenAI <span class="mono faint">▾</span></div></div></div>
+          <div class="field" style="margin-top:14px"><label>API Base URL</label><div class="input mono">https://api.openai.com/v1</div></div>
+          <div class="field"><label>API Key</label><div class="input mono ph">sk-···（本地服务可留空）</div></div>
+          <div class="field" style="margin:0"><label>模型</label><div class="withbtn"><div class="input select" style="flex:1">gpt-4o-mini <span class="mono faint">▾</span></div><button class="btn">拉取</button></div></div>
+          <div style="height:14px"></div>
+          <div style="display:flex;gap:8px"><button class="btn danger">删除</button><span class="spacer"></span><button class="btn">测试连接</button><button class="btn primary">保存服务商</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- S4 润色 纠错学习 -->
+<div class="frame-label" id="s04"><b>S4</b> · 设置 · 润色 · 纠错学习</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 设置</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div class="t">设置</div></div>
+    <div class="set">
+      <nav class="setnav">
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/></svg>常规</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/></svg>识别</div>
+        <div class="n on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg>润色</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg>派活</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>系统</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>更新</div>
+      </nav>
+      <div class="setbody" style="max-width:600px">
+        <div class="sechead">润色</div>
+        <div class="subtabs"><span class="s">配置</span><span class="s on">纠错学习</span><span class="s">词库</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center"><span class="meta mono">纠错开 · OpenAI · gpt-4o-mini</span><button class="btn sm">配置 ▾</button></div>
+        <div class="banner" style="background:var(--copper-wash);border:1px solid var(--copper-line);color:var(--copper-deep);margin-top:10px">整段「识别稿 ↔ 修正稿」作为 few-shot 示例喂给润色模型 —— 让它理解上下文里该怎么改，而不是逐词替换。给出完整的对与错，模型自己学差异。</div>
+        <div class="statbar"><span>示例 12 · 用作 few-shot 8 · 待复核 4</span><span class="spacer"></span><button class="btn ghost sm">导出</button></div>
+        <div class="card">
+          <div class="rmeta" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--faint);display:flex;gap:10px;margin-bottom:10px"><span>2026/3/16 14:20</span><span>3.2s · 中文</span><span class="badge copper">用作 few-shot</span></div>
+          <div class="pair" style="gap:10px">
+            <div><div class="meta faint" style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px">识别稿（原始）</div><div class="diff">今天<span class="del">要</span>会讨论一下方案，<span class="del">配森</span>那块谁负责，下午<span class="del">在</span>两点对齐。</div></div>
+            <div><div class="meta" style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px;color:var(--copper-deep)">修正稿（正确）</div><div style="font-size:14px;line-height:1.6;color:var(--ink)">今天<span class="ins">开</span>会讨论一下方案，<span class="ins">Python</span> 那块谁负责，下午两点对齐。</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><span class="meta">识别效果</span><span class="qseg"><span class="q">差</span><span class="q on">一般</span><span class="q">好</span></span><span class="spacer"></span><label class="check"><span class="box on">✓</span> 用作 few-shot</label><button class="btn ghost sm">编辑修正 ▾</button></div>
+        </div>
+        <div class="card">
+          <div class="rmeta" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--faint);display:flex;gap:10px;margin-bottom:10px"><span>2026/3/16 12:05</span><span>5.6s · 中文</span><span class="badge">待复核</span></div>
+          <div class="pair" style="gap:10px">
+            <div><div class="meta faint" style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px">识别稿（原始）</div><div class="diff">把刚才那段<span class="del">总结</span>成要点，发我<span class="del">right</span>。</div></div>
+            <div><div class="meta" style="font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:3px;color:var(--copper-deep)">修正稿（正确）</div><div style="font-size:14px;line-height:1.6;color:var(--ink)">把刚才那段<span class="ins">整理</span>成要点，发我<span class="ins">邮箱</span>。</div></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><span class="meta">识别效果</span><span class="qseg"><span class="q">差</span><span class="q on">一般</span><span class="q">好</span></span><span class="spacer"></span><label class="check"><span class="box">　</span> 用作 few-shot</label><button class="btn ghost sm">编辑修正 ▾</button></div>
+        </div>
+        <div class="meta">空态：「还没有示例 · 在 HUD 改字确认后，整段识别稿 ↔ 修正稿会成对出现在这里，自动作为 few-shot」。编辑修正展开：识别稿只读 + 修正稿 TextArea +「保存修正」。删除某条 = 不再作示例。</div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- S5 词库 -->
+<div class="frame-label" id="s05"><b>S5</b> · 设置 · 润色 · 词库</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 设置</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div class="t">设置</div></div>
+    <div class="set">
+      <nav class="setnav">
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/></svg>常规</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/></svg>识别</div>
+        <div class="n on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg>润色</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg>派活</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>系统</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>更新</div>
+      </nav>
+      <div class="setbody">
+        <div class="sechead">润色</div>
+        <div class="subtabs"><span class="s">配置</span><span class="s">纠错学习</span><span class="s on">词库</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center"><span class="meta mono">8 条</span><button class="btn sm">＋ 添加 ▾</button></div>
+        <div class="card">
+          <div class="field"><label>词条</label><div class="withbtn"><div class="input ph">Python / 配森=Python</div><button class="btn primary">添加</button></div></div>
+        </div>
+        <div class="chips">
+          <span class="chip">Python <span class="x">✕</span></span>
+          <span class="chip">配森 → Python <span class="x">✕</span></span>
+          <span class="chip">Claude <span class="x">✕</span></span>
+          <span class="chip">Codex <span class="x">✕</span></span>
+          <span class="chip">Tauri <span class="x">✕</span></span>
+          <span class="chip">纪要 <span class="x">✕</span></span>
+        </div>
+        <div class="meta">空态：「还没有词条」。点击 chip 删除。</div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- S6 派活能力 -->
+<div class="frame-label" id="s06"><b>S6</b> · 设置 · 派活能力</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 设置</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div class="t">设置</div></div>
+    <div class="set">
+      <nav class="setnav">
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/></svg>常规</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/></svg>识别</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg>润色</div>
+        <div class="n on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg>派活</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>系统</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>更新</div>
+      </nav>
+      <div class="setbody">
+        <div class="sechead">派活</div>
+        <div class="hint" style="margin-top:-4px">言落内置支持 Claude · Codex · Pi 三种 CLI。开启要用的那几个，填好路径与默认模型即可 —— 无需改代码，也不是任意添加。</div>
+        <div class="card">
+          <div class="h">内置 Agent</div>
+          <div class="choices">
+            <div class="choice on" style="display:flex;align-items:center;justify-content:space-between"><span>Claude<span class="meta" style="margin-left:8px;font-weight:400">Anthropic CLI</span></span><span class="switch on"></span></div>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:11px;padding:14px;background:var(--surface-2);margin-top:8px">
+            <div class="row2"><div class="field" style="margin:0"><label>默认模型</label><div class="input select">Sonnet <span class="mono faint">▾</span></div></div><div class="field" style="margin:0"><label>路径</label><div class="withbtn"><button class="btn sm" title="自动检测">which</button><div class="input mono" style="flex:1">/opt/homebrew/bin/claude</div><button class="btn sm">浏览</button></div></div></div>
+          </div>
+          <div class="choices" style="margin-top:12px">
+            <div class="choice on" style="display:flex;align-items:center;justify-content:space-between"><span>Codex<span class="meta" style="margin-left:8px;font-weight:400">OpenAI CLI</span></span><span class="switch on"></span></div>
+          </div>
+          <div style="border:1px solid var(--line);border-radius:11px;padding:14px;background:var(--surface-2);margin-top:8px">
+            <div class="row2"><div class="field" style="margin:0"><label>默认模型</label><div class="input select">默认 <span class="mono faint">▾</span></div></div><div class="field" style="margin:0"><label>路径</label><div class="withbtn"><button class="btn sm">which</button><div class="input mono" style="flex:1">/opt/homebrew/bin/codex</div><button class="btn sm">浏览</button></div></div></div>
+          </div>
+          <div class="choices" style="margin-top:12px">
+            <div class="choice" style="display:flex;align-items:center;justify-content:space-between;color:var(--muted)"><span>Pi<span class="meta" style="margin-left:8px;font-weight:400">未启用 · 未检测到路径</span></span><span class="switch"></span></div>
+          </div>
+        </div>
+        <div class="card"><div class="h">Codex 信任目录</div><div class="pathrow">~/repos/asrrrr</div><div class="pathrow">~/repos/notes</div><button class="btn sm" style="margin-top:8px">＋ 添加目录</button></div>
+        <button class="btn primary block">保存</button>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- S7 系统 快捷键 -->
+<div class="frame-label" id="s07"><b>S7</b> · 设置 · 系统 · 快捷键</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 设置</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div class="t">设置</div></div>
+    <div class="set">
+      <nav class="setnav">
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/></svg>常规</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/></svg>识别</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg>润色</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg>派活</div>
+        <div class="n on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>系统</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>更新</div>
+      </nav>
+      <div class="setbody">
+        <div class="sechead">系统</div>
+        <div class="subtabs"><span class="s on">快捷键</span><span class="s">权限</span></div>
+        <div class="card"><div class="h">全局快捷键</div>
+          <div class="hkrow"><span class="hkl">出稿</span><span class="kbd">Fn</span></div>
+          <div class="hkrow"><span class="hkl">翻译</span><span class="kbd">⇧ + Fn</span></div>
+          <div class="hkrow"><span class="hkl">派活</span><span class="kbd">Fn + Space</span></div>
+          <div class="hkrow"><span class="hkl">取消</span><span style="display:flex;align-items:center;gap:8px"><span class="mono meta" style="color:var(--copper-deep)">按下组合键…</span><button class="btn ghost sm">取消</button></span></div>
+        </div>
+        <div class="meta">录制态：点某行 → 「按下组合键…」/「松键确认：{preview}」+ 取消。</div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- S8 系统 权限 -->
+<div class="frame-label" id="s08"><b>S8</b> · 设置 · 系统 · 权限（mac）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 设置</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div class="t">设置</div></div>
+    <div class="set">
+      <nav class="setnav">
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/></svg>常规</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/></svg>识别</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg>润色</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg>派活</div>
+        <div class="n on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>系统</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>更新</div>
+      </nav>
+      <div class="setbody">
+        <div class="sechead">系统</div>
+        <div class="subtabs"><span class="s">快捷键</span><span class="s on">权限</span></div>
+        <div class="card"><div class="h">系统权限</div>
+          <div class="perm"><span class="pi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span><div class="pb"><div class="pt">辅助功能</div><div class="pd">粘贴识别结果到其他应用</div></div><span class="badge ok">已授权</span></div>
+          <div class="perm"><span class="pi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="7" width="16" height="12" rx="2"/><path d="M8 7V5h8v2"/></svg></span><div class="pb"><div class="pt">输入监视</div><div class="pd">全局快捷键（含 Fn）</div></div><button class="btn sm">去授权</button></div>
+          <div class="perm"><span class="pi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/></svg></span><div class="pb"><div class="pt">麦克风</div><div class="pd">录制外部声音</div></div><span class="badge ok">已授权</span></div>
+          <div class="perm"><span class="pi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10v4h4l5 5V5L7 10H3z"/></svg></span><div class="pb"><div class="pt">语音识别</div><div class="pd">Apple Speech 引擎</div></div><button class="btn sm">去授权</button></div>
+          <div class="perm"><span class="pi"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg></span><div class="pb"><div class="pt">屏幕录制</div><div class="pd">采集系统播放音频</div></div><button class="btn sm">去授权</button></div>
+        </div>
+        <div class="adv">说明 <span class="chev">▾</span></div>
+        <div class="meta" style="margin-top:8px">· 签名安装包权限随 Bundle ID 保留 · 辅助功能 / 输入监视按可执行路径。<br/>可执行路径（mono）+ 按钮「打开系统设置」。</div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- S9 更新 -->
+<div class="frame-label" id="s09"><b>S9</b> · 设置 · 更新</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 设置</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg><span>派活</span></div><div class="foot"><div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div></aside>
+  <div class="content">
+    <div class="pagehead"><div class="t">设置</div></div>
+    <div class="set">
+      <nav class="setnav">
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h13"/></svg>常规</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/></svg>识别</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20l6-6M14 4l6 6-9 9H5v-6z"/></svg>润色</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/></svg>派活</div>
+        <div class="n"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>系统</div>
+        <div class="n on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>更新</div>
+      </nav>
+      <div class="setbody">
+        <div class="sechead">更新</div>
+        <div class="card"><div class="h">当前版本</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div><div style="font-size:15px;font-weight:600">言落 v0.6.2</div><div class="meta mono" style="margin-top:4px;color:var(--copper-deep)">发现新版本 v0.7.0 · Yanluo-0.7.0.dmg · 安装包约 82 MB</div></div><button class="btn sm">检查更新</button></div>
+          <div style="display:flex;gap:8px"><button class="btn primary" style="flex:1;justify-content:center">下载并安装 v0.7.0</button><button class="btn">下载目录</button><button class="btn">Releases</button></div>
+          <div class="meta" style="margin-top:10px">下载中：进度「正在下载安装包…」+ 百分比/字节。无 asset：主按钮「打开 Release 页下载」。检查失败：「检查失败：{err}（仍显示本地更新说明）」。</div>
+        </div>
+        <div class="card"><div class="h">更新说明</div>
+          <div class="release" style="border-top:0;padding-top:0;margin-top:0"><div class="rv">v0.7.0 · 2026-07-14</div><ul><li>出稿改结果优先，紧凑分段控件</li><li>设置改双栏源列</li><li>派活支持文件附件</li></ul></div>
+          <div class="release"><div class="rv">v0.6.2 · 2026-07-02</div><ul><li>长音频增量 KV + VAD 重置</li><li>浅色暖纸 + 亮橙主色</li></ul></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+  <div class="legendfoot">
+    言落 · Yanluo — 浅色设计契约 v2（全页详版）<br/>
+    功能页 11 帧 · 设置页 9 帧 · 覆盖每页状态/空态/子页。<br/>
+    字体：Instrument Serif + Noto Serif SC（标题）· Noto Sans SC（正文）· IBM Plex Mono（热键/时间戳/状态）。<br/>
+    暗色仍为品牌主脸，另行；本稿只定浅色。实现按此稿：theme.css 令牌 → 逐页对齐；上一版骨架见 ../v1/yanluo-ui.html。
+  </div>
+</div>
+</body>
+</html>

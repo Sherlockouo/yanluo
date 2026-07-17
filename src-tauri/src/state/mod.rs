@@ -63,7 +63,8 @@ pub(crate) enum WorkerCommand {
 #[derive(Clone)]
 pub(crate) struct PendingHudConfirm {
     pub(crate) mode: String,
-    /// Text shown when editing started (post-vocab / translate accept).
+    /// Text shown when editing started (post-vocab / LLM refine / translate accept).
+    /// Used to detect user edits; true ASR lives in `result.raw_text`.
     pub(crate) asr_text: String,
     pub(crate) result: TranscriptionResult,
     pub(crate) gen: u64,

@@ -11,10 +11,8 @@ import {
 import { Link } from "react-router-dom";
 import { BookPlus, RotateCcw, Save, Sparkles } from "lucide-react";
 import {
-  EmptyState,
   PageHeader,
   PageShell,
-  PanelHeader,
   Reveal,
   SoftCollapse,
 } from "@/components/shared/page-shell";
@@ -220,12 +218,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
     try {
       await rateHistory(id, rating);
       if (rating === "bad") {
-        const entry = learnEntries.find((e) => e.id === id);
-        if (!entry) return;
-        const n = await offerLearnFromEntries([entry]);
-        if (n > 0) {
-          toast.success("差评已记，确认词条");
-        }
+        toast.success("差评已记（词库请用本地 / AI 提炼）");
       }
     } catch (e) {
       toast.danger(String(e));
@@ -242,11 +235,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
     }
     try {
       await setHistoryUserText(entry.id, trimmed);
-      const updated = { ...entry, user_text: trimmed, text: trimmed };
-      const n = await offerLearnFromEntries([updated]);
-      toast.success(
-        n > 0 ? `已保存用户修正，提炼 ${n} 条` : "已保存用户修正",
-      );
+      toast.success("已保存修正稿（识别稿 ↔ 修正稿）");
     } catch (e) {
       toast.danger(String(e));
     }
@@ -272,7 +261,16 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
   const content = (
     <>
       {embedded ? (
-        <PanelHeader status={header} action={headerAction} />
+        <div className="-mb-1 flex items-center justify-between gap-3">
+          <div className="min-w-0">{header}</div>
+          <button
+            type="button"
+            className="dlink muted shrink-0"
+            onClick={() => setConfigOpen((v) => !v)}
+          >
+            配置{configOpen ? " ▴" : " ▾"}
+          </button>
+        </div>
       ) : (
         <PageHeader title="LLM" status={header} action={headerAction} />
       )}
@@ -360,10 +358,10 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
 
       {pendingLearn && pendingLearn.terms.length > 0 ? (
         <Reveal>
-          <div className="surface-card border-accent/20 bg-accent/[0.05] px-4 py-3.5">
+          <div className="surface-card border-border bg-surface-secondary/60 px-4 py-3.5">
             <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
               <div className="type-ui">
-                待确认（{pendingLearn.terms.length}）
+                词库待确认（{pendingLearn.terms.length}）
               </div>
               <div className="flex gap-2">
                 <Button
@@ -405,7 +403,15 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
       ) : null}
 
       {learnEntries.length === 0 ? (
-        <EmptyState title="还没有学习 case" icon={<Sparkles size={18} />} />
+        <div className="dropzone" style={{ minHeight: 200 }}>
+          <span className="dropzone-ic">
+            <Sparkles size={22} aria-hidden />
+          </span>
+          <span className="dropzone-t">还没有学习 case</span>
+          <span className="dropzone-fmt">
+            HUD 改字确认后 · 整段识别稿 ↔ 修正稿出现在这里
+          </span>
+        </div>
       ) : (
         <>
           <div className="flex flex-wrap items-end justify-between gap-3">
@@ -444,7 +450,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
             </div>
           </div>
 
-          <div className="flex flex-col gap-2.5">
+          <div className="recs">
             {learnEntries.map((entry, i) => {
               const rated = ratingOf(entry);
               const status = entry.learn_status;
@@ -457,34 +463,24 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
               const editing = editingId === entry.id;
               return (
                 <Reveal key={entry.id} index={i}>
-                  <article className="surface-card px-4 py-3.5">
-                    <div className="mb-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 type-meta">
+                  <article className="rec">
+                    <div className="rec-l">
                       <span>
                         {new Date(entry.created_at).toLocaleString()}
                       </span>
-                      <span className="text-muted/40">·</span>
                       <span>{entry.duration_seconds.toFixed(1)}s</span>
                       {triple?.hasUser ? (
-                        <>
-                          <span className="text-muted/40">·</span>
-                          <span className="text-accent">有修正</span>
-                        </>
+                        <span className="tag">有修正</span>
                       ) : null}
                       {status === "applied" ? (
-                        <>
-                          <span className="text-muted/40">·</span>
-                          <span>已入词库</span>
-                        </>
+                        <span>已入词库</span>
                       ) : status === "suggested" ? (
-                        <>
-                          <span className="text-muted/40">·</span>
-                          <span>待确认</span>
-                        </>
+                        <span>待确认</span>
                       ) : null}
                     </div>
 
                     {entry.raw_text && learnGold(entry) !== entry.raw_text ? (
-                      <div className="mb-1">
+                      <div className="rec-c">
                         <RefineDiff
                           before={entry.raw_text}
                           after={learnGold(entry)}
@@ -492,9 +488,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
                         />
                       </div>
                     ) : (
-                      <p className="mb-1 type-body !text-[13.5px] !leading-relaxed">
-                        {entry.raw_text}
-                      </p>
+                      <p className="rec-c">{entry.raw_text}</p>
                     )}
 
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-2.5">

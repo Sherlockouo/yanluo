@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>言落 · 出稿 · Variant A（编辑式单一表面）</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Serif+SC:wght@400;500&family=Noto+Sans+SC:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+/*
+  言落 · 出稿 Variant A — 编辑式 / 结果优先 / 单一表面
+  取消等重分段 TAB 条。模式切换 = 大标题旁的安静排版切换（小字 + 铜色基线）。
+  文稿主导阅读宽度 ~760px；发丝线优先于阴影；亮橙只给单个主 CTA + 录音灯。
+*/
+:root{
+  --paper:#F4F2EE; --paper-2:#EDEAE4;
+  --surface:#FFFFFF; --surface-2:#F8F6F2;
+  --ink:#1C1A17; --muted:#6E6862; --faint:#9A938B;
+  --line:rgba(28,26,23,0.10); --line-strong:rgba(28,26,23,0.16);
+  --copper:#D9722E; --copper-hover:#BE611F; --copper-deep:#A0561F;
+  --copper-wash:rgba(217,114,46,0.11); --copper-line:rgba(217,114,46,0.40);
+  --ok:#2F7A4C; --warn:#A66C12; --danger:#C24238;
+  --radius:14px; --radius-sm:9px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper-2);color:var(--ink);font-family:"Noto Sans SC",-apple-system,system-ui,sans-serif;font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.doc{max-width:1140px;margin:0 auto;padding:44px 24px 130px}
+.doc-eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--copper-deep)}
+.doc h1{font-family:"Instrument Serif","Noto Serif SC",serif;font-size:56px;font-weight:400;letter-spacing:-.02em;line-height:1;margin-top:8px}
+.doc h1 em{font-style:italic;color:var(--copper-deep)}
+.doc-sub{margin-top:14px;color:var(--muted);max-width:66ch;line-height:1.7}
+.doc-note{margin-top:20px;padding:16px 18px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);color:var(--muted);font-size:13px;line-height:1.75}
+.doc-note b{color:var(--ink)}
+
+.frame-label{margin:60px 0 14px;font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.frame-label b{color:var(--copper-deep);font-weight:500}
+.frame-note{margin:0 0 12px;color:var(--muted);font-size:12.5px;max-width:84ch;line-height:1.6}
+
+/* mac window */
+.win{border:1px solid var(--line-strong);border-radius:16px;overflow:hidden;background:var(--paper);box-shadow:0 10px 30px rgba(28,26,23,.06)}
+.titlebar{display:flex;align-items:center;gap:8px;padding:11px 14px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.dot{width:11px;height:11px;border-radius:50%}
+.dot.r{background:#ec6a5e}.dot.y{background:#f4bf4f}.dot.g{background:#61c554}
+.titlebar .title{margin-left:8px;font-size:12px;color:var(--muted);font-family:"IBM Plex Mono",monospace}
+.shell{display:grid;grid-template-columns:76px minmax(0,1fr);min-height:600px}
+
+/* rail */
+.rail{display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px 8px;border-right:1px solid var(--line);background:color-mix(in oklab,var(--surface) 60%,var(--paper))}
+.rail .mark{display:grid;place-items:center;width:40px;height:40px;border-radius:11px;background:var(--ink);color:var(--paper);font-family:"Instrument Serif","Noto Serif SC",serif;font-size:20px;line-height:1}
+.rail .it{display:flex;flex-direction:column;align-items:center;gap:3px;width:60px;padding:9px 4px;border-radius:11px;border:1px solid transparent;color:var(--muted);font-size:11px;cursor:pointer}
+.rail .it svg{width:17px;height:17px}
+.rail .it:hover{color:var(--ink);background:rgba(28,26,23,.04)}
+.rail .it.on{color:var(--ink);background:rgba(28,26,23,.06);border-color:var(--line-strong)}
+.rail .foot{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:8px}
+
+.content{overflow:auto;padding:34px 40px 40px;min-width:0}
+.stage{max-width:812px;margin:0 auto}
+
+/* ===== EDITORIAL MASTHEAD — quiet typographic mode switch ===== */
+.masthead{margin-bottom:26px}
+.masthead .kicker{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--copper-deep);margin-bottom:10px}
+.mastrow{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;border-bottom:1px solid var(--line);padding-bottom:12px}
+.masthead h2{font-family:"Instrument Serif","Noto Serif SC",serif;font-size:52px;font-weight:400;line-height:.92;letter-spacing:-.01em}
+/* modes: NOT a segmented box — plain type on the masthead baseline */
+.modes{display:flex;align-items:baseline;gap:22px;padding-bottom:4px}
+.modes .m{position:relative;font-size:15px;color:var(--muted);cursor:pointer;padding-bottom:10px;margin-bottom:-13px;white-space:nowrap;transition:color .14s}
+.modes .m:hover{color:var(--ink)}
+.modes .m.on{color:var(--ink);font-weight:600}
+.modes .m.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--copper);border-radius:2px}
+.subline{display:flex;align-items:center;gap:18px;margin-top:10px;font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--muted);flex-wrap:wrap}
+.subline .dotsep{width:3px;height:3px;border-radius:50%;background:var(--faint)}
+.subline b{color:var(--ink);font-weight:500}
+.subline a{color:var(--copper-deep);text-decoration:none}
+
+/* type helpers */
+.mono{font-family:"IBM Plex Mono",monospace}
+.meta{font-size:12px;color:var(--muted)}
+.faint{color:var(--faint)}
+.kbd{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:2px 7px;white-space:nowrap}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 15px;border-radius:var(--radius-sm);border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:14px;font-weight:500;cursor:pointer}
+.btn:hover{border-color:var(--line-strong)}
+.btn.primary{background:var(--copper);border-color:var(--copper);color:#fff}
+.btn.primary:hover{background:var(--copper-hover)}
+.btn.primary.block{width:100%;justify-content:center;height:46px;font-size:15px}
+.btn.primary[disabled],.btn[disabled]{background:var(--paper-2);border-color:var(--line);color:var(--faint);cursor:default}
+.btn.sm{height:30px;padding:0 12px;font-size:13px}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.ghost:hover{background:rgba(28,26,23,.05);color:var(--ink)}
+.iconbtn{width:34px;height:34px;border-radius:9px;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;cursor:pointer;color:var(--muted)}
+.iconbtn:hover{color:var(--ink);border-color:var(--line-strong)}
+.spacer{flex:1}
+
+/* quiet inline text switch (本地/链接 · 音频/视频 · 专注/全文) */
+.tswitch{display:inline-flex;align-items:center;gap:14px;font-size:13.5px}
+.tswitch .o{color:var(--faint);cursor:pointer}
+.tswitch .o.on{color:var(--ink);font-weight:600}
+.tswitch .sep{color:var(--line-strong)}
+
+/* fields */
+.field{display:flex;flex-direction:column;gap:8px;margin-bottom:18px}
+.field:last-child{margin-bottom:0}
+.field label{font-size:13px;font-weight:500;color:var(--ink)}
+.field .hint{font-size:12px;color:var(--muted);line-height:1.6}
+.field .hint a{color:var(--copper-deep)}
+.input{min-height:42px;border:1px solid var(--line-strong);border-radius:9px;background:#fff;padding:10px 13px;display:flex;align-items:center;color:var(--ink);font-size:14px}
+.input.ph{color:var(--faint)}
+.input.select{justify-content:space-between}
+.input.mono{font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+.input.textarea{min-height:78px;align-items:flex-start;line-height:1.6}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.switchrow{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.switchrow .lb{font-size:14px;font-weight:500}
+.switchrow .sub{font-size:12px;color:var(--muted)}
+.switch{width:38px;height:22px;border-radius:999px;background:var(--line-strong);position:relative;flex:0 0 auto}
+.switch.on{background:var(--copper)}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff}
+.switch.on::after{left:18px}
+
+/* dropzone — editorial, airy */
+.dropzone{min-height:280px;border:1.5px dashed var(--line-strong);border-radius:18px;background:var(--surface-2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--muted);text-align:center;padding:40px}
+.dropzone .ic{width:56px;height:56px;border-radius:16px;display:grid;place-items:center;background:var(--surface);border:1px solid var(--line);color:var(--copper-deep)}
+.dropzone .t{font-size:16px;font-weight:600;color:var(--ink)}
+.dropzone .fmt{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.04em;color:var(--faint)}
+
+/* import composition */
+.importhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.linkzone{border:1px solid var(--line);border-radius:18px;background:var(--surface);padding:26px}
+
+/* processing — calm centered */
+.proc{display:flex;flex-direction:column;align-items:center;gap:18px;padding:70px 20px;text-align:center}
+.proc .ic{width:60px;height:60px;border-radius:18px;display:grid;place-items:center;background:var(--copper-wash);color:var(--copper-deep);border:1px solid var(--copper-line)}
+.proc .t{font-size:17px;font-weight:600;color:var(--ink)}
+.proc .prog{width:340px;max-width:100%;height:5px;border-radius:3px;background:var(--line-strong);position:relative;overflow:hidden}
+.proc .prog i{position:absolute;left:0;top:0;bottom:0;background:var(--ink);border-radius:3px}
+.proc .stat{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--muted);letter-spacing:.04em}
+
+/* results — manuscript index */
+.rlist{display:flex;flex-direction:column}
+.ritem{display:flex;gap:16px;align-items:flex-start;padding:20px 4px;border-bottom:1px solid var(--line);cursor:pointer;transition:opacity .14s}
+.ritem:hover{opacity:.72}
+.ritem.on{cursor:default}
+.ritem .rn{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--faint);padding-top:3px;width:22px;flex:0 0 auto}
+.ritem .rbody{min-width:0;flex:1}
+.rmeta{display:flex;align-items:center;gap:12px;font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--faint)}
+.rmeta .tag{color:var(--copper-deep)}
+.rtext{margin-top:8px;font-size:15.5px;line-height:1.7;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rchev{color:var(--faint);flex:0 0 auto;padding-top:4px}
+.rchev svg{width:16px;height:16px}
+
+/* opened detail reader (inline, not a modal — results-first) */
+.reader{border:1px solid var(--line-strong);background:var(--surface);border-radius:16px;padding:22px;margin:6px 0 4px}
+.reader .rhead{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}
+.reader .rtitle{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--copper-deep)}
+.player{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.thumb{width:112px;height:70px;border-radius:11px;background:var(--surface);border:1px solid var(--line);display:grid;place-items:center;color:var(--faint);flex:0 0 auto}
+.scrub{flex:1;display:flex;flex-direction:column;gap:8px}
+.scrub .bar{height:4px;border-radius:2px;background:var(--line-strong);position:relative}
+.scrub .bar i{position:absolute;left:0;top:0;height:4px;width:38%;background:var(--ink);border-radius:2px}
+.scrub .bar i::after{content:"";position:absolute;right:-5px;top:-3px;width:10px;height:10px;border-radius:50%;background:var(--ink)}
+.scrub .time{display:flex;justify-content:space-between;font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--muted)}
+.playbtn{width:38px;height:38px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;flex:0 0 auto;cursor:pointer}
+.readbody{font-size:15.5px;line-height:1.95;color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px}
+.readbody .hl{background:var(--copper-wash);border-radius:3px;padding:1px 3px}
+
+/* live config — quiet secondary block */
+.configbar{background:var(--surface-2);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:26px}
+.configbar .ch{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.configbar .ct{font-size:13px;font-weight:600}
+
+/* record list (live / translate / history) */
+.recs{display:flex;flex-direction:column}
+.rec{padding:18px 4px;border-bottom:1px solid var(--line)}
+.rec .rl{display:flex;align-items:center;gap:12px;font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--faint)}
+.rec .rl .tag{color:var(--copper-deep)}
+.rec .rc{margin-top:9px;font-size:15px;line-height:1.7;color:var(--ink)}
+.diff .del{color:var(--danger);text-decoration:line-through;opacity:.72}
+.diff .ins{color:var(--ok)}
+.pair{margin-top:9px}
+.pair .a{color:var(--muted);font-size:14px;line-height:1.6}
+.pair .b{color:var(--ink);font-size:15.5px;line-height:1.7;margin-top:4px}
+
+/* history expand affordance */
+.rec.exp{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:0}
+.rec .expbody{margin-top:14px;padding-top:14px;border-top:1px solid var(--line);display:flex;gap:16px;align-items:flex-start}
+.rec .expbody .m{width:96px;height:60px;border-radius:10px;background:var(--surface-2);border:1px solid var(--line);display:grid;place-items:center;color:var(--faint);flex:0 0 auto}
+.rec .expbody .full{font-size:14.5px;line-height:1.8;color:var(--ink);flex:1}
+.recact{display:flex;gap:8px;margin-top:12px}
+
+/* HUD capsule (floating, for 实时 note) */
+.hudwrap{display:flex;justify-content:center;padding:22px;margin-top:22px;background:repeating-linear-gradient(45deg,var(--paper),var(--paper) 10px,var(--paper-2) 10px,var(--paper-2) 20px);border-radius:14px}
+.hud{width:400px;max-width:100%;height:56px;display:flex;align-items:center;gap:12px;border-radius:16px;background:rgba(30,30,34,.72);-webkit-backdrop-filter:blur(24px) saturate(1.3);backdrop-filter:blur(24px) saturate(1.3);border:.5px solid rgba(255,255,255,.10);color:rgba(255,255,255,.94);padding:0 18px 0 16px;box-shadow:0 20px 60px rgba(0,0,0,.42)}
+.hud .bars{display:flex;align-items:center;gap:3px;height:22px;flex:0 0 auto}
+.hud .bars i{width:4px;background:#c4784a;border-radius:999px;align-self:center}
+.hud .colon{color:rgba(255,255,255,.9);font-size:15px;font-weight:600;flex:0 0 auto;margin-top:-1px}
+.hud .txt{flex:1;min-width:0;font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden}
+.hud .txt .committed{color:rgba(255,255,255,.55);font-weight:450}
+.hud .txt .active{color:rgba(255,255,255,.96);font-weight:560}
+
+/* cleanup menu (history) */
+.menu{position:relative}
+.menucard{border:1px solid var(--line-strong);background:var(--surface);border-radius:12px;padding:6px;box-shadow:0 12px 28px rgba(28,26,23,.10);width:230px}
+.menucard .mi{display:flex;justify-content:space-between;align-items:center;padding:9px 11px;border-radius:8px;font-size:13.5px;color:var(--ink);cursor:pointer}
+.menucard .mi:hover{background:var(--surface-2)}
+.menucard .mi.danger{color:var(--danger)}
+.menucard .mgrp{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);padding:8px 11px 4px}
+.menucard .div{height:1px;background:var(--line);margin:4px 0}
+
+/* empty */
+.empty{display:flex;flex-direction:column;align-items:center;gap:12px;padding:80px 20px;text-align:center;color:var(--muted)}
+.empty .t{font-size:16px;font-weight:600;color:var(--ink)}
+
+.legendfoot{margin-top:90px;padding-top:22px;border-top:1px solid var(--line);font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--faint);line-height:1.9}
+</style>
+</head>
+<body>
+<div class="doc">
+  <div class="doc-eyebrow">出稿 · Variant A · Editorial / results-first single surface · 2026-07-16</div>
+  <h1>出稿<em>.</em></h1>
+  <p class="doc-sub">重构：取消等重四联 TAB 条。把「文件 · 实时 · 翻译 · 历史」收成大标题右侧的<b>安静排版切换</b>——小字 + 单条铜色基线，不切割页面。文稿与结果占据 ~760–812px 阅读宽，发丝线优先，全篇亮橙只留给单个主行动与录音灯。</p>
+  <div class="doc-note">
+    <b>组织概念：</b>整页像一份稿件目录 + 阅读器。masthead（栏眉 + 大衬线标题 + 排版模式切换）是唯一的横向分隔线；其下是同一张纸上的内容随模式流动，而不是「TAB 条 vs 内容盘」两块对打。<br/>
+    <b>模式切换：</b>四个模式是标题基线上的排版文字，激活项 = 墨色加粗 + 一条 2px 铜线；其余为浅灰。热键在其下用 mono 提示（Fn / ⇧Fn）。没有胶囊、没有等重按钮条。
+  </div>
+
+<!-- ========================= A · 文件上传 ========================= -->
+<div class="frame-label" id="a1"><b>A</b> · 出稿 · 文件 / 链接（upload · 入口态）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div>
+    <div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div>
+    <div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg><span>派活</span></div>
+    <div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg><span>设置</span></div></div>
+  </aside>
+  <div class="content"><div class="stage">
+    <div class="masthead">
+      <div class="kicker">本机识别 · 已就绪</div>
+      <div class="mastrow">
+        <h2>出稿</h2>
+        <nav class="modes"><span class="m on">文件</span><span class="m">实时</span><span class="m">翻译</span><span class="m">历史</span></nav>
+      </div>
+      <div class="subline"><span><b>Fn</b> 出稿</span><span class="dotsep"></span><span><b>⇧Fn</b> 翻译</span><span class="dotsep"></span><span>自动检测语言</span></div>
+    </div>
+
+    <div class="importhead">
+      <div class="tswitch"><span class="o on">本地文件</span><span class="sep">/</span><span class="o">网络链接</span></div>
+      <div class="meta">拖入、粘贴或选择</div>
+    </div>
+
+    <div class="dropzone">
+      <div class="ic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg></div>
+      <div class="t">把音频或视频放到这里</div>
+      <div class="meta">或点击选择文件</div>
+      <div class="fmt">WAV · MP3 · M4A · FLAC · MP4 · MOV · MKV</div>
+    </div>
+    <div style="height:20px"></div>
+    <button class="btn primary block">开始转写</button>
+    <div class="meta" style="margin-top:12px;text-align:center">已选文件后：图标 + 文件名 + 「更换」；模型未就绪时上方出黄条，主按钮转中性灰禁用。</div>
+  </div></div>
+</div></div>
+
+<!-- ========================= A2 · 链接（视频/音频） ========================= -->
+<div class="frame-label" id="a2"><b>A2</b> · 出稿 · 网络链接（音频 / 视频 toggle）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div>
+    <div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div>
+    <div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg><span>派活</span></div>
+    <div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div>
+  </aside>
+  <div class="content"><div class="stage">
+    <div class="masthead">
+      <div class="kicker">本机识别 · 已就绪</div>
+      <div class="mastrow">
+        <h2>出稿</h2>
+        <nav class="modes"><span class="m on">文件</span><span class="m">实时</span><span class="m">翻译</span><span class="m">历史</span></nav>
+      </div>
+      <div class="subline"><span><b>Fn</b> 出稿</span><span class="dotsep"></span><span><b>⇧Fn</b> 翻译</span></div>
+    </div>
+
+    <div class="importhead">
+      <div class="tswitch"><span class="o">本地文件</span><span class="sep">/</span><span class="o on">网络链接</span></div>
+      <div class="tswitch"><span class="o on">音频</span><span class="sep">/</span><span class="o">视频</span></div>
+    </div>
+
+    <div class="linkzone">
+      <div class="field">
+        <label>媒体链接</label>
+        <div class="input ph mono">https://…</div>
+        <div class="hint">支持网页音视频；需要本机 <span class="mono">yt-dlp</span> 抓取、<span class="mono">ffmpeg</span> 转码。</div>
+      </div>
+      <button class="btn primary block">开始转写</button>
+      <div class="meta" style="margin-top:12px">缺 yt-dlp → 「请先安装 yt-dlp」；缺 ffmpeg → 「需要本机 ffmpeg（brew install ffmpeg）」，主按钮禁用。</div>
+    </div>
+  </div></div>
+</div></div>
+
+<!-- ========================= B · 处理中 ========================= -->
+<div class="frame-label" id="b"><b>B</b> · 出稿 · 处理中（识别中 / 下载中 · %）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div>
+    <div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div>
+    <div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg><span>派活</span></div>
+    <div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div>
+  </aside>
+  <div class="content"><div class="stage">
+    <div class="masthead">
+      <div class="kicker">本机识别 · 处理中</div>
+      <div class="mastrow">
+        <h2>出稿</h2>
+        <nav class="modes"><span class="m on">文件</span><span class="m">实时</span><span class="m">翻译</span><span class="m">历史</span></nav>
+      </div>
+    </div>
+
+    <div class="proc">
+      <div class="ic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 18V5l12-2v13M9 9l12-2"/></svg></div>
+      <div class="t">正在识别…</div>
+      <div class="stat">interview-0316.m4a · 本机识别 · 自动检测</div>
+      <button class="btn sm">取消</button>
+    </div>
+
+    <div style="border-top:1px solid var(--line);margin-top:8px;padding-top:24px">
+      <div class="proc" style="padding:24px 20px 8px">
+        <div class="ic"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></div>
+        <div class="t">正在下载…</div>
+        <div class="prog"><i style="width:62%"></i></div>
+        <div class="stat">62% · 18.4 / 29.6 MB · yt-dlp · 1.9 MB/s</div>
+      </div>
+      <div class="meta" style="text-align:center;margin-top:6px">网络链接先经「下载中 · 百分比」阶段，完成后转「识别中」。</div>
+    </div>
+  </div></div>
+</div></div>
+
+<!-- ========================= C · 结果 + 详情 ========================= -->
+<div class="frame-label" id="c"><b>C</b> · 出稿 · 转写结果列表 + 展开详情（阅读器内联，非弹窗）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div>
+    <div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div>
+    <div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg><span>派活</span></div>
+    <div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div>
+  </aside>
+  <div class="content"><div class="stage">
+    <div class="masthead">
+      <div class="kicker">本机识别 · 已就绪</div>
+      <div class="mastrow">
+        <h2>出稿</h2>
+        <nav class="modes"><span class="m on">文件</span><span class="m">实时</span><span class="m">翻译</span><span class="m">历史</span></nav>
+      </div>
+      <div class="subline"><span>转写记录 · 3 条</span><span class="dotsep"></span><span><a href="#a1">＋ 新转写</a></span></div>
+    </div>
+
+    <div class="rlist">
+      <!-- opened row → inline reader -->
+      <div class="ritem on">
+        <div class="rn">01</div>
+        <div class="rbody">
+          <div class="rmeta"><span>2026/3/16 14:38</span><span class="tag">音频</span><span>291.2s</span><span>中文</span></div>
+          <div class="reader">
+            <div class="rhead">
+              <div class="rtitle">阅读 · 291.2s · 中文</div>
+              <div class="tswitch"><span class="o on">专注</span><span class="sep">/</span><span class="o">全文</span></div>
+            </div>
+            <div class="player">
+              <div class="thumb"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+              <div class="playbtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg></div>
+              <div class="scrub">
+                <div class="bar"><i></i></div>
+                <div class="time"><span>1:52</span><span>4:51</span></div>
+              </div>
+            </div>
+            <div class="readbody">他来听我的演唱会，在十七岁的初恋<span class="hl">第一次约会</span>，男孩为了她彻夜排队，半年的积蓄买了门票，只为了在台下听她唱那一首歌。专注模式只显示当前句并跟随播放高亮；切到「全文」可自由滚动整篇。</div>
+          </div>
+        </div>
+      </div>
+      <div class="ritem">
+        <div class="rn">02</div>
+        <div class="rbody">
+          <div class="rmeta"><span>2026/3/15 20:35</span><span class="tag">视频</span><span>7.4s</span><span>English</span></div>
+          <div class="rtext">But I didn't forget. Na Jo. I've been married a long time ago. Where did you come from, after all these years apart?</div>
+        </div>
+        <div class="rchev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div>
+      </div>
+      <div class="ritem">
+        <div class="rn">03</div>
+        <div class="rbody">
+          <div class="rmeta"><span>2026/3/13 16:45</span><span class="tag">音频</span><span>1992.5s</span><span>中英</span></div>
+          <div class="rtext">啊，so that's a rough. We got it. It's again. Uh, today's day five hundred and twelve, 我们继续把昨天那段没讲完的接着聊。</div>
+        </div>
+        <div class="rchev"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div>
+      </div>
+    </div>
+    <div class="meta" style="margin-top:16px">空态：「还没有转写结果」+ 主按钮「开始转写」。点击行原地展开为阅读器（媒体缩略 + 播放条 + 专注/全文），不跳弹窗。</div>
+  </div></div>
+</div></div>
+
+<!-- ========================= D · 实时 ========================= -->
+<div class="frame-label" id="d"><b>D</b> · 出稿 · 实时（页内引擎配置 + 历史记录；采集在 HUD）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div>
+    <div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div>
+    <div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg><span>派活</span></div>
+    <div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div>
+  </aside>
+  <div class="content"><div class="stage">
+    <div class="masthead">
+      <div class="kicker">本机识别 · 已加载</div>
+      <div class="mastrow">
+        <h2>出稿</h2>
+        <nav class="modes"><span class="m">文件</span><span class="m on">实时</span><span class="m">翻译</span><span class="m">历史</span></nav>
+      </div>
+      <div class="subline"><span>按 <b>Fn</b> 开始 · 波形与部分文字在浮层 HUD</span></div>
+    </div>
+
+    <div class="configbar">
+      <div class="ch"><span class="ct">引擎</span><span class="meta mono">未保存改动</span></div>
+      <div class="row2">
+        <div class="field" style="margin:0"><label>识别语言</label><div class="input select ph">自动检测 <span class="mono faint">▾</span></div></div>
+        <div class="field" style="margin:0"><label>型号</label><div class="input select">Qwen3-ASR-0.6B（推荐） <span class="mono faint">▾</span></div></div>
+      </div>
+      <div class="switchrow" style="margin:16px 0"><div><div class="lb">逐字对齐</div><div class="sub">ForcedAligner 字级时间戳</div></div><span class="switch on"></span></div>
+      <button class="btn primary block">保存并加载</button>
+    </div>
+
+    <div class="recs">
+      <div class="rec">
+        <div class="rl"><span>2026/3/16 14:20</span><span class="tag">Fn</span><span>3.2s</span><span>中文</span></div>
+        <div class="rc diff">今天<span class="del">要</span><span class="ins">开</span>会讨论一下方案，<span class="del">配森</span><span class="ins">Python</span> 那块谁负责？</div>
+      </div>
+      <div class="rec">
+        <div class="rl"><span>2026/3/16 12:05</span><span class="tag">Fn</span><span>2.1s</span><span>中文</span></div>
+        <div class="rc">帮我把刚才那段整理成要点。</div>
+      </div>
+    </div>
+    <div class="meta" style="margin-top:14px">空态：「还没有识别记录 · 按 Fn 开始」。行内 diff：删除=删除线（danger），插入=success。</div>
+
+    <div class="hudwrap">
+      <div class="hud">
+        <span class="bars"><i style="height:7px"></i><i style="height:15px"></i><i style="height:21px"></i><i style="height:11px"></i><i style="height:18px"></i><i style="height:9px"></i><i style="height:13px"></i></span>
+        <span class="colon">:</span>
+        <span class="txt"><span class="committed">今天开会讨论一下方案，</span><span class="active">下午两点……</span></span>
+      </div>
+    </div>
+    <div class="meta" style="text-align:center;margin-top:8px">浮层 HUD 承载实时波形 + 部分识别文字，不占本页；本页只管引擎配置与历史。</div>
+  </div></div>
+</div></div>
+
+<!-- ========================= E · 翻译 ========================= -->
+<div class="frame-label" id="e"><b>E</b> · 出稿 · 翻译（目标语言 + LLM 在 masthead · SemanticPair 结果）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div>
+    <div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div>
+    <div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg><span>派活</span></div>
+    <div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div>
+  </aside>
+  <div class="content"><div class="stage">
+    <div class="masthead">
+      <div class="kicker">⇧Fn · 翻译</div>
+      <div class="mastrow">
+        <h2>出稿</h2>
+        <nav class="modes"><span class="m">文件</span><span class="m">实时</span><span class="m on">翻译</span><span class="m">历史</span></nav>
+      </div>
+      <div class="subline"><span>翻译到 <b>English</b> <span class="faint">▾</span></span><span class="dotsep"></span><span>OpenAI <span class="faint">▾</span></span><span class="dotsep"></span><span>gpt-4o-mini <span class="faint">▾</span></span></div>
+    </div>
+
+    <div class="configbar">
+      <div class="field" style="margin:0">
+        <label>翻译 Prompt</label>
+        <div class="input textarea">将以下内容翻译为 English，保持口语与语气，不要解释。</div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px"><button class="btn sm ghost">恢复默认</button><button class="btn primary sm">保存</button></div>
+    </div>
+
+    <div class="recs">
+      <div class="rec">
+        <div class="rl"><span>2026/3/16 15:02</span><span class="tag">翻译</span><span>5.1s</span><span>→ English</span></div>
+        <div class="pair"><div class="a">今天开会讨论一下方案。</div><div class="b">Let's have a meeting today to discuss the plan.</div></div>
+      </div>
+      <div class="rec">
+        <div class="rl"><span>2026/3/16 12:31</span><span class="tag">翻译</span><span>4.4s</span><span>→ English</span></div>
+        <div class="pair"><div class="a">帮我把刚才那段整理成要点。</div><div class="b">Help me organize what I just said into key points.</div></div>
+      </div>
+    </div>
+    <div class="meta" style="margin-top:14px">空态：「还没有翻译 · ⇧Fn 开始」。结果为 SemanticPair：原文（灰）→ 译文（墨），无标签。目标语言 / Provider / 模型都在 masthead 副行选。</div>
+  </div></div>
+</div></div>
+
+<!-- ========================= F · 历史 ========================= -->
+<div class="frame-label" id="f"><b>F</b> · 出稿 · 历史（统一记录 + 清理菜单 + 展开）</div>
+<div class="win"><div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">言落 · 出稿</span></div><div class="shell">
+  <aside class="rail"><div class="mark">言</div>
+    <div class="it on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M6 7v10M18 7v10"/></svg><span>出稿</span></div>
+    <div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M8 21h8"/></svg><span>派活</span></div>
+    <div class="foot"><div class="it"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/></svg><span>设置</span></div></div>
+  </aside>
+  <div class="content"><div class="stage">
+    <div class="masthead">
+      <div class="kicker">全部记录</div>
+      <div class="mastrow">
+        <h2>出稿</h2>
+        <nav class="modes"><span class="m">文件</span><span class="m">实时</span><span class="m">翻译</span><span class="m on">历史</span></nav>
+      </div>
+      <div class="subline"><span>128 条 · 转写 / Fn / 翻译</span><span class="dotsep"></span><span><a href="#f">清理 ▾</a></span></div>
+    </div>
+
+    <div class="recs">
+      <!-- expanded entry (Fn · 学习) -->
+      <div class="rec exp">
+        <div class="rl"><span>2026/3/16 14:38</span><span class="tag">转写</span><span>291.2s</span><span>中文</span></div>
+        <div class="rc">今天开会讨论一下方案，Python 那块谁负责？我们把负责人和时间点定下来。</div>
+        <div class="expbody">
+          <div class="m"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+          <div class="full">全文在此展开供阅读：今天开会讨论一下方案，Python 那块谁负责？我们把负责人和时间点定下来，下午两点前给我一版初稿。</div>
+        </div>
+        <div class="recact"><button class="btn sm">复制</button><button class="btn sm ghost">打开</button></div>
+      </div>
+      <div class="rec">
+        <div class="rl"><span>2026/3/16 12:05</span><span class="tag">Fn</span><span>2.1s</span><span>中文</span></div>
+        <div class="rc">帮我把刚才那段整理成要点。</div>
+        <div class="recact"><button class="btn sm">复制</button><button class="btn sm ghost" style="color:var(--copper-deep)">学习</button></div>
+      </div>
+      <div class="rec">
+        <div class="rl"><span>2026/3/15 20:35</span><span class="tag">翻译</span><span>7.4s</span><span>→ English</span></div>
+        <div class="pair"><div class="a">但我没有忘记，你从哪里来？</div><div class="b">But I didn't forget. Where did you come from?</div></div>
+      </div>
+    </div>
+
+    <!-- cleanup menu (shown open, positioned as example) -->
+    <div style="display:flex;justify-content:flex-end;margin-top:18px">
+      <div class="menucard">
+        <div class="mgrp">保留</div>
+        <div class="mi">保留最近 100 条</div>
+        <div class="mi">保留最近 500 条</div>
+        <div class="div"></div>
+        <div class="mgrp">删除</div>
+        <div class="mi">删除 30 天前</div>
+        <div class="mi">删除 90 天前</div>
+        <div class="div"></div>
+        <div class="mi danger">清空全部</div>
+      </div>
+    </div>
+    <div class="meta" style="margin-top:12px">每行 type tag（转写 / Fn / 翻译，深橙）+ 语言 + 时长；点击展开媒体 + 全文 + 复制；Fn 条目额外「学习」。清理菜单：保留最近 100 / 500 · 删除 30 / 90 天前 · 清空全部。</div>
+  </div></div>
+</div></div>
+
+  <div class="legendfoot">
+    言落 · Yanluo — 出稿 Variant A · 编辑式结果优先单一表面<br/>
+    6 帧 · 覆盖文件上传 / 链接 / 处理中 / 结果+详情 / 实时 / 翻译 / 历史。<br/>
+    字体：Instrument Serif + Noto Serif SC（标题）· Noto Sans SC（正文）· IBM Plex Mono（热键/时间戳/状态/路径）。<br/>
+    模式切换 = masthead 排版切换（墨色加粗 + 铜色基线），无等重 TAB 条；亮橙只给单个主 CTA 与录音灯，小铜字用 #A0561F。
+  </div>
+</div>
+</body>
+</html>

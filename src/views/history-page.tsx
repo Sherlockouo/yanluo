@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button, toast } from "@heroui/react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ChevronDown, Clipboard, Trash2 } from "lucide-react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import {
-  EmptyState,
   PageHeader,
   PageShell,
-  PanelHeader,
   Reveal,
   SectionCard,
 } from "@/components/shared/page-shell";
@@ -33,7 +32,15 @@ function historySourceLabel(entry: HistoryEntry): string {
 }
 
 /** Full history mode panel. Used standalone or embedded in 出稿. */
-export function HistoryPage({ embedded = false }: { embedded?: boolean } = {}) {
+export function HistoryPage({
+  embedded = false,
+  active = true,
+  actionSlot,
+}: {
+  embedded?: boolean;
+  active?: boolean;
+  actionSlot?: HTMLElement | null;
+} = {}) {
   const {
     history,
     clearHistory,
@@ -140,23 +147,32 @@ export function HistoryPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   const content = (
     <>
-      {embedded ? (
-        <PanelHeader status={headerStatus} action={headerAction} />
-      ) : (
+      {embedded && active && actionSlot
+        ? createPortal(
+            <>
+              {headerStatus ? (
+                <span className="dmast-meta">{headerStatus}</span>
+              ) : null}
+              {headerAction}
+            </>,
+            actionSlot,
+          )
+        : null}
+      {embedded ? null : (
         <PageHeader title="历史" status={headerStatus} action={headerAction} />
       )}
 
       {history.length === 0 ? (
-        <SectionCard>
-          <EmptyState title="还没有记录" />
-        </SectionCard>
+        <div className="dropzone" style={{ minHeight: 200 }}>
+          <span className="dropzone-t">还没有记录</span>
+        </div>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="recs">
           {history.map((entry, i) => {
             const open = expandedId === entry.id;
             return (
               <Reveal key={entry.id} index={i}>
-                <div className="flex flex-col gap-2">
+                <div className="rec">
                   <HistoryRow
                     entry={entry}
                     open={open}
@@ -235,57 +251,42 @@ function HistoryRow({
       : entry.language || "auto";
 
   return (
-    <div
-      className={cn(
-        "flex w-full items-start gap-2 rounded-2xl border px-4 py-3.5 transition",
-        open
-          ? "border-accent/35 bg-accent/[0.07]"
-          : "border-border bg-surface hover:bg-surface-secondary/40",
-      )}
-    >
-      <Button
-        variant="ghost"
-        onPress={onToggle}
-        className="h-auto min-h-0 min-w-0 flex-1 items-start justify-start gap-3 rounded-none bg-transparent px-0 py-0 text-left font-normal shadow-none hover:bg-transparent data-[hovered=true]:bg-transparent data-[pressed=true]:scale-100 data-[pressed=true]:bg-transparent"
+    <div className="group flex w-full items-start gap-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="min-w-0 flex-1 text-left"
       >
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 type-meta">
-            <span>{new Date(entry.created_at).toLocaleString()}</span>
-            <span>{entry.duration_seconds.toFixed(1)}s</span>
-            <span>{historySourceLabel(entry)}</span>
-            <span>{lang}</span>
-          </div>
-          {showTranslatePair ? (
-            <div className="mt-1.5 line-clamp-4">
-              <SemanticPair
-                before={entry.raw_text}
-                after={entry.text}
-                compact
-              />
-            </div>
-          ) : showDiff ? (
-            <div className="mt-1.5 line-clamp-3">
-              <RefineDiff before={entry.raw_text} after={entry.text} compact />
-            </div>
-          ) : (
-            <p className="mt-1.5 line-clamp-2 type-body leading-snug">
-              {entry.text || "（空）"}
-            </p>
-          )}
+        <div className="rec-l">
+          <span>{new Date(entry.created_at).toLocaleString()}</span>
+          <span>{entry.duration_seconds.toFixed(1)}s</span>
+          <span className="tag">{historySourceLabel(entry)}</span>
+          <span>{lang}</span>
         </div>
-        <ChevronDown
-          size={16}
-          className={cn(
-            "mt-1 shrink-0 text-muted transition-transform duration-200",
-            open && "rotate-180",
-          )}
-        />
-      </Button>
+        {showTranslatePair ? (
+          <div className="rec-pair line-clamp-4">
+            <SemanticPair before={entry.raw_text} after={entry.text} compact />
+          </div>
+        ) : showDiff ? (
+          <div className="rec-c line-clamp-3">
+            <RefineDiff before={entry.raw_text} after={entry.text} compact />
+          </div>
+        ) : (
+          <p className="rec-c line-clamp-2">{entry.text || "（空）"}</p>
+        )}
+      </button>
+      <ChevronDown
+        size={16}
+        className={cn(
+          "mt-1 shrink-0 text-muted transition-transform duration-200",
+          open && "rotate-180",
+        )}
+      />
       <Button
         isIconOnly
         size="sm"
         variant="ghost"
-        className="mt-0.5 shrink-0 text-muted hover:bg-danger/10 hover:text-danger data-[hovered=true]:bg-danger/10 data-[hovered=true]:text-danger"
+        className="mt-0.5 shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:bg-danger/10 hover:text-danger data-[hovered=true]:bg-danger/10 data-[hovered=true]:text-danger"
         aria-label="删除"
         onPress={onDelete}
       >
@@ -322,7 +323,7 @@ function ExpandedViewer({ entry }: { entry: HistoryEntry }) {
   const isFn = (view.source ?? "fn") === "fn";
 
   return (
-    <SectionCard className="!p-4">
+    <SectionCard className="p-4!">
       {isTranslate && showDiff ? (
         <div className="mb-4">
           <SemanticPair before={view.raw_text} after={view.text} />

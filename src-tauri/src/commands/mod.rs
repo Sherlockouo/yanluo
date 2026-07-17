@@ -639,16 +639,21 @@ pub(crate) fn confirm_floating_transcript(
         return Err("确认文本不能为空".into());
     }
 
-    let asr_text = pending.asr_text.clone();
+    let shown_text = pending.asr_text.clone();
     let mode = pending.mode.clone();
-    let edited = confirmed != asr_text.trim();
+    let edited = confirmed != shown_text.trim();
     let learn = mode == "fn" && edited;
 
     let mut result = pending.result;
-    // Keep ASR baseline in raw_text for learn harvest.
-    if result.raw_text.trim().is_empty() || mode == "fn" {
-        result.raw_text = asr_text.clone();
+    // Keep true ASR in raw_text for learn harvest — do NOT overwrite with shown/LLM text.
+    if result.raw_text.trim().is_empty() {
+        result.raw_text = shown_text.clone();
     }
+    let learn_before = if !result.raw_text.trim().is_empty() {
+        result.raw_text.clone()
+    } else {
+        shown_text.clone()
+    };
     result.text = confirmed.clone();
 
     match inject_text_via_paste_on_main(&app, &confirmed) {
@@ -685,7 +690,7 @@ pub(crate) fn confirm_floating_transcript(
         if let Some(id) = entry_id.clone() {
             let payload = LearnFromHudPayload {
                 entry_id: id,
-                before: asr_text.clone(),
+                before: learn_before,
                 after: confirmed.clone(),
             };
             let _ = app.emit("learn-from-hud", &payload);
@@ -728,7 +733,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
         .store(false, Ordering::Release);
     engine.inner().recording.store(false, Ordering::Release);
 
-    // Fn release = accept current. No refining HUD — paste committed / stream preview.
+    // Fn release = stop record; worker finalizes (vocab + optional LLM refine → HUD edit).
     let hud_text = if session == "translate" {
         peek_translate_out(&app)
     } else {

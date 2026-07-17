@@ -37,12 +37,28 @@ export type TranscriptParagraph = {
 
 const SENTENCE_END = /[。！？!?；;…]$/;
 const SOFT_BREAK = /[，,、：:]$/;
+/** Closing / trailing punct units — never stand alone as a paragraph. */
+const PUNCT_ONLY = /^[,.!?;:…，。！？、；：）】》」』'"’”)\]]+$/;
+
+function joinWordTexts(words: TranscriptWord[]): string {
+  return words
+    .map((w, i) => {
+      if (i === 0) return w.text;
+      const prev = words[i - 1];
+      return needsLatinWordSpace(prev.text, w.text) ? ` ${w.text}` : w.text;
+    })
+    .join("");
+}
+
+export function isPunctOnlyText(text: string): boolean {
+  return PUNCT_ONLY.test(text.trim());
+}
 
 /** Latin word gap: keep glued punctuation (`Hello,` `world!`) and apostrophes (`It's`). */
 export function needsLatinWordSpace(prev: string, next: string): boolean {
   if (!prev || !next) return false;
   // Never pad before a closing/trailing punct-only unit.
-  if (/^[,.!?;:…，。！？、；：）】》」』'"’”)\]]+$/.test(next)) return false;
+  if (PUNCT_ONLY.test(next)) return false;
   // Never pad after an opening punct-only unit.
   if (/^[(（【《「『"“‘[]+$/.test(prev)) return false;
   const prevLatin = /[A-Za-z0-9]/.test(prev);
@@ -53,6 +69,8 @@ export function needsLatinWordSpace(prev: string, next: string): boolean {
 /**
  * Group timed words into paragraphs for reading.
  * Breaks on silence gaps, sentence punctuation, or soft length limits.
+ * Punct-only buffers merge into the previous paragraph (softMax/silence
+ * can otherwise orphan `。` / `?` as their own timed rows).
  */
 export function groupWordsIntoParagraphs(
   words: TranscriptWord[],
@@ -73,19 +91,21 @@ export function groupWordsIntoParagraphs(
 
   const flush = () => {
     if (!buf.length) return;
-    paragraphs.push({
-      id: paragraphs.length,
-      startTime: buf[0].startTime,
-      endTime: buf[buf.length - 1].endTime,
-      words: buf,
-      text: buf
-        .map((w, i) => {
-          if (i === 0) return w.text;
-          const prev = buf[i - 1];
-          return needsLatinWordSpace(prev.text, w.text) ? ` ${w.text}` : w.text;
-        })
-        .join(""),
-    });
+    const punctOnly = buf.every((w) => isPunctOnlyText(w.text));
+    if (punctOnly && paragraphs.length > 0) {
+      const prev = paragraphs[paragraphs.length - 1];
+      prev.words = [...prev.words, ...buf];
+      prev.endTime = buf[buf.length - 1].endTime;
+      prev.text = joinWordTexts(prev.words);
+    } else {
+      paragraphs.push({
+        id: paragraphs.length,
+        startTime: buf[0].startTime,
+        endTime: buf[buf.length - 1].endTime,
+        words: buf,
+        text: joinWordTexts(buf),
+      });
+    }
     buf = [];
     charCount = 0;
   };

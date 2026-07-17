@@ -4,22 +4,23 @@
 .type-display {
   font-family: var(--font-display);
   font-size: var(--text-display);
-  font-weight: 600;
-  letter-spacing: -0.025em;
-  line-height: 1.15;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
   color: var(--foreground);
 }
 
 .type-section {
   font-family: var(--font-display);
   font-size: var(--text-section);
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.3;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
   color: var(--foreground);
 }
 
 .type-body {
+  font-family: var(--font-sans);
   font-size: var(--text-body);
   font-weight: 400;
   line-height: 1.55;
@@ -27,15 +28,19 @@
 }
 
 .type-ui {
+  font-family: var(--font-sans);
   font-size: var(--text-ui);
   font-weight: 500;
+  letter-spacing: 0.01em;
   line-height: 1.35;
   color: var(--foreground);
 }
 
 .type-meta {
+  font-family: var(--font-sans);
   font-size: var(--text-meta);
   font-weight: 400;
+  letter-spacing: 0.01em;
   line-height: 1.4;
   color: var(--muted);
 }
@@ -47,6 +52,16 @@
   text-transform: uppercase;
   line-height: 1.3;
   color: var(--muted);
+}
+
+/* Home poster headline — bigger than --text-display, responsive clamp */
+.home-headline {
+  font-family: var(--font-display);
+  font-size: clamp(2.25rem, 6vw, 3.25rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+  color: var(--foreground);
 }
 
 /* Primary CTA press — compositor only */
@@ -111,9 +126,14 @@ body {
 [data-theme="light"] body {
   background:
     radial-gradient(
-      900px 520px at 8% -12%,
-      rgba(18, 20, 26, 0.03),
-      transparent 55%
+      880px 480px at 0% -8%,
+      rgba(28, 26, 23, 0.04),
+      transparent 58%
     ),
-    linear-gradient(180deg, #f6f7f8 0%, #f3f4f6 100%);
+    radial-gradient(
+      640px 420px at 100% 0%,
+      rgba(217, 114, 46, 0.05),
+      transparent 52%
+    ),
+    linear-gradient(180deg, #f6f4f0 0%, #f1eee9 100%);
 }

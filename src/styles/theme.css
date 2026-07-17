@@ -1,12 +1,14 @@
 /* Theme tokens: @theme + light/dark semantic vars — 言落 (Yanluo) brand */
 
 @theme {
+  /* UI: Satoshi (Latin) + Noto Sans SC (CJK). Display: Instrument + Noto Serif SC. */
   --font-sans:
-    "DM Sans", "Satoshi", -apple-system, BlinkMacSystemFont, "SF Pro Text",
-    "Helvetica Neue", ui-sans-serif, system-ui, sans-serif;
+    "Satoshi", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB",
+    -apple-system, BlinkMacSystemFont, "Helvetica Neue", ui-sans-serif,
+    system-ui, sans-serif;
   --font-display:
-    "Instrument Serif", "DM Sans", -apple-system, BlinkMacSystemFont,
-    "SF Pro Display", "Helvetica Neue", ui-serif, system-ui, sans-serif;
+    "Instrument Serif", "Noto Serif SC", "Satoshi", "Noto Sans SC",
+    "PingFang SC", Georgia, "Songti SC", ui-serif, serif;
   --font-mono:
     "IBM Plex Mono", "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
     Consolas, monospace;
@@ -15,7 +17,7 @@
   --color-accent-fg: #ffffff;
 
   /* Type ladder — Jobs: clear hierarchy, not denser soup */
-  --text-display: 1.875rem;
+  --text-display: 2.125rem;
   --text-section: 1.0625rem;
   --text-body: 0.9375rem;
   --text-ui: 0.875rem;
@@ -39,70 +41,73 @@
   --border-width: 1px;
   --field-border-width: 1px;
 
-  --background: #f3f4f6;
-  --foreground: #12141a;
-  --muted: #6a6e78;
-  --border: rgba(18, 20, 26, 0.1);
-  --separator: rgba(18, 20, 26, 0.08);
-  --focus: #c4784a;
-  --link: #c4784a;
+  /* Warm near-white paper + clean white cards + warm ink (浅色 v3) */
+  --background: #f4f2ee;
+  --foreground: #1c1a17;
+  --muted: #6e6862;
+  --border: rgba(28, 26, 23, 0.1);
+  --separator: rgba(28, 26, 23, 0.08);
+  --focus: #d9722e;
+  --link: #a0561f;
 
-  --accent: #c4784a;
+  /* Bright orange = only primary action / recording light. White text on solid;
+     copper text on paper uses the deeper --accent-soft-foreground (≥4.5:1 on paper). */
+  --accent: #d9722e;
   --accent-foreground: #ffffff;
-  --accent-hover: #a8663d;
-  --accent-soft: rgba(196, 120, 74, 0.16);
-  --accent-soft-foreground: #8c5530;
-  --accent-soft-hover: rgba(196, 120, 74, 0.24);
+  --accent-hover: #be611f;
+  --accent-soft: rgba(217, 114, 46, 0.11);
+  --accent-soft-foreground: #a0561f;
+  --accent-soft-hover: rgba(217, 114, 46, 0.16);
 
-  --danger: #d1453b;
+  --danger: #c24238;
   --danger-foreground: #ffffff;
-  --danger-hover: #b3372e;
-  --danger-soft: rgba(209, 69, 59, 0.12);
-  --danger-soft-foreground: #d1453b;
-  --danger-soft-hover: rgba(209, 69, 59, 0.18);
+  --danger-hover: #a8362d;
+  --danger-soft: rgba(194, 66, 56, 0.1);
+  --danger-soft-foreground: #c24238;
+  --danger-soft-hover: rgba(194, 66, 56, 0.16);
 
-  --success: #3f8f5c;
+  --success: #2f7a4c;
   --success-foreground: #ffffff;
-  --success-hover: #2f6f46;
-  --success-soft: rgba(63, 143, 92, 0.14);
-  --success-soft-foreground: #2f6f46;
-  --success-soft-hover: rgba(63, 143, 92, 0.2);
+  --success-hover: #26633e;
+  --success-soft: rgba(47, 122, 76, 0.12);
+  --success-soft-foreground: #26633e;
+  --success-soft-hover: rgba(47, 122, 76, 0.18);
 
-  --warning: #b8791a;
+  --warning: #a66c12;
   --warning-foreground: #ffffff;
-  --warning-hover: #96610f;
-  --warning-soft: rgba(184, 121, 26, 0.16);
-  --warning-soft-foreground: #96610f;
-  --warning-soft-hover: rgba(184, 121, 26, 0.22);
+  --warning-hover: #8a590e;
+  --warning-soft: rgba(166, 108, 18, 0.12);
+  --warning-soft-foreground: #8a590e;
+  --warning-soft-hover: rgba(166, 108, 18, 0.18);
 
   --surface: #ffffff;
-  --surface-foreground: #12141a;
-  --surface-secondary: #e9eaed;
-  --surface-secondary-foreground: #12141a;
-  --surface-hover: #e9eaed;
+  --surface-foreground: #1c1a17;
+  --surface-secondary: #f8f6f2;
+  --surface-secondary-foreground: #1c1a17;
+  --surface-hover: #f1eee9;
 
   --overlay: #ffffff;
-  --overlay-foreground: #12141a;
+  --overlay-foreground: #1c1a17;
 
-  --default: #e4e5e8;
-  --default-foreground: #12141a;
-  --default-hover: #d6d8dc;
-  --default-soft: rgba(18, 20, 26, 0.05);
-  --default-soft-foreground: #12141a;
-  --default-soft-hover: rgba(18, 20, 26, 0.08);
+  --default: #eae6e0;
+  --default-foreground: #1c1a17;
+  --default-hover: #e1dcd4;
+  --default-soft: rgba(28, 26, 23, 0.045);
+  --default-soft-foreground: #1c1a17;
+  --default-soft-hover: rgba(28, 26, 23, 0.07);
 
   --field-background: #ffffff;
-  --field-foreground: #12141a;
-  --field-placeholder: #8a8d94;
-  --field-border: rgba(18, 20, 26, 0.14);
-  --field-hover: #f2f3f5;
+  --field-foreground: #1c1a17;
+  --field-placeholder: #8a847c;
+  --field-border: rgba(28, 26, 23, 0.16);
+  --field-hover: #f5f2ed;
   --field-focus: #ffffff;
-  --field-border-hover: rgba(18, 20, 26, 0.2);
-  --field-border-focus: rgba(196, 120, 74, 0.55);
+  --field-border-hover: rgba(28, 26, 23, 0.22);
+  --field-border-focus: rgba(217, 114, 46, 0.55);
 
   --segment: #ffffff;
-  --segment-foreground: #12141a;
-  --scrollbar: rgba(18, 20, 26, 0.28);
+  --segment-foreground: #1c1a17;
+  --scrollbar: rgba(28, 26, 23, 0.3);
 }
 .dark,
 [data-theme="dark"] {

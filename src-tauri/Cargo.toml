@@ -6,7 +6,7 @@ authors = ["Sherlockouo"]
 edition = "2021"
 
 [lib]
-name = "asr_workshop_lib"
+name = "yanluo_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

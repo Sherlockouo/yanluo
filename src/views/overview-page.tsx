@@ -1,17 +1,30 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Kbd, toast } from "@heroui/react";
 import { NavLink } from "react-router-dom";
-import { AudioLines, Bot, Download } from "lucide-react";
+import { Download } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { hotkeySegments, providerLabel, stateLabel } from "@/lib/constants";
 import {
   ModeSwitch,
-  PageHeader,
   PageShell,
   SectionCard,
 } from "@/components/shared/page-shell";
+import { hotkeySegments } from "@/lib/constants";
 import { useApp } from "@/app-context";
+
+/** Split a hotkey combo (e.g. "Fn+Space") and wrap each part in a HeroUI Kbd. */
+function HotkeyKbd({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1">
+      {hotkeySegments(label).map((part, i) => (
+        <span key={`${part}-${i}`} className="inline-flex items-center gap-1">
+          {i > 0 ? <span className="text-muted">+</span> : null}
+          <Kbd>{part}</Kbd>
+        </span>
+      ))}
+    </span>
+  );
+}
 
 type ModelStatus = {
   model_id: string;
@@ -31,22 +44,8 @@ type ModelDownloadProgress = {
   percent: number | null;
 };
 
-function HotkeyKbd({ label }: { label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1">
-      {hotkeySegments(label).map((part, i) => (
-        <span key={`${part}-${i}`} className="inline-flex items-center gap-1">
-          {i > 0 ? <span className="text-border">+</span> : null}
-          <Kbd>{part}</Kbd>
-        </span>
-      ))}
-    </span>
-  );
-}
-
 export function OverviewPage() {
-  const { config, state, modelLoaded, updateConfig, loadModel, agentJobs } =
-    useApp();
+  const { config, modelLoaded, updateConfig, loadModel, agentJobs } = useApp();
   const [status, setStatus] = useState<ModelStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
@@ -115,110 +114,101 @@ export function OverviewPage() {
     (j) => j.status === "queued" || j.status === "running",
   ).length;
 
-  const statusBits = [
-    config.asr_provider === "qwen" && modelLoaded
-      ? "本机就绪"
-      : providerLabel(config.asr_provider),
-    stateLabel(state),
-    config.language === "auto" ? "自动检测" : config.language,
-    activeAgents > 0 ? `派活中 ${activeAgents}` : null,
-  ].filter(Boolean);
+  const dispatchHint =
+    activeAgents > 0
+      ? `${activeAgents} 运行中`
+      : agentJobs.length > 0
+        ? `${agentJobs.length} 任务`
+        : "说完派给 Claude / Codex";
+
+  const draftKey = config.hotkey_transcribe.label;
+  const translateKey = config.hotkey_translate.label;
+  const agentKey = config.hotkey_agent?.label ?? "Fn+Space";
 
   return (
-    <PageShell className="max-w-xl">
-      <PageHeader
-        title="言落"
-        status={
-          needsInstall ? undefined : (
-            <>
-              <HotkeyKbd label={config.hotkey_transcribe.label} />
-              {" · "}
-              <HotkeyKbd label={config.hotkey_translate.label} />
-              {" · "}
-              <HotkeyKbd
-                label={config.hotkey_agent?.label ?? "Fn+Space"}
-              />
-              {" · "}
-              <span>{statusBits.join(" · ")}</span>
-            </>
-          )
-        }
-      />
-
+    <PageShell className="max-w-2xl">
       <ModeSwitch modeKey={needsInstall ? "install" : "ready"}>
         {needsInstall ? (
-          <SectionCard className="flex flex-col gap-4 border-accent/30">
-            <div>
-              <div className="type-section">下载本机识别（约 2GB）</div>
-              <p className="mt-1 type-meta">
-                声音留在本机 · 型号 {config.asr_model_id || "Qwen3-ASR-0.6B"}
+          <div className="flex flex-col gap-7">
+            <div className="flex flex-col gap-3">
+              <div className="home-eyebrow">本机 · MAC</div>
+              <h1 className="home-headline">先装本机识别</h1>
+              <p className="max-w-[42ch] type-body text-muted">
+                你的声音留在本机。装好即可开口出稿。
               </p>
             </div>
-            {downloading && progress ? (
-              <div className="type-meta">
-                {progress.file} ·{" "}
-                {progress.percent != null
-                  ? `${progress.percent.toFixed(0)}%`
-                  : `${progress.file_index}/${progress.file_count}`}
+
+            <SectionCard className="flex flex-col gap-4 border-accent/30">
+              <div>
+                <div className="type-section">
+                  下载本机识别（约 2GB）
+                </div>
+                <p className="mt-1 type-meta">
+                  型号 {config.asr_model_id || "Qwen3-ASR-0.6B"}
+                </p>
               </div>
-            ) : null}
-            <Button
-              fullWidth
-              variant="primary"
-              className="btn-press"
-              isPending={downloading}
-              onPress={() => void startDownload()}
-            >
-              <Download size={14} />
-              {downloading ? "下载中…" : "下载本机识别"}
-            </Button>
-          </SectionCard>
+              {downloading && progress ? (
+                <div className="type-meta">
+                  {progress.file} ·{" "}
+                  {progress.percent != null
+                    ? `${progress.percent.toFixed(0)}%`
+                    : `${progress.file_index}/${progress.file_count}`}
+                </div>
+              ) : null}
+              <Button
+                fullWidth
+                variant="primary"
+                className="btn-press"
+                isPending={downloading}
+                onPress={() => void startDownload()}
+              >
+                <Download size={14} />
+                {downloading ? "下载中…" : "下载本机识别"}
+              </Button>
+            </SectionCard>
+          </div>
         ) : (
-          <div className="flex flex-col gap-5">
-            <div>
-              <p className="type-display !text-2xl">今天开口要什么结果？</p>
-              <p className="mt-1.5 type-meta">
+          <div className="flex flex-col gap-8">
+            <div className="flex flex-col gap-3">
+              <div className="home-eyebrow">本机 · MAC</div>
+              <h1 className="home-headline">
+                今天开口
+                <br />
+                要什么结果？
+              </h1>
+              <p className="max-w-[42ch] type-body text-muted">
                 你的声音留在本机。开口出稿，开口派活。
               </p>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <NavLink
-                to="/draft"
-                className="group flex items-center gap-3 rounded-2xl border border-border bg-surface px-4 py-5 transition duration-200 hover:border-accent/30 hover:bg-surface-secondary/40"
-              >
-                <div className="grid h-11 w-11 place-items-center rounded-xl bg-accent/10 text-accent transition group-hover:scale-[1.03]">
-                  <AudioLines size={18} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="type-section">出稿</div>
-                  <div className="mt-0.5 type-meta">
-                    实时 · 文件/链接 · 翻译 · 历史
-                  </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <NavLink to="/draft" className="dest-card dest-card-primary">
+                <div className="dest-label dest-label-primary">出稿</div>
+                <div className="dest-foot">
+                  <div className="type-meta">开会 · 口述 · 文件转写</div>
+                  <HotkeyKbd label={draftKey} />
                 </div>
               </NavLink>
-              <NavLink
-                to="/dispatch"
-                className="group flex items-center gap-3 rounded-2xl border border-border/70 bg-surface/70 px-4 py-4 transition duration-200 hover:border-accent/30 hover:bg-surface-secondary/40"
-              >
-                <div className="grid h-11 w-11 place-items-center rounded-xl bg-default/50 text-muted transition group-hover:scale-[1.03] group-hover:text-accent">
-                  <Bot size={18} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="type-section">派活</div>
-                  <div className="mt-0.5 type-meta">
-                    {activeAgents > 0
-                      ? `${activeAgents} 运行中`
-                      : agentJobs.length > 0
-                        ? `${agentJobs.length} 任务`
-                        : (
-                            <HotkeyKbd
-                              label={config.hotkey_agent?.label ?? "Fn+Space"}
-                            />
-                          )}
-                  </div>
+
+              <NavLink to="/dispatch" className="dest-card">
+                <div className="dest-label">派活</div>
+                <div className="dest-foot">
+                  <div className="type-meta">{dispatchHint}</div>
+                  <HotkeyKbd label={agentKey} />
                 </div>
               </NavLink>
+            </div>
+
+            <div className="home-legend">
+              <span>
+                <b>{draftKey}</b> 出稿
+              </span>
+              <span>
+                <b>{translateKey}</b> 翻译
+              </span>
+              <span>
+                <b>{agentKey}</b> 派活
+              </span>
             </div>
           </div>
         )}

@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -25,7 +26,6 @@ import {
   ModeSwitch,
   PageHeader,
   PageShell,
-  PanelHeader,
   SectionCard,
 } from "@/components/shared/page-shell";
 import { useApp } from "@/app-context";
@@ -153,7 +153,15 @@ function deferWork(fn: () => void, timeoutMs: number): () => void {
 }
 
 /** File/URL transcribe mode panel — upload/processing/result mutual-exclusive. Used standalone or embedded in 出稿. */
-export function TranscribePage({ embedded = false }: { embedded?: boolean } = {}) {
+export function TranscribePage({
+  embedded = false,
+  active = true,
+  actionSlot,
+}: {
+  embedded?: boolean;
+  active?: boolean;
+  actionSlot?: HTMLElement | null;
+} = {}) {
   const {
     config,
     history,
@@ -435,6 +443,27 @@ export function TranscribePage({ embedded = false }: { embedded?: boolean } = {}
     go("upload", { processingName: null, jobBaselineId: null, clearSelection: true });
   };
 
+  // Contextual action portaled into the 出稿 masthead top-right (file mode only).
+  const mastAction =
+    embedded && active && actionSlot
+      ? createPortal(
+          screen === "result" ? (
+            <button type="button" className="dlink" onClick={enterUpload}>
+              ＋ 新转写
+            </button>
+          ) : screen === "upload" && sessionEntries.length > 0 ? (
+            <button
+              type="button"
+              className="dlink muted"
+              onClick={() => go("result")}
+            >
+              ← 转写记录 · {sessionEntries.length}
+            </button>
+          ) : null,
+          actionSlot,
+        )
+      : null;
+
   const selectEntry = (id: string) => {
     go("result", { id, processingName: null });
   };
@@ -479,7 +508,8 @@ export function TranscribePage({ embedded = false }: { embedded?: boolean } = {}
   };
 
   useEffect(() => {
-    if (screen !== "upload") return;
+    // Kept mounted but hidden (parent tab away) → don't grab OS file drops.
+    if (!active || screen !== "upload") return;
     let unlisten: (() => void) | undefined;
     let disposed = false;
     const cancelDefer = deferWork(() => {
@@ -517,9 +547,9 @@ export function TranscribePage({ embedded = false }: { embedded?: boolean } = {}
       cancelDefer();
       unlisten?.();
     };
-    // acceptPath closes over go; only wire while upload is visible.
+    // acceptPath closes over go; only wire while upload is visible + active.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen]);
+  }, [screen, active]);
 
   const cancelProcessing = async () => {
     try {
@@ -628,11 +658,12 @@ export function TranscribePage({ embedded = false }: { embedded?: boolean } = {}
 
   const content = (
     <>
-      {embedded ? (
-        <PanelHeader status={headerStatus} action={headerAction} />
-      ) : (
+      {mastAction}
+      {embedded ? null : (
         <PageHeader title="转写" status={headerStatus} action={headerAction} />
       )}
+
+      {/* Embedded (出稿 文件): 新转写 / 转写记录 toggle lives in the masthead. */}
 
       {/* No nested AnimatePresence — PageShell already owns enter. Double motion = tab hitch. */}
       {screen === "upload" ? (
@@ -717,92 +748,70 @@ function UploadPhase({
   const canUrlStart = urlLooksValid && !modelBlocked && !processing;
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
-      <div className="flex gap-1 rounded-xl border border-border p-1 self-start">
-        <Button
-          size="sm"
-          variant="ghost"
-          className={cn(
-            "h-auto min-h-0 rounded-lg px-3.5 py-1.5 text-[13px] font-medium shadow-none data-[pressed=true]:scale-100",
-            source === "file"
-              ? "bg-default text-foreground data-[hovered=true]:bg-default"
-              : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
-          )}
-          onPress={() => setSource("file")}
+    <div className="flex w-full flex-col gap-5">
+      <div className="tswitch" role="tablist" aria-label="来源">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={source === "file"}
+          className={cn("o", source === "file" && "is-active")}
+          onClick={() => setSource("file")}
         >
-          文件
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className={cn(
-            "h-auto min-h-0 rounded-lg px-3.5 py-1.5 text-[13px] font-medium shadow-none data-[pressed=true]:scale-100",
-            source === "link"
-              ? "bg-default text-foreground data-[hovered=true]:bg-default"
-              : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
-          )}
-          onPress={() => setSource("link")}
+          本地文件
+        </button>
+        <span className="sep">/</span>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={source === "link"}
+          className={cn("o", source === "link" && "is-active")}
+          onClick={() => setSource("link")}
         >
-          链接
-        </Button>
+          网络链接
+        </button>
       </div>
 
       <ModeSwitch modeKey={source}>
         {source === "file" ? (
-          <SectionCard className="flex flex-col gap-4">
+          <div className="flex flex-col gap-5">
             {modelBlocked ? (
               <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 type-meta text-warning">
                 模型未就绪
               </div>
             ) : null}
 
-            <Button
-              variant="ghost"
+            <button
+              type="button"
               aria-label={selectedPath ? "更换文件" : "选择文件"}
-              onPress={onPick}
-              className={cn(
-                "flex h-auto min-h-[180px] w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed px-4 py-8 text-center font-normal shadow-none data-[pressed=true]:scale-100",
-                dragOver
-                  ? "border-accent/50 bg-accent/10 data-[hovered=true]:bg-accent/10"
-                  : "border-border bg-surface-secondary/40 hover:border-foreground/25 hover:bg-surface-secondary/60 data-[hovered=true]:border-foreground/25 data-[hovered=true]:bg-surface-secondary/60",
-              )}
+              onClick={onPick}
+              className={cn("dropzone", dragOver && "is-drag")}
             >
               {selectedPath ? (
                 <>
-                  {selectedIsVideo ? (
-                    <FileVideo
-                      className="block text-foreground"
-                      size={28}
-                      aria-hidden
-                    />
-                  ) : (
-                    <FileAudio
-                      className="block text-foreground"
-                      size={28}
-                      aria-hidden
-                    />
-                  )}
-                  <span className="max-w-full truncate text-sm font-medium text-foreground">
+                  <span className="dropzone-ic">
+                    {selectedIsVideo ? (
+                      <FileVideo size={26} aria-hidden />
+                    ) : (
+                      <FileAudio size={26} aria-hidden />
+                    )}
+                  </span>
+                  <span className="dropzone-t max-w-full truncate">
                     {fileName(selectedPath)}
                   </span>
-                  <span className="text-[12px] text-muted">点击更换</span>
+                  <span className="dropzone-fmt">点击更换</span>
                 </>
               ) : (
                 <>
-                  <Upload
-                    className="block text-muted opacity-70"
-                    size={28}
-                    aria-hidden
-                  />
-                  <span className="text-sm font-medium text-foreground">
+                  <span className="dropzone-ic">
+                    <Upload size={26} aria-hidden />
+                  </span>
+                  <span className="dropzone-t">
                     {dragOver ? "松开以添加" : "拖拽或点击选择"}
                   </span>
-                  <span className="max-w-md text-[12px] text-muted">
-                    {TRANSCRIBE_FORMAT_HINT}
-                  </span>
+                  <span className="dropzone-fmt">{TRANSCRIBE_FORMAT_HINT}</span>
                 </>
               )}
-            </Button>
+            </button>
 
             <Button
               fullWidth
@@ -817,38 +826,31 @@ function UploadPhase({
               )}
               开始转写
             </Button>
-          </SectionCard>
+          </div>
         ) : (
-          <SectionCard className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-[12px] text-muted">{provider}</p>
-              <div className="flex shrink-0 gap-1 rounded-xl border border-border p-1">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className={cn(
-                    "h-auto min-h-0 rounded-lg px-3 py-1.5 text-[12px] font-medium shadow-none data-[pressed=true]:scale-100",
-                    urlMode === "audio"
-                      ? "bg-default text-foreground data-[hovered=true]:bg-default"
-                      : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
-                  )}
-                  onPress={() => onUrlModeChange("audio")}
+              <p className="type-meta font-mono">{provider}</p>
+              <div className="tswitch" role="tablist" aria-label="媒体类型">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={urlMode === "audio"}
+                  className={cn("o", urlMode === "audio" && "is-active")}
+                  onClick={() => onUrlModeChange("audio")}
                 >
                   音频
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className={cn(
-                    "h-auto min-h-0 rounded-lg px-3 py-1.5 text-[12px] font-medium shadow-none data-[pressed=true]:scale-100",
-                    urlMode === "video"
-                      ? "bg-default text-foreground data-[hovered=true]:bg-default"
-                      : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
-                  )}
-                  onPress={() => onUrlModeChange("video")}
+                </button>
+                <span className="sep">/</span>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={urlMode === "video"}
+                  className={cn("o", urlMode === "video" && "is-active")}
+                  onClick={() => onUrlModeChange("video")}
                 >
                   视频
-                </Button>
+                </button>
               </div>
             </div>
 
@@ -879,7 +881,7 @@ function UploadPhase({
               <Download size={16} aria-hidden />
               开始转写
             </Button>
-          </SectionCard>
+          </div>
         )}
       </ModeSwitch>
     </div>
@@ -1003,29 +1005,32 @@ function ResultPhase({
 
   return (
     <>
-      <SectionCard title="转写记录" className="mx-auto w-full max-w-2xl">
-        <div className="flex max-h-[calc(100vh-12rem)] flex-col gap-2 overflow-y-auto">
-          {sessionEntries.length === 0 ? (
-            <div className="grid min-h-[200px] place-items-center gap-3 text-center">
-              <p className="text-sm text-muted">还没有转写结果</p>
-              <Button variant="primary" onPress={onNew}>
-                <Plus size={16} aria-hidden />
-                开始转写
-              </Button>
+      <div className="w-full">
+        {sessionEntries.length === 0 ? (
+          <div className="dropzone" style={{ minHeight: 220 }}>
+            <span className="dropzone-t">还没有转写结果</span>
+            <Button variant="primary" onPress={onNew}>
+              <Plus size={16} aria-hidden />
+              开始转写
+            </Button>
+          </div>
+        ) : (
+          <>
+            <div className="rlist">
+              {rows.map((entry, i) => (
+                <HistoryRow
+                  key={entry.id}
+                  entry={entry}
+                  index={i + 1}
+                  active={activeEntry?.id === entry.id}
+                  onSelect={() => selectAndOpen(entry.id)}
+                  onDelete={() => onDelete(entry.id)}
+                />
+              ))}
             </div>
-          ) : (
-            rows.map((entry) => (
-              <HistoryRow
-                key={entry.id}
-                entry={entry}
-                active={activeEntry?.id === entry.id}
-                onSelect={() => selectAndOpen(entry.id)}
-                onDelete={() => onDelete(entry.id)}
-              />
-            ))
-          )}
-        </div>
-      </SectionCard>
+          </>
+        )}
+      </div>
 
       {viewerEntry && detailOpen && Viewer ? (
         <Modal.Backdrop
@@ -1120,11 +1125,13 @@ const PREVIEW_CHARS = 140;
 
 const HistoryRow = memo(function HistoryRow({
   entry,
+  index,
   active,
   onSelect,
   onDelete,
 }: {
   entry: HistoryEntry;
+  index: number;
   active: boolean;
   onSelect: () => void;
   onDelete: () => void;
@@ -1135,42 +1142,32 @@ const HistoryRow = memo(function HistoryRow({
     raw.length > PREVIEW_CHARS ? `${raw.slice(0, PREVIEW_CHARS)}…` : raw;
 
   return (
-    <div
-      className={`flex w-full gap-2 rounded-xl items-center border px-3 py-2.5 transition ${active
-          ? "border-accent/40 bg-accent/10"
-          : "border-border bg-surface-secondary/30 hover:bg-surface-secondary/60"
-        }`}
-    >
-      <Button
-        variant="ghost"
-        onPress={onSelect}
-        className="h-auto min-h-0 min-w-0 flex-1 items-start justify-start rounded-none bg-transparent px-0 py-0 text-left font-normal shadow-none hover:bg-transparent data-[hovered=true]:bg-transparent data-[pressed=true]:scale-100 data-[pressed=true]:bg-transparent"
+    <div className={cn("ritem group", active && "is-open")}>
+      <span className="ritem-n">{String(index).padStart(2, "0")}</span>
+      <button
+        type="button"
+        onClick={onSelect}
+        className="ritem-body text-left"
       >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-2 text-[11px] text-muted">
-            <span className="inline-flex items-center gap-2">
-              <span>{new Date(entry.created_at).toLocaleString()}</span>
-              <span className="inline-flex items-center gap-1 text-foreground/80">
-                {isVideo ? (
-                  <FileVideo size={11} aria-hidden />
-                ) : (
-                  <FileAudio size={11} aria-hidden />
-                )}
-                {isVideo ? "视频" : "音频"}
-              </span>
-            </span>
-            <span>{entry.duration_seconds.toFixed(1)}s</span>
-          </div>
-          <p className="mt-1 line-clamp-2 text-sm leading-snug text-foreground">
-            {preview}
-          </p>
+        <div className="rmeta">
+          <span>{new Date(entry.created_at).toLocaleString()}</span>
+          <span className="tag inline-flex items-center gap-1">
+            {isVideo ? (
+              <FileVideo size={11} aria-hidden />
+            ) : (
+              <FileAudio size={11} aria-hidden />
+            )}
+            {isVideo ? "视频" : "音频"}
+          </span>
+          <span>{entry.duration_seconds.toFixed(1)}s</span>
         </div>
-      </Button>
+        <p className="rtext">{preview}</p>
+      </button>
       <Button
         isIconOnly
         size="sm"
         variant="ghost"
-        className="mt-0.5 shrink-0 text-muted hover:bg-danger/10 hover:text-danger data-[hovered=true]:bg-danger/10 data-[hovered=true]:text-danger"
+        className="mt-0.5 shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:bg-danger/10 hover:text-danger data-[hovered=true]:bg-danger/10 data-[hovered=true]:text-danger"
         aria-label="删除"
         onPress={onDelete}
       >

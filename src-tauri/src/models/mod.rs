@@ -35,8 +35,7 @@ pub(crate) struct DownloadProgress {
 }
 
 fn models_root() -> Result<PathBuf, String> {
-    let base = dirs::data_dir().ok_or_else(|| "无法定位 Application Support".to_string())?;
-    let root = base.join("ASR Workshop").join("models");
+    let root = crate::config::app_data_dir().join("models");
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
     Ok(root)
 }
@@ -179,7 +178,7 @@ fn download_file(
 
     let mut response = client
         .get(url)
-        .header("User-Agent", "ASR-Workshop")
+        .header("User-Agent", "Yanluo")
         .send()
         .map_err(|e| format!("下载失败 {file_label}: {e}"))?;
 

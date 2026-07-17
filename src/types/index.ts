@@ -7,12 +7,15 @@ export type RecState =
 
 export type AsrProvider = "qwen" | "apple" | "elevenlabs";
 
-export type LlmProvider =
+/** Built-in provider presets. User-added custom providers use arbitrary string ids. */
+export type LlmBuiltinProvider =
   | "openai"
   | "deepseek"
   | "dashscope"
-  | "ollama"
-  | "custom";
+  | "ollama";
+
+/** A provider id: a built-in preset id or a user-added custom id (e.g. `custom-xxx`). */
+export type LlmProvider = LlmBuiltinProvider | (string & {});
 
 /** Recording source for Fn / live capture. */
 export type AudioCaptureMode = "external" | "system" | "both";
@@ -97,6 +100,8 @@ export type LlmCredential = {
   api_base_url: string;
   api_key: string;
   model: string;
+  /** Display name for user-added custom providers. Empty/absent for built-ins. */
+  label?: string;
 };
 
 export type AppConfig = {
@@ -159,8 +164,8 @@ export type AppConfig = {
   llm_api_base_url: string;
   llm_api_key: string;
   llm_model: string;
-  /** Per-provider credentials; the active provider mirrors into the flat llm_* fields. */
-  llm_credentials: Partial<Record<LlmProvider, LlmCredential>>;
+  /** Per-provider credentials (provider id → creds); active provider mirrors into flat llm_* fields. */
+  llm_credentials: Record<string, LlmCredential>;
   /** Empty = built-in default; `{glossary}` appended by backend for vocab. */
   llm_refine_prompt: string;
   /** Empty = built-in default; `{target}` replaced with language name. */

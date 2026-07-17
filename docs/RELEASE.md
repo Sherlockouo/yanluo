@@ -1,4 +1,4 @@
-# Release checklist (ASR Workshop)
+# Release checklist (言落 / Yanluo)
 
 ## Version source of truth
 
@@ -70,6 +70,6 @@ Privacy lists only show apps that **requested** the permission.
 1. Open **设置 → 权限**
 2. Click **去授权** (one click — do not also spam「系统设置」)
 3. Mic / Speech show an Allow dialog; Accessibility / Input Monitoring / Screen use the system prompt or Settings pane themselves
-4. During `tauri dev`, look for binary `asr-workshop` (path shown on the page), not “ASR Workshop”
+4. During `tauri dev`, look for binary `yanluo` (path shown on the page), not the product display name alone
 5. After packaging a `.app`, the product name appears
 6. Signed releases keep Mic / Speech / Screen across reinstalls; Accessibility / Input Monitoring often need a re-toggle after path change (macOS TCC)

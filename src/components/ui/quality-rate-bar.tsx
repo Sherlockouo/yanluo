@@ -50,6 +50,7 @@ export function QualityRateBar({
             <Button
               key={opt.value}
               variant="ghost"
+              size="sm"
               className="rate-segment-btn h-auto min-h-0 shadow-none data-[pressed=true]:scale-100"
               data-active={active ? "true" : "false"}
               data-tone={opt.tone}

@@ -5,8 +5,9 @@ import { ChevronDown } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   activateLlmProviderPatch,
-  LLM_PROVIDER_PRESETS,
+  listLlmProviders,
   llmPreset,
+  llmProviderLabel,
   resolveLlmCreds,
 } from "@/lib/constants";
 import { useApp } from "@/app-context";
@@ -33,6 +34,8 @@ export function LlmProviderSelect({ className }: { className?: string }) {
   const reduce = useReducedMotion();
   const provider = config.llm_provider;
   const preset = useMemo(() => llmPreset(provider), [provider]);
+  const providers = useMemo(() => listLlmProviders(config), [config]);
+  const providerLabel = llmProviderLabel(config, provider);
   const modelInList = preset.models.includes(config.llm_model);
   const [customOpen, setCustomOpen] = useState(false);
   const showCustomField =
@@ -84,12 +87,12 @@ export function LlmProviderSelect({ className }: { className?: string }) {
         }}
       >
         <Select.Trigger className={triggerCls}>
-          <Select.Value>{() => preset.label}</Select.Value>
+          <Select.Value>{() => providerLabel}</Select.Value>
           <ChevronDown size={12} className="shrink-0 text-muted" />
         </Select.Trigger>
         <Select.Popover className="min-w-[9rem]">
           <ListBox>
-            {LLM_PROVIDER_PRESETS.map((p) => (
+            {providers.map((p) => (
               <ListBox.Item key={p.id} id={p.id} textValue={p.label}>
                 {p.label}
                 <ListBox.ItemIndicator />

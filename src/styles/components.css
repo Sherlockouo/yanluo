@@ -1,5 +1,91 @@
 /* Shared UI: rate, forms, settings, page-enter */
 
+/* —— Home poster —— */
+.home-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-soft-foreground);
+}
+
+/* Two destination cards — label top / hint + hotkey bottom (see brand-preview .dest) */
+.dest-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.25rem;
+  min-height: 140px;
+  padding: 1.375rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+  background: var(--surface);
+  transition:
+    transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 160ms ease;
+}
+
+.dest-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in oklab, var(--foreground) 20%, transparent);
+}
+
+/* Primary destination = 出稿. Thin copper border + thin wash (ink wash on light,
+   copper wash on dark via --accent-soft) — never a peach pastel block. */
+.dest-card-primary {
+  background: var(--accent-soft);
+  border-color: color-mix(in oklab, var(--accent) 32%, transparent);
+}
+
+.dest-card-primary:hover {
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+}
+
+.dest-label {
+  font-family: var(--font-sans);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--foreground);
+}
+
+.dest-label-primary {
+  color: var(--accent-soft-foreground);
+}
+
+.dest-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* Hotkey legend under the cards */
+.home-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.home-legend b {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dest-card,
+  .dest-card:hover {
+    transform: none;
+    transition: border-color 160ms ease;
+  }
+}
+
 /* Segmented rate control */
 .rate-segment {
   display: inline-flex;
@@ -199,28 +285,124 @@ button.form-actions-primary,
   padding-top: 0;
 }
 
+/* —— 设置 · 双栏源列 (macOS System-Settings style) —— */
+.set {
+  display: grid;
+  grid-template-columns: 250px minmax(0, 1fr);
+  gap: 1.75rem;
+  align-items: start;
+}
+
+.setnav {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 0.25rem;
+}
+
+.setnav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease;
+}
+
+.setnav-icon {
+  flex: 0 0 auto;
+  opacity: 0.8;
+}
+
+.setnav-item:hover {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
+}
+
+.setnav-item-active,
+.setnav-item-active:hover {
+  color: var(--foreground);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.setnav-item-active .setnav-icon {
+  color: var(--accent-soft-foreground);
+  opacity: 1;
+}
+
+.setbody {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+/* Serif section heading atop the right detail pane */
+.set-sechead {
+  font-family: var(--font-display);
+  font-size: 1.625rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--foreground);
+}
+
+@media (max-width: 640px) {
+  .set {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .setnav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+}
+
 .settings-tabs {
   position: relative;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem;
-  padding: 0.25rem;
+  gap: 0.15rem;
+  padding: 0.2rem;
   border: 1px solid var(--border);
-  border-radius: 1.25rem;
+  border-radius: 0.7rem;
   background: color-mix(in oklab, var(--surface) 80%, transparent);
 }
 
+.light .settings-tabs,
+[data-theme="light"] .settings-tabs {
+  background: var(--surface);
+}
+
+/*
+  Top-level settings tabs — quieter than the boxed segmented control.
+  Scoped so 出稿 (draft) mode tabs keep the framed look.
+*/
 .settings-tab {
   position: relative;
   z-index: 1;
   flex: 0 0 auto;
   border: 0;
-  border-radius: 999px;
-  padding: 0.55rem 0.75rem;
+  border-radius: 0.55rem;
+  padding: 0.5rem 0.7rem;
   background: transparent;
   color: var(--muted);
+  font-family: var(--font-sans);
   font-size: var(--text-ui);
-  font-weight: 550;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   cursor: pointer;
   transition: color 160ms ease;
 }
@@ -239,11 +421,18 @@ button.form-actions-primary,
   z-index: 0;
   border-radius: inherit;
   background: var(--default);
-  box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 6%, transparent) inset;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 8%, transparent);
   pointer-events: none;
   transform: translateZ(0);
 }
 
+.light .settings-tab-indicator,
+[data-theme="light"] .settings-tab-indicator {
+  background: var(--surface-secondary);
+  box-shadow: inset 0 0 0 1px rgba(28, 26, 23, 0.12);
+}
+
+/* No container box on top tabs → give the active pill a touch more presence. */
 /* Secondary (二级) tab row nested inside a panel — smaller & quieter than top-level. */
 .settings-tabs-sub {
   border: 0;
@@ -253,8 +442,80 @@ button.form-actions-primary,
 }
 
 .settings-tab-sub {
-  padding: 0.35rem 0.65rem;
+  padding: 0.35rem 0.35rem;
   font-size: 12px;
+}
+
+/* Sub (二级) active = quiet underline, clearly secondary to top filled pills. */
+.settings-tab-sub .settings-tab-indicator {
+  inset: auto 0.35rem;
+  top: auto;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--foreground) 42%, transparent);
+  box-shadow: none;
+}
+
+/*
+  Segmented control — compact, left-aligned. No layout animation (instant
+  switch, no measure hitch); cheap active fill only. Shared by 出稿 mode
+  switch and settings choice groups (录音源 etc.).
+*/
+.seg {
+  align-self: flex-start;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--surface);
+}
+
+.seg-tab {
+  position: relative;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.85rem;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-sans);
+  font-size: var(--text-ui);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.seg-tab:hover {
+  color: var(--foreground);
+}
+
+.seg-tab.is-active {
+  color: var(--foreground);
+  background: var(--surface-secondary);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.seg-tab:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/*
+  Unified disabled primary CTA — HeroUI dims the accent fill to opacity .5,
+  which reads as a faded "peach pastel block" the design contract warns against.
+  Force a neutral, unmistakably-disabled surface instead.
+*/
+.button--primary:disabled,
+.button--primary[data-disabled="true"] {
+  background: var(--default) !important;
+  color: var(--muted) !important;
+  opacity: 1 !important;
 }
 
 .release-entry + .release-entry {
