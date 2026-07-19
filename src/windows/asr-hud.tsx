@@ -560,6 +560,13 @@ export function AsrHud() {
       }),
     );
     add(
+      listen("hud-accept-preview-request", () => {
+        void invoke("accept_floating_preview").catch((e) => {
+          console.error("[hud] accept preview failed", e);
+        });
+      }),
+    );
+    add(
       listen("hud-cancel-request", () => {
         void cancelTranscript();
       }),

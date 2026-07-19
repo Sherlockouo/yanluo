@@ -4,11 +4,12 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@heroui/react";
 import { ChevronUp } from "lucide-react";
-import type { FloatingPayload } from "@/types";
+import type { AppConfig, FloatingPayload } from "@/types";
 import {
-  TRANSLATE_LANGUAGES,
+  translateLanguageOptions,
   hudTargetShort,
   translateTargetLabel,
+  defaultConfig,
 } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 
@@ -32,6 +33,7 @@ export function AsrHudLangChip() {
     rms: 0,
   });
   const [menuOpen, setMenuOpen] = useState(false);
+  const [extras, setExtras] = useState(defaultConfig.extra_languages);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-floating", "1");
@@ -53,10 +55,17 @@ export function AsrHudLangChip() {
     let unlistenStatus: UnlistenFn | null = null;
     let unlistenTheme: UnlistenFn | null = null;
     let unlistenMenu: UnlistenFn | null = null;
+    let unlistenConfig: UnlistenFn | null = null;
 
     void invoke<FloatingPayload>("get_floating_status")
       .then((status) => {
         if (!disposed) setPayload(status);
+      })
+      .catch(() => {});
+
+    void invoke<AppConfig>("get_app_config")
+      .then((cfg) => {
+        if (!disposed) setExtras(cfg.extra_languages ?? []);
       })
       .catch(() => {});
 
@@ -81,6 +90,11 @@ export function AsrHudLangChip() {
     }).then((u) => {
       unlistenMenu = u;
     });
+    void listen<AppConfig>("config-updated", (event) => {
+      setExtras(event.payload.extra_languages ?? []);
+    }).then((u) => {
+      unlistenConfig = u;
+    });
 
     return () => {
       disposed = true;
@@ -88,6 +102,7 @@ export function AsrHudLangChip() {
       unlistenStatus?.();
       unlistenTheme?.();
       unlistenMenu?.();
+      unlistenConfig?.();
       // Do NOT invoke set_floating_lang_menu_open(false) here — HMR/unmount
       // used to orderFront the chip and flash EN on launch.
     };
@@ -96,6 +111,7 @@ export function AsrHudLangChip() {
   // Esc is handled by the global event tap (NonactivatingPanel never gets keydown).
   // Keep a local listener only as a no-op fallback when the chip somehow has focus.
 
+  const langOptions = translateLanguageOptions(extras);
   const switching = Boolean(payload.switching);
   const target = payload.target_language ?? "en-US";
   const short = hudTargetShort(target) || "EN";
@@ -132,7 +148,7 @@ export function AsrHudLangChip() {
     >
       {menuOpen ? (
         <div className="hud-lang-menu" role="listbox" aria-label="翻译目标语言">
-          {TRANSLATE_LANGUAGES.map(([code, label]) => {
+          {langOptions.map(([code, label]) => {
             const selected = code === target;
             return (
               <span
@@ -168,7 +184,7 @@ export function AsrHudLangChip() {
           busy && "is-busy",
           menuOpen && "is-open",
         )}
-        aria-label={`${translateTargetLabel(target) || short}`}
+        aria-label={`${translateTargetLabel(target, extras) || short}`}
         aria-expanded={menuOpen}
         aria-haspopup="listbox"
         isDisabled={busy}

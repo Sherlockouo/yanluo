@@ -6,7 +6,7 @@ import { ChevronDown, Languages } from "lucide-react";
 import { PageHeader, PageShell, Reveal } from "@/components/shared/page-shell";
 import { SemanticPair } from "@/components/ui/refine-diff";
 import { LlmProviderSelect } from "@/components/ui/llm-provider-select";
-import { TRANSLATE_LANGUAGES, translateTargetLabel } from "@/lib/constants";
+import { translateLanguageOptions, translateTargetLabel } from "@/lib/constants";
 import { useApp } from "@/app-context";
 
 /** 翻译 Prompt 编辑已收敛到 设置 → 润色 → 配置。 */
@@ -32,9 +32,11 @@ export function TranslatePage({
     [history],
   );
 
-  const targetLabel =
-    TRANSLATE_LANGUAGES.find(([v]) => v === config.translate_target_language)?.[1] ??
-    config.translate_target_language;
+  const langOptions = translateLanguageOptions(config.extra_languages);
+  const targetLabel = translateTargetLabel(
+    config.translate_target_language,
+    config.extra_languages,
+  );
 
   const setTargetLanguage = (code: string) => {
     updateConfig("translate_target_language", code);
@@ -66,7 +68,7 @@ export function TranslatePage({
       </Select.Trigger>
       <Select.Popover className="min-w-[10rem]">
         <ListBox>
-          {TRANSLATE_LANGUAGES.map(([value, label]) => (
+          {langOptions.map(([value, label]) => (
             <ListBox.Item
               key={value}
               id={value}
@@ -137,7 +139,10 @@ export function TranslatePage({
                   <span>{new Date(entry.created_at).toLocaleString()}</span>
                   <span>{entry.duration_seconds.toFixed(1)}s</span>
                   <span className="tag">
-                    {translateTargetLabel(entry.translate_target_language) ||
+                    {translateTargetLabel(
+                      entry.translate_target_language,
+                      config.extra_languages,
+                    ) ||
                       targetLabel}
                   </span>
                 </div>

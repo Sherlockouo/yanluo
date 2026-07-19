@@ -610,7 +610,9 @@ html.light[data-floating="1"] .hud-agent-preview-fallback:hover {
   gap: 2px;
   padding: 6px 6px 4px;
   min-height: 0;
-  overflow: hidden;
+  max-height: 360px;
+  overflow-x: hidden;
+  overflow-y: auto;
   box-sizing: border-box;
 }
 

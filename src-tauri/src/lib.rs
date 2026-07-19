@@ -146,6 +146,7 @@ pub fn main() {
             commands::cancel_recording,
             commands::confirm_floating_transcript,
             commands::cancel_floating_transcript,
+            commands::accept_floating_preview,
             commands::transcribe_file,
             download::get_ytdlp_status,
             download::download_url_media,

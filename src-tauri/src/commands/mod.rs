@@ -827,6 +827,82 @@ pub(crate) fn cancel_floating_transcript(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Mid-pipeline skip: refining / processing → paste HUD text now, abort in-flight finalize.
+/// Fn while spinner shows = accept what user already sees (no wait for LLM / late ASR).
+#[tauri::command]
+pub(crate) fn accept_floating_preview(app: AppHandle) -> Result<(), String> {
+    let (state, text, intention) = floating_status_slot(&app)
+        .lock()
+        .map(|s| (s.state.clone(), s.text.clone(), s.intention.clone()))
+        .unwrap_or_default();
+    if intention.as_deref() == Some("agent") {
+        return Err("派活态请用 Enter 派发".into());
+    }
+    if state != "refining" && state != "processing" {
+        return Err("当前不在处理中间态".into());
+    }
+
+    // Abort in-flight finalize / LLM refine (late result discarded).
+    let _ = AsrEngine::bump_finalize_gen(&app);
+    let _ = AsrEngine::take_pending_hud_confirm(&app);
+
+    let confirmed = text.trim().to_string();
+    if confirmed.is_empty() {
+        emit_floating_status(&app, false, "idle", "", 0.0);
+        let _ = app.emit("recording-cancelled", ());
+        eprintln!("[asr] accept preview: empty — idle");
+        return Ok(());
+    }
+
+    let mode = AsrEngine::session_mode(&app);
+    let mode = if mode == "translate" || mode == "fn" {
+        mode
+    } else if intention.as_deref() == Some("translate") {
+        "translate".into()
+    } else {
+        "fn".into()
+    };
+
+    match inject_text_via_paste_on_main(&app, &confirmed) {
+        Ok(()) => {
+            eprintln!(
+                "[paste] accept preview {} chars (skipped mid-pipeline mode={mode})",
+                confirmed.chars().count()
+            );
+        }
+        Err(e) => {
+            eprintln!("[paste] accept preview failed: {e}");
+            let _ = app.emit(
+                "partial-error",
+                format!("已写入剪切板，但粘贴失败（请检查辅助功能权限）: {e}"),
+            );
+        }
+    }
+
+    let lang = app
+        .state::<AsrEngine>()
+        .inner()
+        .config
+        .lock()
+        .map(|c| c.language.clone())
+        .unwrap_or_else(|_| "auto".into());
+    let result = TranscriptionResult {
+        text: confirmed.clone(),
+        raw_text: confirmed.clone(),
+        llm_text: None,
+        language: lang,
+        duration_seconds: 0.0,
+        refined: false,
+        error: None,
+        segments: Vec::new(),
+        alignment: None,
+    };
+    append_history(&app, &result, &mode, None, "audio");
+    emit_floating_status(&app, false, "idle", "", 0.0);
+    let _ = app.emit("transcription-result", &result);
+    Ok(())
+}
+
 #[tauri::command]
 pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Result<(), String> {
     let config = engine

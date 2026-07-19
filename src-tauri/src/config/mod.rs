@@ -53,6 +53,12 @@ pub(crate) fn default_hotkey_agent() -> HotkeyBinding {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct ExtraLanguage {
+    pub(crate) id: String,
+    pub(crate) label: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct AgentProfile {
     pub(crate) id: String,
     pub(crate) name: String,
@@ -237,6 +243,9 @@ pub(crate) struct AppConfig {
     /// Shift+Fn translate target language (BCP-47 / app language id).
     #[serde(default = "default_translate_target_language")]
     pub(crate) translate_target_language: String,
+    /// User-added languages (beyond built-in zh/en/ja/ko).
+    #[serde(default)]
+    pub(crate) extra_languages: Vec<ExtraLanguage>,
     /// Qwen streaming chunk size in seconds (`chunk_size_sec`).
     #[serde(default = "default_chunk_size_sec")]
     pub(crate) chunk_size_sec: f64,
@@ -426,6 +435,7 @@ impl Default for AppConfig {
             elevenlabs_model: "scribe_v2".into(),
             language: read_user_default_language().unwrap_or_else(|| "auto".into()),
             translate_target_language: default_translate_target_language(),
+            extra_languages: Vec::new(),
             chunk_size_sec: default_chunk_size_sec(),
             unfixed_token_num: default_unfixed_token_num(),
             vad_backend: default_vad_backend(),

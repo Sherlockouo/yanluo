@@ -5,7 +5,7 @@ import { AsrPage } from "@/views/asr-page";
 import { TranscribePage } from "@/views/transcribe-page";
 import { HistoryPage } from "@/views/history-page";
 import { TranslatePage } from "@/views/translate-page";
-import { providerLabel, LANGUAGES } from "@/lib/constants";
+import { providerLabel, asrLanguageOptions } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/app-context";
 type DraftMode = "file" | "live" | "translate" | "history";
@@ -86,8 +86,9 @@ export function DraftPage() {
   const languageLabel =
     config.language === "auto"
       ? "自动检测语言"
-      : (LANGUAGES.find(([v]) => v === config.language)?.[1] ??
-        config.language);
+      : (asrLanguageOptions(config.extra_languages).find(
+          ([v]) => v === config.language,
+        )?.[1] ?? config.language);
 
   return (
     <PageShell className="max-w-[880px]">

@@ -60,7 +60,8 @@ import {
   llmPreset,
   llmProviderLabel,
   newCustomProviderId,
-  LANGUAGES,
+  asrLanguageOptions,
+  addableLanguageCatalog,
   QWEN_ASR_MODELS,
   resolveLlmCreds,
   seedLlmCredentials,
@@ -71,6 +72,7 @@ import type {
   AgentProfile,
   AppConfig,
   AsrProvider,
+  ExtraLanguage,
   HotkeyBinding,
   LlmCredential,
   LlmProvider,
@@ -1608,6 +1610,35 @@ function ProviderEditor({
 
 function GeneralPanel() {
   const { config, updateConfig, theme, setTheme } = useApp();
+  const langOptions = asrLanguageOptions(config.extra_languages);
+  const addable = addableLanguageCatalog(config.extra_languages);
+  const [pendingAdd, setPendingAdd] = useState<string>(addable[0]?.[0] ?? "");
+
+  useEffect(() => {
+    if (!addable.some(([id]) => id === pendingAdd)) {
+      setPendingAdd(addable[0]?.[0] ?? "");
+    }
+  }, [addable, pendingAdd]);
+
+  const addLanguage = (id: string) => {
+    const row = addable.find(([v]) => v === id);
+    if (!row) return;
+    const next: ExtraLanguage[] = [
+      ...(config.extra_languages ?? []),
+      { id: row[0], label: row[1] },
+    ];
+    updateConfig("extra_languages", next);
+    // Prefer newly added as recognition language when still on auto? No — just list.
+  };
+
+  const removeLanguage = (id: string) => {
+    const next = (config.extra_languages ?? []).filter((e) => e.id !== id);
+    updateConfig("extra_languages", next);
+    if (config.language === id) updateConfig("language", "auto");
+    if (config.translate_target_language === id) {
+      updateConfig("translate_target_language", "en-US");
+    }
+  };
 
   return (
     <div className="set-lines">
@@ -1632,7 +1663,7 @@ function GeneralPanel() {
             </Select.Trigger>
             <Select.Popover>
               <ListBox>
-                {LANGUAGES.map(([value, label]) => (
+                {langOptions.map(([value, label]) => (
                   <ListBox.Item key={value} id={value} textValue={label}>
                     {label}
                     <ListBox.ItemIndicator />
@@ -1641,6 +1672,73 @@ function GeneralPanel() {
               </ListBox>
             </Select.Popover>
           </Select>
+        </div>
+      </div>
+
+      <div className="set-row-line">
+        <div className="set-row-line-lab">
+          添加语言
+          <small>扩充「识别语言」列表；翻译目标已含 Qwen 全目录</small>
+        </div>
+        <div className="set-row-line-ctl flex flex-col items-end gap-2">
+          {(config.extra_languages?.length ?? 0) > 0 ? (
+            <div className="flex max-w-md flex-wrap justify-end gap-1.5">
+              {config.extra_languages.map((e) => (
+                <span
+                  key={e.id}
+                  className="inline-flex items-center gap-1 rounded-md border border-border bg-default/40 px-2 py-0.5 font-mono text-[11px] text-foreground"
+                >
+                  {e.label}
+                  <button
+                    type="button"
+                    className="text-muted transition-colors hover:text-danger"
+                    aria-label={`移除 ${e.label}`}
+                    onClick={() => removeLanguage(e.id)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {addable.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <Select
+                aria-label="待添加语言"
+                selectedKey={pendingAdd || undefined}
+                onSelectionChange={(key) => {
+                  if (key == null) return;
+                  setPendingAdd(String(key));
+                }}
+              >
+                <Select.Trigger className="qsel">
+                  <Select.Value />
+                  <Select.Indicator className="qsel-chev" />
+                </Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    {addable.map(([value, label]) => (
+                      <ListBox.Item key={value} id={value} textValue={label}>
+                        {label}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-7 min-h-7 px-2.5 text-[12px]"
+                isDisabled={!pendingAdd}
+                onPress={() => pendingAdd && addLanguage(pendingAdd)}
+              >
+                添加
+              </Button>
+            </div>
+          ) : (
+            <span className="type-meta">目录语言已全部添加</span>
+          )}
         </div>
       </div>
 

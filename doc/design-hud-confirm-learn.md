@@ -11,7 +11,8 @@ Fn / ⇧Fn 识别完后 **HUD 停住可编辑**；再按 Fn（或 Enter）才粘
 | 时机 | 动作 |
 |------|------|
 | idle → Fn / ⇧Fn | 开始录音（同前） |
-| recording → 松开 Fn | 停录 → 进 **editing**（不粘贴）；识别结果为空则直接关 HUD |
+| recording → 松开 Fn | 停录 →（若开纠错）**refining 转圈** → 进 **editing**；空结果直接关 HUD |
+| refining / processing → Fn | **跳过中间态**：中止 LLM/收尾，直接粘贴 HUD 上已显示的字 |
 | editing → Fn / Enter | 粘贴确认稿 → 写 history → 关 HUD |
 | editing → Esc | 取消：不贴、不写 history |
 

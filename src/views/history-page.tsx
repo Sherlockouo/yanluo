@@ -104,8 +104,9 @@ export function HistoryPage({
           aria-expanded={cleanupOpen}
           aria-haspopup="menu"
           onPress={() => setCleanupOpen((v) => !v)}
+          className="text-xs"
         >
-          <Trash2 size={14} />
+          <Trash2 size={12} />
           清理
         </Button>
         {cleanupOpen ? (

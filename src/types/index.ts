@@ -29,6 +29,14 @@ export type HotkeyBinding = {
 
 export type AgentKind = "claude" | "codex" | "pi";
 
+/** User-added ASR / translate language (beyond built-in LANGUAGES). */
+export type ExtraLanguage = {
+  /** BCP-47-ish id (e.g. fr-FR) or Qwen name (french). */
+  id: string;
+  /** Display label. */
+  label: string;
+};
+
 /** User-managed agent preset (settings + HUD picker). */
 export type AgentProfile = {
   id: string;
@@ -117,6 +125,8 @@ export type AppConfig = {
   language: string;
   /** Shift+Fn 翻译目标语言（不含 auto）。 */
   translate_target_language: string;
+  /** User-added languages (识别 + 翻译目标可选). */
+  extra_languages: ExtraLanguage[];
   /** Qwen 流式分块秒数（chunk_size_sec）。 */
   chunk_size_sec: number;
   /** Qwen 流式未固定 token 数（unfixed_token_num）。 */

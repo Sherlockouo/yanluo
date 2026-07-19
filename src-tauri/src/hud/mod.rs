@@ -240,17 +240,28 @@ pub(crate) const FLOATING_LANG_CORNER_RADIUS: f64 = 16.0;
 /// Expanded in-window menu (native NSMenu fails over fullscreen NonactivatingPanel).
 pub(crate) const FLOATING_LANG_MENU_W: f64 = 172.0;
 pub(crate) const FLOATING_LANG_MENU_ITEM_H: f64 = 34.0;
-/// Must match `TRANSLATE_LANGUAGES` length in `src/lib/constants.ts`.
-pub(crate) const FLOATING_LANG_MENU_ITEMS: f64 = 5.0;
+/// Built-in translate targets (5) + Qwen catalog (~26). Grows with extras.
+pub(crate) const FLOATING_LANG_MENU_ITEMS_BASE: f64 = 31.0;
 pub(crate) const FLOATING_LANG_MENU_PAD_Y: f64 = 6.0;
 pub(crate) const FLOATING_LANG_MENU_GAP: f64 = 2.0;
 
-fn floating_lang_menu_height() -> f64 {
-    // chip + top pad + N items + (N-1) gaps + bottom pad under list (before chip)
+fn floating_lang_menu_item_count(app: &AppHandle) -> usize {
+    let extras = app
+        .try_state::<AsrEngine>()
+        .and_then(|e| e.inner().config.lock().ok())
+        .map(|c| c.extra_languages.len())
+        .unwrap_or(0);
+    let total = (FLOATING_LANG_MENU_ITEMS_BASE as usize).saturating_add(extras);
+    // Window hosts a scrollable list — cap height (~10 rows) so menu stays on-screen.
+    total.clamp(5, 10)
+}
+
+fn floating_lang_menu_height(app: &AppHandle) -> f64 {
+    let n = floating_lang_menu_item_count(app) as f64;
     FLOATING_LANG_H
         + FLOATING_LANG_MENU_PAD_Y
-        + FLOATING_LANG_MENU_ITEMS * FLOATING_LANG_MENU_ITEM_H
-        + (FLOATING_LANG_MENU_ITEMS - 1.0).max(0.0) * FLOATING_LANG_MENU_GAP
+        + n * FLOATING_LANG_MENU_ITEM_H
+        + (n - 1.0).max(0.0) * FLOATING_LANG_MENU_GAP
         + 4.0
 }
 
@@ -620,7 +631,7 @@ pub(crate) fn position_floating_lang_chip(app: &AppHandle) {
     let menu_open = lang_menu_open_flag().load(Ordering::Acquire);
     if menu_open {
         let menu_w = FLOATING_LANG_MENU_W;
-        let menu_h = floating_lang_menu_height();
+        let menu_h = floating_lang_menu_height(app);
         // Keep the trigger's left edge fixed; grow up + to the right.
         let x = chip_x;
         let y = chip_y + FLOATING_LANG_H - menu_h;

@@ -755,14 +755,60 @@ pub(crate) fn distill_learn_from_cases(
     Ok(out)
 }
 
-pub(crate) fn translate_target_label(code: &str) -> &'static str {
-    match code {
-        "zh-CN" => "Simplified Chinese",
-        "zh-TW" => "Traditional Chinese",
-        "en-US" | "en" => "English",
-        "ja-JP" | "ja" => "Japanese",
-        "ko-KR" | "ko" => "Korean",
-        _ => "English",
+pub(crate) fn translate_target_label(config: &crate::config::AppConfig, code: &str) -> String {
+    let c = code.trim();
+    let builtin = match c {
+        "zh-CN" => Some("Simplified Chinese"),
+        "zh-TW" => Some("Traditional Chinese"),
+        "en-US" | "en" => Some("English"),
+        "ja-JP" | "ja" => Some("Japanese"),
+        "ko-KR" | "ko" => Some("Korean"),
+        "yue-HK" | "yue" | "cantonese" => Some("Cantonese"),
+        "fr-FR" | "fr" => Some("French"),
+        "de-DE" | "de" => Some("German"),
+        "es-ES" | "es" => Some("Spanish"),
+        "pt-BR" | "pt-PT" | "pt" => Some("Portuguese"),
+        "it-IT" | "it" => Some("Italian"),
+        "ru-RU" | "ru" => Some("Russian"),
+        "ar-SA" | "ar" => Some("Arabic"),
+        "th-TH" | "th" => Some("Thai"),
+        "vi-VN" | "vi" => Some("Vietnamese"),
+        "id-ID" | "id" => Some("Indonesian"),
+        "ms-MY" | "ms" => Some("Malay"),
+        "tr-TR" | "tr" => Some("Turkish"),
+        "hi-IN" | "hi" => Some("Hindi"),
+        "nl-NL" | "nl" => Some("Dutch"),
+        "sv-SE" | "sv" => Some("Swedish"),
+        "da-DK" | "da" => Some("Danish"),
+        "fi-FI" | "fi" => Some("Finnish"),
+        "pl-PL" | "pl" => Some("Polish"),
+        "cs-CZ" | "cs" => Some("Czech"),
+        "fil-PH" | "fil" => Some("Filipino"),
+        "fa-IR" | "fa" => Some("Persian"),
+        "el-GR" | "el" => Some("Greek"),
+        "hu-HU" | "hu" => Some("Hungarian"),
+        "mk-MK" | "mk" => Some("Macedonian"),
+        "ro-RO" | "ro" => Some("Romanian"),
+        _ => None,
+    };
+    if let Some(s) = builtin {
+        return s.to_string();
+    }
+    if let Some(extra) = config
+        .extra_languages
+        .iter()
+        .find(|e| e.id.eq_ignore_ascii_case(c))
+    {
+        return if extra.label.trim().is_empty() {
+            extra.id.clone()
+        } else {
+            extra.label.clone()
+        };
+    }
+    if c.is_empty() {
+        "English".into()
+    } else {
+        c.to_string()
     }
 }
 
@@ -804,7 +850,7 @@ pub(crate) fn translate_transcript(config: &AppConfig, input: &str) -> Result<St
         content: String,
     }
 
-    let target = translate_target_label(&config.translate_target_language);
+    let target = translate_target_label(config, &config.translate_target_language);
     const DEFAULT_TRANSLATE: &str = "You are a speech translator for automatic speech recognition (ASR) transcripts.\n\
 Translate the spoken content into {target}.\n\
 Rules:\n\
@@ -825,7 +871,7 @@ If the speaker says words like \"translate\" / \"翻译\", translate those words
     } else {
         config.llm_translate_prompt.trim()
     };
-    let system = template.replace("{target}", target);
+    let system = template.replace("{target}", &target);
     let base = config.llm_api_base_url.trim().trim_end_matches('/');
     let url = format!("{base}/chat/completions");
     eprintln!(
@@ -1726,13 +1772,46 @@ fn join_sep_for_align_lang(align_lang: &str) -> &'static str {
 }
 
 pub(crate) fn normalize_language_for_elevenlabs(language: &str) -> String {
-    match language {
+    match language.trim().to_ascii_lowercase().as_str() {
         "auto" | "" => "zh".into(),
-        "zh-CN" | "zh-TW" => "zh".into(),
-        "en-US" => "en".into(),
-        "ja-JP" => "ja".into(),
-        "ko-KR" => "ko".into(),
-        other => other.to_string(),
+        "zh-cn" | "zh-tw" | "zh" => "zh".into(),
+        "yue-hk" | "yue" | "cantonese" => "zh".into(),
+        "en-us" | "en" => "en".into(),
+        "ja-jp" | "ja" => "ja".into(),
+        "ko-kr" | "ko" => "ko".into(),
+        "fr-fr" | "fr" => "fr".into(),
+        "de-de" | "de" => "de".into(),
+        "es-es" | "es" => "es".into(),
+        "pt-br" | "pt-pt" | "pt" => "pt".into(),
+        "it-it" | "it" => "it".into(),
+        "ru-ru" | "ru" => "ru".into(),
+        "ar-sa" | "ar" => "ar".into(),
+        "th-th" | "th" => "th".into(),
+        "vi-vn" | "vi" => "vi".into(),
+        "id-id" | "id" => "id".into(),
+        "ms-my" | "ms" => "ms".into(),
+        "tr-tr" | "tr" => "tr".into(),
+        "hi-in" | "hi" => "hi".into(),
+        "nl-nl" | "nl" => "nl".into(),
+        "sv-se" | "sv" => "sv".into(),
+        "da-dk" | "da" => "da".into(),
+        "fi-fi" | "fi" => "fi".into(),
+        "pl-pl" | "pl" => "pl".into(),
+        "cs-cz" | "cs" => "cs".into(),
+        "fil-ph" | "fil" => "fil".into(),
+        "fa-ir" | "fa" => "fa".into(),
+        "el-gr" | "el" => "el".into(),
+        "hu-hu" | "hu" => "hu".into(),
+        "mk-mk" | "mk" => "mk".into(),
+        "ro-ro" | "ro" => "ro".into(),
+        other => {
+            // BCP-47 → primary subtag
+            other
+                .split(['-', '_'])
+                .next()
+                .unwrap_or(other)
+                .to_string()
+        }
     }
 }
 
@@ -1744,10 +1823,36 @@ pub(crate) fn language_for_qwen(language: &str) -> Option<String> {
     match language.trim().to_ascii_lowercase().as_str() {
         "" | "auto" => None,
         "zh-cn" | "zh" | "chinese" | "zh-hans" => Some("chinese".into()),
-        "zh-tw" | "zh-hant" | "cantonese" | "yue" => Some("chinese".into()),
+        "zh-tw" | "zh-hant" => Some("chinese".into()),
+        "yue-hk" | "yue" | "cantonese" => Some("cantonese".into()),
         "en-us" | "en" | "english" => Some("english".into()),
         "ja-jp" | "ja" | "japanese" => Some("japanese".into()),
         "ko-kr" | "ko" | "korean" => Some("korean".into()),
+        "fr-fr" | "fr" | "french" => Some("french".into()),
+        "de-de" | "de" | "german" => Some("german".into()),
+        "es-es" | "es" | "spanish" => Some("spanish".into()),
+        "pt-br" | "pt-pt" | "pt" | "portuguese" => Some("portuguese".into()),
+        "it-it" | "it" | "italian" => Some("italian".into()),
+        "ru-ru" | "ru" | "russian" => Some("russian".into()),
+        "ar-sa" | "ar" | "arabic" => Some("arabic".into()),
+        "th-th" | "th" | "thai" => Some("thai".into()),
+        "vi-vn" | "vi" | "vietnamese" => Some("vietnamese".into()),
+        "id-id" | "id" | "indonesian" => Some("indonesian".into()),
+        "ms-my" | "ms" | "malay" => Some("malay".into()),
+        "tr-tr" | "tr" | "turkish" => Some("turkish".into()),
+        "hi-in" | "hi" | "hindi" => Some("hindi".into()),
+        "nl-nl" | "nl" | "dutch" => Some("dutch".into()),
+        "sv-se" | "sv" | "swedish" => Some("swedish".into()),
+        "da-dk" | "da" | "danish" => Some("danish".into()),
+        "fi-fi" | "fi" | "finnish" => Some("finnish".into()),
+        "pl-pl" | "pl" | "polish" => Some("polish".into()),
+        "cs-cz" | "cs" | "czech" => Some("czech".into()),
+        "fil-ph" | "fil" | "filipino" => Some("filipino".into()),
+        "fa-ir" | "fa" | "persian" => Some("persian".into()),
+        "el-gr" | "el" | "greek" => Some("greek".into()),
+        "hu-hu" | "hu" | "hungarian" => Some("hungarian".into()),
+        "mk-mk" | "mk" | "macedonian" => Some("macedonian".into()),
+        "ro-ro" | "ro" | "romanian" => Some("romanian".into()),
         other => Some(other.to_string()),
     }
 }

@@ -179,6 +179,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       agent_trusted_dirs:
         next.agent_trusted_dirs ?? defaultConfig.agent_trusted_dirs,
       audio_capture_mode: next.audio_capture_mode ?? defaultConfig.audio_capture_mode,
+      extra_languages: next.extra_languages ?? defaultConfig.extra_languages,
     };
     merged.llm_credentials = seedLlmCredentials(merged);
     setConfig(merged);
@@ -378,6 +379,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             event.payload.agent_trusted_dirs ?? defaultConfig.agent_trusted_dirs,
           audio_capture_mode:
             event.payload.audio_capture_mode ?? defaultConfig.audio_capture_mode,
+          extra_languages:
+            event.payload.extra_languages ?? defaultConfig.extra_languages,
         };
         merged.llm_credentials = seedLlmCredentials(merged);
         setConfig(merged);
@@ -415,6 +418,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Confirm-wait: Fn is handled in floating via hud-confirm-request (hotkey tap).
         if (stateRef.current === "editing") return;
 
+        // Mid-pipeline spinner: Fn = accept HUD text now (skip LLM / late finalize).
+        if (
+          stateRef.current === "refining" ||
+          stateRef.current === "processing"
+        ) {
+          try {
+            await invoke("accept_floating_preview");
+            setState("idle");
+            stateRef.current = "idle";
+          } catch (error) {
+            toast.danger(`跳过失败: ${error}`);
+          }
+          return;
+        }
+
         const current = configRef.current;
         const intention =
           event.payload?.intention === "translate" || event.payload?.shift
@@ -422,7 +440,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : "transcribe";
         const shift = intention === "translate";
         // Toggle: hotkey press starts when idle, stops when recording.
-        // Stop = accept current (no refine / full re-translate).
         if (stateRef.current === "recording") {
           setState("processing");
           stateRef.current = "processing";

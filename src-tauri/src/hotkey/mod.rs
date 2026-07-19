@@ -110,6 +110,32 @@ fn hud_confirm_editing(app: &AppHandle) -> bool {
             .unwrap_or(false)
 }
 
+/// Spinner mid-state (LLM refine / finalize): Fn accepts HUD text now.
+fn hud_skip_pipeline(app: &AppHandle) -> bool {
+    floating_status_slot(app)
+        .lock()
+        .map(|s| {
+            s.visible
+                && matches!(s.state.as_str(), "refining" | "processing")
+                && s.intention.as_deref() != Some("agent")
+        })
+        .unwrap_or(false)
+}
+
+fn emit_hud_skip_or_confirm(app: &AppHandle) -> bool {
+    if hud_confirm_editing(app) {
+        let _ = app.emit_to("floating", "hud-confirm-request", ());
+        let _ = app.emit("hud-confirm-request", ());
+        return true;
+    }
+    if hud_skip_pipeline(app) {
+        let _ = app.emit_to("floating", "hud-accept-preview-request", ());
+        let _ = app.emit("hud-accept-preview-request", ());
+        return true;
+    }
+    false
+}
+
 pub(crate) fn start_fn_event_tap(app: AppHandle) {
     #[cfg(not(target_os = "macos"))]
     {
@@ -401,8 +427,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                             if !binding_is_fn(&hk_translate)
                                 && binding_matches(&hk_translate, &key, &mods)
                             {
-                                if hud_confirm_editing(&app_cb) {
-                                    let _ = app_cb.emit_to("floating", "hud-confirm-request", ());
+                                if emit_hud_skip_or_confirm(&app_cb) {
                                     return CallbackResult::Drop;
                                 }
                                 let _ = app_cb.emit(
@@ -417,8 +442,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                             if !binding_is_fn(&hk_transcribe)
                                 && binding_matches(&hk_transcribe, &key, &mods)
                             {
-                                if hud_confirm_editing(&app_cb) {
-                                    let _ = app_cb.emit_to("floating", "hud-confirm-request", ());
+                                if emit_hud_skip_or_confirm(&app_cb) {
                                     return CallbackResult::Drop;
                                 }
                                 let _ = app_cb.emit(
@@ -510,8 +534,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                 if binding_is_fn(&hk_translate)
                                     && binding_matches(&hk_translate, "fn", &final_mods)
                                 {
-                                    if hud_confirm_editing(&app_cb) {
-                                        let _ = app_cb.emit_to("floating", "hud-confirm-request", ());
+                                    if emit_hud_skip_or_confirm(&app_cb) {
                                         return CallbackResult::Drop;
                                     }
                                     let _ = app_cb.emit(
@@ -526,8 +549,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                 if binding_is_fn(&hk_transcribe)
                                     && binding_matches(&hk_transcribe, "fn", &final_mods)
                                 {
-                                    if hud_confirm_editing(&app_cb) {
-                                        let _ = app_cb.emit_to("floating", "hud-confirm-request", ());
+                                    if emit_hud_skip_or_confirm(&app_cb) {
                                         return CallbackResult::Drop;
                                     }
                                     let _ = app_cb.emit(

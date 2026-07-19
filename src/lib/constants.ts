@@ -2,6 +2,7 @@ import type {
   AgentKind,
   AppConfig,
   AsrProvider,
+  ExtraLanguage,
   HotkeyBinding,
   LlmCredential,
   LlmProvider,
@@ -242,6 +243,7 @@ export const defaultConfig: AppConfig = {
   // auto = detect; on Chinese macOS we soft-force chinese to avoid EN mis-detect.
   language: "auto",
   translate_target_language: "en-US",
+  extra_languages: [],
   chunk_size_sec: 1.5,
   unfixed_token_num: 5,
   vad_backend: "webrtc",
@@ -336,16 +338,102 @@ export const LANGUAGES: [string, string][] = [
   ["ko-KR", "한국어"],
 ];
 
+/**
+ * Qwen3-ASR catalog (30 langs) minus built-ins — pick list for「添加语言」.
+ * id → model language name via Rust `language_for_qwen`.
+ */
+export const ASR_LANGUAGE_CATALOG: [string, string][] = [
+  ["yue-HK", "粵語"],
+  ["fr-FR", "Français"],
+  ["de-DE", "Deutsch"],
+  ["es-ES", "Español"],
+  ["pt-BR", "Português"],
+  ["it-IT", "Italiano"],
+  ["ru-RU", "Русский"],
+  ["ar-SA", "العربية"],
+  ["th-TH", "ไทย"],
+  ["vi-VN", "Tiếng Việt"],
+  ["id-ID", "Bahasa Indonesia"],
+  ["ms-MY", "Bahasa Melayu"],
+  ["tr-TR", "Türkçe"],
+  ["hi-IN", "हिन्दी"],
+  ["nl-NL", "Nederlands"],
+  ["sv-SE", "Svenska"],
+  ["da-DK", "Dansk"],
+  ["fi-FI", "Suomi"],
+  ["pl-PL", "Polski"],
+  ["cs-CZ", "Čeština"],
+  ["fil-PH", "Filipino"],
+  ["fa-IR", "فارسی"],
+  ["el-GR", "Ελληνικά"],
+  ["hu-HU", "Magyar"],
+  ["mk-MK", "Македонски"],
+  ["ro-RO", "Română"],
+];
+
+/** Built-in ids (incl. auto) — cannot remove. */
+export const BUILTIN_LANGUAGE_IDS = new Set(LANGUAGES.map(([id]) => id));
+
 /** Translate target — no auto. */
 export const TRANSLATE_LANGUAGES: [string, string][] = LANGUAGES.filter(
   ([value]) => value !== "auto",
 );
 
+/** Recognition select: builtins + user extras. */
+export function asrLanguageOptions(
+  extras?: ExtraLanguage[] | null,
+): [string, string][] {
+  const out: [string, string][] = [...LANGUAGES];
+  const seen = new Set(out.map(([id]) => id));
+  for (const e of extras ?? []) {
+    const id = e.id?.trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push([id, e.label?.trim() || id]);
+  }
+  return out;
+}
+
+/** Translate / HUD target list: builtins + full Qwen catalog + user extras. */
+export function translateLanguageOptions(
+  extras?: ExtraLanguage[] | null,
+): [string, string][] {
+  const out: [string, string][] = [...TRANSLATE_LANGUAGES];
+  const seen = new Set(out.map(([id]) => id));
+  for (const [id, label] of ASR_LANGUAGE_CATALOG) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push([id, label]);
+  }
+  for (const e of extras ?? []) {
+    const id = e.id?.trim();
+    if (!id || seen.has(id) || id === "auto") continue;
+    seen.add(id);
+    out.push([id, e.label?.trim() || id]);
+  }
+  return out;
+}
+
+/** Catalog entries not yet in builtins or extras. */
+export function addableLanguageCatalog(
+  extras?: ExtraLanguage[] | null,
+): [string, string][] {
+  const taken = new Set([
+    ...BUILTIN_LANGUAGE_IDS,
+    ...(extras ?? []).map((e) => e.id),
+  ]);
+  return ASR_LANGUAGE_CATALOG.filter(([id]) => !taken.has(id));
+}
+
 /** Human label for a stored translate target (e.g. en-US → English). */
-export function translateTargetLabel(code?: string | null): string {
+export function translateTargetLabel(
+  code?: string | null,
+  extras?: ExtraLanguage[] | null,
+): string {
   if (!code?.trim()) return "";
   return (
-    TRANSLATE_LANGUAGES.find(([v]) => v === code)?.[1] ??
+    translateLanguageOptions(extras).find(([v]) => v === code)?.[1] ??
+    ASR_LANGUAGE_CATALOG.find(([v]) => v === code)?.[1] ??
     LANGUAGES.find(([v]) => v === code)?.[1] ??
     code
   );
@@ -368,8 +456,93 @@ export function hudTargetShort(code?: string | null): string {
     case "ko-KR":
     case "ko":
       return "KO";
-    default:
-      return translateTargetLabel(code) || code;
+    case "yue-HK":
+    case "yue":
+      return "粵";
+    case "fr-FR":
+    case "fr":
+      return "FR";
+    case "de-DE":
+    case "de":
+      return "DE";
+    case "es-ES":
+    case "es":
+      return "ES";
+    case "pt-BR":
+    case "pt":
+      return "PT";
+    case "it-IT":
+    case "it":
+      return "IT";
+    case "ru-RU":
+    case "ru":
+      return "RU";
+    case "ar-SA":
+    case "ar":
+      return "AR";
+    case "th-TH":
+    case "th":
+      return "TH";
+    case "vi-VN":
+    case "vi":
+      return "VI";
+    case "id-ID":
+    case "id":
+      return "ID";
+    case "ms-MY":
+    case "ms":
+      return "MS";
+    case "tr-TR":
+    case "tr":
+      return "TR";
+    case "hi-IN":
+    case "hi":
+      return "HI";
+    case "nl-NL":
+    case "nl":
+      return "NL";
+    case "sv-SE":
+    case "sv":
+      return "SV";
+    case "da-DK":
+    case "da":
+      return "DA";
+    case "fi-FI":
+    case "fi":
+      return "FI";
+    case "pl-PL":
+    case "pl":
+      return "PL";
+    case "cs-CZ":
+    case "cs":
+      return "CS";
+    case "fil-PH":
+    case "fil":
+      return "FIL";
+    case "fa-IR":
+    case "fa":
+      return "FA";
+    case "el-GR":
+    case "el":
+      return "EL";
+    case "hu-HU":
+    case "hu":
+      return "HU";
+    case "mk-MK":
+    case "mk":
+      return "MK";
+    case "ro-RO":
+    case "ro":
+      return "RO";
+    default: {
+      const label = translateTargetLabel(code);
+      if (label && label !== code) {
+        // Prefer 2–3 letter code from id
+        const primary = code.split(/[-_]/)[0]?.toUpperCase();
+        if (primary && primary.length <= 3) return primary;
+      }
+      return label || code;
+    }
   }
 }
 
