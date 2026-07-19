@@ -2,6 +2,13 @@
 
 All notable changes to 言落 (Yanluo) are documented in this file.
 
+## [0.9.1] — 2026-07-19
+
+### Fixed
+- Bundle `productName` ASCII **Yanluo** (CJK broke WiX `light.exe` + stripped asset filenames to `_0.9.0_*.dmg`)
+- Release CI passes per-platform `--bundles` (macOS app/dmg, Linux deb/appimage, Windows msi/nsis)
+- macOS `CFBundleDisplayName` / menu About stay **言落**; window title `言落 · Yanluo`
+
 ## [0.9.0] — 2026-07-19
 
 ### Added

@@ -449,17 +449,17 @@ mod tests {
     fn picks_platform_dmg() {
         let assets = vec![
             ReleaseAsset {
-                name: "言落_0.2.0_x64.dmg".into(),
+                name: "Yanluo_0.2.0_x64.dmg".into(),
                 browser_download_url: "https://example.com/x64.dmg".into(),
                 size: 1,
             },
             ReleaseAsset {
-                name: "言落_0.2.0_aarch64.dmg".into(),
+                name: "Yanluo_0.2.0_aarch64.dmg".into(),
                 browser_download_url: "https://example.com/arm.dmg".into(),
                 size: 2,
             },
             ReleaseAsset {
-                name: "言落_0.2.0_x64_en-US.msi".into(),
+                name: "Yanluo_0.2.0_x64_en-US.msi".into(),
                 browser_download_url: "https://example.com/x.msi".into(),
                 size: 3,
             },

@@ -194,6 +194,7 @@ Ship in order. Each step should still pass Jobs 3-second test.
 - [x] Replace accent `#007AFF` → copper `#C4784A` in `theme.css` (light + dark)
 - [x] Load Instrument Serif + DM Sans/Satoshi + IBM Plex Mono; set `--font-display` / `--font-sans` / `--font-mono`
 - [x] Retire user-facing string `ASR Workshop` → `言落` / `Yanluo` (window title, tray, sidebar, overview, plist display name plan)
+- [x] Bundle packaging: `productName` = ASCII **Yanluo** (WiX + asset filenames); UI / CFBundleDisplayName / menu = **言落**
 - [x] Bundle id plan: leave `com.template…` for a dedicated packaging pass (don't half-rename signing) — defaults domain now `com.sherlockouo.yanluo` with legacy read fallback; data dir `Yanluo` with `ASR Workshop` migrate
 
 ### P1 — Kill workbench nav

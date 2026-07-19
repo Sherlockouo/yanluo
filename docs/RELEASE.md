@@ -15,6 +15,8 @@ package.json version
                  └─ In-app「设置 → 更新」shows this version + checks newer tags
 ```
 
+**Bundle name:** `tauri.conf.json` `productName` must stay ASCII **`Yanluo`** (WiX / installer filenames). Window title + `CFBundleDisplayName` / menu stay **言落**. Do not put CJK in `productName` — CI WiX `light.exe` and asset names break.
+
 1. Bump `package.json` version.
 2. Run `pnpm version:sync` (keeps Cargo / tauri.conf in lockstep).
 3. Update `CHANGELOG.md` with `## [x.y.z] — YYYY-MM-DD`.

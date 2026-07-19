@@ -12,11 +12,8 @@ use crate::config::*;
 /// Language / LLM live in the Settings UI — not as top-level menu bar hacks.
 pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
     let pkg = app.package_info();
-    let app_name = if pkg.name.trim().is_empty() {
-        "言落".to_string()
-    } else {
-        pkg.name.clone()
-    };
+    // productName is ASCII "Yanluo" for WiX/filenames; menu/About stay 言落.
+    let app_name = "言落".to_string();
     let about_metadata = AboutMetadata {
         name: Some(app_name.clone()),
         version: Some(pkg.version.to_string()),

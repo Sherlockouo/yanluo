@@ -19,18 +19,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # productName is ASCII "Yanluo" (WiX/filenames). UI title / CFBundleDisplayName stay 言落.
           - platform: macos-aarch64
             os: macos-14
-            args: --features qwen-local
-            bundles: app,dmg
+            args: --features qwen-local --bundles app,dmg
           - platform: linux-x86_64
             os: ubuntu-22.04
-            args: ""
-            bundles: deb,appimage
+            args: --bundles deb,appimage
           - platform: windows-x86_64
             os: windows-latest
-            args: ""
-            bundles: msi,nsis
+            args: --bundles msi,nsis
 
     name: Build (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
