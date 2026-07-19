@@ -110,6 +110,7 @@ pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
                     })
                     .unwrap_or(FLOATING_HUD_MIN_W);
                 let (x, y) = resolve_hud_logical_position(&app, width);
+                mark_hud_programmatic_move();
                 let _ = window.set_position(tauri::LogicalPosition::new(x, y));
                 let _ = window.set_always_on_top(true);
                 // Prefer orderFrontRegardless over Tauri show()/set_focus —
@@ -206,6 +207,14 @@ pub(crate) fn emit_floating_status(app: &AppHandle, visible: bool, state: &str, 
     if let Ok(mut slot) = floating_status_slot(app).lock() {
         *slot = payload.clone();
     }
+    // Close HUD → drop outside menus so next summon starts clean
+    // (Esc after @/picker left stale agent_picker_mode / hidden window).
+    if !visible || state == "idle" {
+        close_floating_agent_menu(app);
+        if floating_lang_menu_is_open() {
+            close_floating_lang_menu(app);
+        }
+    }
     set_floating_window_visible(app, visible);
     // Agent HUD needs key focus for Raycast menus / paste (⌘. ⌘/ ⌘V); editing too.
     // AppKit: always hop to main thread (mlx-worker must not call makeKey*).
@@ -219,8 +228,9 @@ pub(crate) fn emit_floating_status(app: &AppHandle, visible: bool, state: &str, 
 pub(crate) const FLOATING_HUD_H: f64 = 56.0;
 /// Fixed HUD width — transcript scrolls inside; window does not grow.
 pub(crate) const FLOATING_HUD_MIN_W: f64 = 400.0;
-pub(crate) const FLOATING_HUD_MAX_W: f64 = 400.0;
-pub(crate) const FLOATING_HUD_BOTTOM_INSET: f64 = 48.0;
+pub(crate) const FLOATING_HUD_MAX_W: f64 = 560.0;
+/// Gap from monitor bottom to capsule bottom — clear Dock / taskbar.
+pub(crate) const FLOATING_HUD_BOTTOM_INSET: f64 = 120.0;
 pub(crate) const FLOATING_HUD_CORNER_RADIUS: f64 = 28.0;
 /// Separate translate-target chip appended after the capsule.
 pub(crate) const FLOATING_LANG_W: f64 = 54.0;
@@ -266,34 +276,82 @@ pub(crate) fn close_floating_lang_menu(app: &AppHandle) {
     });
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct HudPosition {
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+pub(crate) struct HudMonitorPos {
+    /// Logical offset from that monitor's top-left.
     pub(crate) x: f64,
     pub(crate) y: f64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+pub(crate) struct HudPositionFile {
+    /// Per-monitor remembered drag offsets (key = monitor name or origin).
+    #[serde(default)]
+    pub(crate) by_monitor: std::collections::HashMap<String, HudMonitorPos>,
+    /// Legacy absolute logical coords (pre per-monitor). Migrated on load.
+    #[serde(default)]
+    pub(crate) x: Option<f64>,
+    #[serde(default)]
+    pub(crate) y: Option<f64>,
+}
+
+fn skip_hud_move_persist() -> &'static AtomicBool {
+    static FLAG: AtomicBool = AtomicBool::new(false);
+    &FLAG
+}
+
+/// Next `Moved` is from programmatic `set_position` — don't overwrite memory.
+pub(crate) fn mark_hud_programmatic_move() {
+    skip_hud_move_persist().store(true, Ordering::Release);
 }
 
 pub(crate) fn hud_position_path() -> PathBuf {
     app_data_dir().join("hud-position.json")
 }
 
-pub(crate) fn load_hud_position() -> Option<(f64, f64)> {
-    let data = fs::read_to_string(hud_position_path()).ok()?;
-    let pos: HudPosition = serde_json::from_str(&data).ok()?;
-    if !pos.x.is_finite() || !pos.y.is_finite() {
-        return None;
-    }
-    Some((pos.x, pos.y))
+fn monitor_key(monitor: &tauri::Monitor) -> String {
+    monitor
+        .name()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            let p = monitor.position();
+            format!("@{},{}", p.x, p.y)
+        })
 }
 
-pub(crate) fn save_hud_position(x: f64, y: f64) {
-    if !x.is_finite() || !y.is_finite() {
-        return;
-    }
+fn load_hud_position_file() -> HudPositionFile {
+    let Ok(data) = fs::read_to_string(hud_position_path()) else {
+        return HudPositionFile::default();
+    };
+    serde_json::from_str(&data).unwrap_or_default()
+}
+
+fn save_hud_position_file(file: &HudPositionFile) {
     let _ = fs::create_dir_all(app_data_dir());
-    let payload = HudPosition { x, y };
-    if let Ok(data) = serde_json::to_string_pretty(&payload) {
+    if let Ok(data) = serde_json::to_string_pretty(file) {
         let _ = fs::write(hud_position_path(), data);
     }
+}
+
+/// Capsule centered above bottom inset on this monitor (logical coords).
+fn hud_default_on_monitor(monitor: &tauri::Monitor, win_w: f64) -> (f64, f64) {
+    let win_w = win_w.clamp(FLOATING_HUD_MIN_W, FLOATING_HUD_MAX_W);
+    let (lx, ly, lw, lh) = monitor_logical_rect(monitor);
+    (
+        lx + ((lw - win_w) / 2.0).max(12.0),
+        ly + (lh - FLOATING_HUD_H - FLOATING_HUD_BOTTOM_INSET).max(12.0),
+    )
+}
+
+/// Monitor containing the mouse cursor (physical point → monitor).
+fn cursor_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
+    let pos = app.cursor_position().ok()?;
+    app.monitor_from_point(pos.x, pos.y).ok().flatten()
+}
+
+fn monitor_contains_logical(monitor: &tauri::Monitor, x: f64, y: f64) -> bool {
+    let (lx, ly, lw, lh) = monitor_logical_rect(monitor);
+    x >= lx && x < lx + lw && y >= ly && y < ly + lh
 }
 
 pub(crate) fn floating_hud_logical_position(app: &AppHandle, win_w: f64) -> (f64, f64) {
@@ -322,33 +380,50 @@ fn monitor_logical_rect(monitor: &tauri::Monitor) -> (f64, f64, f64, f64) {
     )
 }
 
-/// Capsule centered at the bottom of this monitor (logical coords).
-fn hud_default_on_monitor(monitor: &tauri::Monitor, win_w: f64) -> (f64, f64) {
-    let win_w = win_w.clamp(FLOATING_HUD_MIN_W, FLOATING_HUD_MAX_W);
-    let (lx, ly, lw, lh) = monitor_logical_rect(monitor);
-    (
-        lx + ((lw - win_w) / 2.0).max(12.0),
-        ly + (lh - FLOATING_HUD_H - FLOATING_HUD_BOTTOM_INSET).max(12.0),
-    )
-}
-
-/// Monitor containing the mouse cursor (physical point → monitor).
-fn cursor_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
-    let pos = app.cursor_position().ok()?;
-    app.monitor_from_point(pos.x, pos.y).ok().flatten()
-}
-
 pub(crate) fn resolve_hud_logical_position(app: &AppHandle, win_w: f64) -> (f64, f64) {
-    // A user-dragged position only counts when it sits on the cursor's
-    // current screen — multi-monitor: HUD must appear where the user looks,
-    // not wherever it was parked last time.
-    if let (Some((sx, sy)), Some(cm)) = (load_hud_position(), cursor_monitor(app)) {
-        let (lx, ly, lw, lh) = monitor_logical_rect(&cm);
-        if sx >= lx && sx < lx + lw && sy >= ly && sy < ly + lh {
-            return (sx, sy);
+    let Some(cm) = cursor_monitor(app) else {
+        return floating_hud_logical_position(app, win_w);
+    };
+    let key = monitor_key(&cm);
+    let mut file = load_hud_position_file();
+
+    // Migrate legacy absolute x/y → per-monitor offset once.
+    if file.by_monitor.is_empty() {
+        if let (Some(sx), Some(sy)) = (file.x, file.y) {
+            if sx.is_finite() && sy.is_finite() {
+                let mon = app
+                    .available_monitors()
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .find(|m| monitor_contains_logical(m, sx, sy))
+                    .unwrap_or_else(|| cm.clone());
+                let (lx, ly, _, _) = monitor_logical_rect(&mon);
+                file.by_monitor.insert(
+                    monitor_key(&mon),
+                    HudMonitorPos {
+                        x: sx - lx,
+                        y: sy - ly,
+                    },
+                );
+                file.x = None;
+                file.y = None;
+                save_hud_position_file(&file);
+            }
         }
     }
-    floating_hud_logical_position(app, win_w)
+
+    if let Some(saved) = file.by_monitor.get(&key) {
+        let (lx, ly, lw, lh) = monitor_logical_rect(&cm);
+        let max_x = (lw - win_w.clamp(FLOATING_HUD_MIN_W, FLOATING_HUD_MAX_W)).max(0.0);
+        let max_y = (lh - FLOATING_HUD_H).max(0.0);
+        let x = lx + saved.x.clamp(0.0, max_x);
+        let y = ly + saved.y.clamp(0.0, max_y);
+        return (x, y);
+    }
+
+    // Different display (or never dragged here) → default on cursor monitor.
+    hud_default_on_monitor(&cm, win_w)
 }
 
 pub(crate) fn persist_floating_hud_position(window: &tauri::WebviewWindow) {
@@ -356,7 +431,29 @@ pub(crate) fn persist_floating_hud_position(window: &tauri::WebviewWindow) {
         return;
     };
     let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
-    save_hud_position(pos.x as f64 / scale, pos.y as f64 / scale);
+    let wx = pos.x as f64 / scale;
+    let wy = pos.y as f64 / scale;
+    let app = window.app_handle().clone();
+    let mon = app
+        .monitor_from_point(pos.x as f64, pos.y as f64)
+        .ok()
+        .flatten()
+        .or_else(|| cursor_monitor(&app));
+    let Some(mon) = mon else {
+        return;
+    };
+    let (lx, ly, _, _) = monitor_logical_rect(&mon);
+    let mut file = load_hud_position_file();
+    file.by_monitor.insert(
+        monitor_key(&mon),
+        HudMonitorPos {
+            x: wx - lx,
+            y: wy - ly,
+        },
+    );
+    file.x = None;
+    file.y = None;
+    save_hud_position_file(&file);
 }
 
 pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
@@ -406,7 +503,11 @@ pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
     let app_for_move = app.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Moved(_) = event {
-            persist_floating_hud_position(&win_for_move);
+            if skip_hud_move_persist().swap(false, Ordering::AcqRel) {
+                // Programmatic show/resize — keep per-monitor memory intact.
+            } else {
+                persist_floating_hud_position(&win_for_move);
+            }
             let show_lang = floating_status_slot(&app_for_move)
                 .lock()
                 .map(|s| s.visible && s.intention.as_deref() == Some("translate"))
@@ -670,8 +771,9 @@ pub(crate) fn recenter_floating_hud(app: AppHandle, width: f64) {
                 .map(|s| (s.height as f64 / scale).clamp(FLOATING_HUD_H, 280.0))
                 .unwrap_or(FLOATING_HUD_H);
             let _ = window.set_size(tauri::LogicalSize::new(width, height));
+            mark_hud_programmatic_move();
             let _ = window.set_position(tauri::LogicalPosition::new(x, y));
-            save_hud_position(x, y);
+            persist_floating_hud_position(&window);
         }
     });
 }
@@ -696,6 +798,7 @@ pub(crate) fn resize_floating_hud(app: AppHandle, width: f64, height: f64) {
                 _ => resolve_hud_logical_position(&app, width),
             };
             let _ = window.set_size(tauri::LogicalSize::new(width, height));
+            mark_hud_programmatic_move();
             let _ = window.set_position(tauri::LogicalPosition::new(x, y));
         }
     });
@@ -912,12 +1015,10 @@ fn apply_agent_picker_open(app: &AppHandle, mode: &str, item_count: usize) {
     agent_picker_item_count_slot().store(item_count.max(1), Ordering::Release);
     position_floating_agent_menu(app, item_count);
     // Raise without set_focus — focus steal caused double-click-to-toggle.
+    // After hide(), orderFront alone can leave window stuck; show() first.
+    let _ = menu.show();
     #[cfg(target_os = "macos")]
     raise_floating_hud_level(&menu, true);
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = menu.show();
-    }
     let _ = app.emit_to("floating-agent-menu", "agent-picker", mode);
     let _ = app.emit_to("floating", "agent-picker", mode);
     // Hidden webview may mount late — re-emit so list paints.
@@ -972,11 +1073,8 @@ pub(crate) fn get_agent_picker() -> String {
     agent_picker_mode()
 }
 
-/// Collapse agent picker from Esc / HUD.
+/// Collapse agent picker from Esc / HUD hide (always clear — tolerates desync).
 pub(crate) fn close_floating_agent_menu(app: &AppHandle) {
-    if !floating_agent_menu_is_open() {
-        return;
-    }
     let app = app.clone();
     let _ = app.clone().run_on_main_thread(move || {
         apply_agent_picker_open(&app, "", 1);

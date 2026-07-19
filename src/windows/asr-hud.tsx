@@ -101,6 +101,8 @@ export function AsrHud() {
   const cwdRef = useRef(cwd);
   const pickerModeRef = useRef(pickerMode);
   const dispatchingRef = useRef(false);
+  const attachDialogRef = useRef(false);
+  const attachDialogGenRef = useRef(0);
 
   useEffect(() => {
     payloadRef.current = payload;
@@ -127,6 +129,19 @@ export function AsrHud() {
   useEffect(() => {
     editTextRef.current = editText;
   }, [editText]);
+
+  /** Ephemeral agent/HUD UI — must clear when HUD closes or new voice starts. */
+  const resetAgentSessionUi = useCallback(() => {
+    attachDialogGenRef.current += 1;
+    attachDialogRef.current = false;
+    setEditText("");
+    setAttachments([]);
+    setPickerMode("");
+    setError(null);
+    setBusy(false);
+    confirmingRef.current = false;
+    dispatchingRef.current = false;
+  }, []);
 
   const agentLabel =
     profiles.find((p) => p.id === profileId)?.name ??
@@ -200,7 +215,7 @@ export function AsrHud() {
 
   const startVoice = useCallback(async () => {
     setError(null);
-    setEditText("");
+    resetAgentSessionUi();
     setPayload((prev) => ({
       ...prev,
       text: "",
@@ -237,7 +252,7 @@ export function AsrHud() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, []);
+  }, [resetAgentSessionUi]);
 
   const stopVoice = useCallback(async () => {
     try {
@@ -253,10 +268,8 @@ export function AsrHud() {
     } catch {
       /* ignore */
     }
-    setEditText("");
-    setAttachments([]);
-    setPickerMode("");
-  }, []);
+    resetAgentSessionUi();
+  }, [resetAgentSessionUi]);
 
   const dispatch = useCallback(async (text: string) => {
     if (dispatchingRef.current) return;
@@ -441,7 +454,7 @@ export function AsrHud() {
         }
         if (event.payload.cwd != null) setCwd(event.payload.cwd || "");
         if (!event.payload.visible || event.payload.state === "idle") {
-          setPickerMode("");
+          resetAgentSessionUi();
           void invoke("set_agent_picker", { mode: "", itemCount: 1 }).catch(
             () => {},
           );
@@ -507,9 +520,7 @@ export function AsrHud() {
     add(
       listen("agent-voice-cancel", () => {
         // Rust already cancelled; clear local agent UI only.
-        setEditText("");
-        setAttachments([]);
-        setPickerMode("");
+        resetAgentSessionUi();
       }),
     );
     add(
@@ -587,14 +598,21 @@ export function AsrHud() {
       window.removeEventListener("storage", onStorage);
       unlisteners.forEach((u) => u());
     };
-  }, [startVoice, stopVoice, cancelVoice, confirmTranscript, cancelTranscript]);
+  }, [startVoice, stopVoice, cancelVoice, confirmTranscript, cancelTranscript, resetAgentSessionUi]);
 
   const addAttach = async (asDir: boolean) => {
+    if (attachDialogRef.current) return;
+    attachDialogRef.current = true;
+    const gen = attachDialogGenRef.current;
     // Defer past HeroUI/RAC press end — sync openDialog swallows pointerup and
     // leaves the HUD dead after ESC-cancel / reopen.
     await new Promise<void>((r) => {
       window.setTimeout(r, 0);
     });
+    if (gen !== attachDialogGenRef.current) {
+      attachDialogRef.current = false;
+      return;
+    }
     let selected: string | string[] | null = null;
     try {
       selected = await openDialog(
@@ -612,11 +630,15 @@ export function AsrHud() {
     } catch {
       selected = null;
     } finally {
+      if (gen === attachDialogGenRef.current) {
+        attachDialogRef.current = false;
+      }
       await invoke("restore_floating_interaction").catch(() => {});
       requestAnimationFrame(() => {
         editRef.current?.focus();
       });
     }
+    if (gen !== attachDialogGenRef.current) return;
     const paths = Array.isArray(selected)
       ? selected
       : typeof selected === "string"

@@ -224,7 +224,8 @@
   gap: 16px;
   align-items: flex-start;
   padding: 22px 4px;
-  border-bottom: 1px solid var(--separator);
+  /* border 不好看 先 disable */
+  /* border-bottom: 1px solid var(--separator); */
   cursor: pointer;
   transition: background-color 120ms ease;
   text-align: left;

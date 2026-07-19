@@ -222,18 +222,14 @@ html.light[data-floating="1"] .hud-agent-menu-item.is-active {
   /* Solid — external window has no vibrancy; must not rely on frost */
   background: rgba(28, 28, 32, 0.98);
   color: rgba(255, 255, 255, 0.94);
-  /* Hairline kills clear-window anti-alias fringe; soft shadow stays inside inset */
-  box-shadow:
-    0 0 0 0.5px rgba(255, 255, 255, 0.08),
-    0 8px 24px rgba(0, 0, 0, 0.28);
+  /* Soft elevation only — no 0.5px hairline ring */
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
 }
 
 html.light[data-floating="1"] .hud-agent-menu-ext {
   background: rgba(255, 255, 255, 0.98);
   color: rgba(16, 16, 18, 0.92);
-  box-shadow:
-    0 0 0 0.5px rgba(0, 0, 0, 0.1),
-    0 8px 24px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 html.light[data-floating="1"] .hud-agent-menu-ext .hud-agent-menu-item {
@@ -857,8 +853,8 @@ html.light[data-floating="1"] .hud-brand-bar {
   background: rgba(23, 25, 30, 0.92);
   border: none;
   border-radius: 999px;
-  /* Hairline only — drop shadows clip to the rectangular webview → square corners */
-  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.14);
+  /* No edge hairline — 0.5px ring read as dark/hard stroke on Retina */
+  box-shadow: none;
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
   overflow: hidden;
@@ -867,7 +863,7 @@ html.light[data-floating="1"] .hud-brand-bar {
 html.light[data-floating="1"] .hud-capsule {
   /* Paper face, not pure white */
   background: rgba(244, 242, 238, 0.88);
-  box-shadow: 0 0 0 0.5px rgba(28, 26, 23, 0.16);
+  box-shadow: none;
 }
 
 .hud-fn-badge {

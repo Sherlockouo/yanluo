@@ -16,13 +16,13 @@
 | 部位 | 规格 |
 |------|------|
 | 胶囊 | min-w 420px，h 56px，圆角 999px，padding 10px 18px 10px 14px |
-| 背景 | 深 `rgba(23,25,30,0.92)` / 浅 `rgba(255,255,255,0.88)`，border hairline |
+| 背景 | 深 `rgba(23,25,30,0.92)` / 浅 `rgba(244,242,238,0.88)`；**无**边缘 hairline（Retina 上像硬描边） |
 | 材质 | `backdrop-filter: blur(20px) saturate(180%)`（仅 HUD，主 shell 不用） |
-| 阴影 | `0 8px 24px rgba(0,0,0,0.28)`（深）/ `rgba(0,0,0,0.12)`（浅）；**无 native NSWindow shadow**（矩形阴影会在圆角外形成方环） |
+| 阴影 | 胶囊无 box-shadow；菜单可用软投影。**无 native NSWindow shadow**（矩形阴影会在圆角外形成方环） |
 | 音频条 | 5 根 × 3px 宽，铜 accent，高 6/14/20/12/8px，`scaleY(0.55↔1)` pulse 1.1s，delay 0/0.1/0.2/0.15/0.05s |
 | 文本 | 13px Satoshi，单行 nowrap ellipsis；已提交段 muted，当前段 foreground |
 | Fn badge | mono 10px，border hairline，圆角 6px，padding 1px 5px |
-| 位置 | **跟随鼠标所在屏幕**（居中底部 inset）；同屏内记住拖拽位置 |
+| 位置 | **跟随鼠标所在屏幕**；默认居中、距底 **120px**（避开 Dock）。**按显示器**记住拖拽位；换屏 → 该屏默认位 |
 
 ## 状态
 

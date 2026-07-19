@@ -34,46 +34,6 @@ export const springBounce = {
   duration: 0.35,
 } as const;
 
-/** Popover open — gentler bounce, quicker settle than springBounce. */
-export const popoverSpring = {
-  type: "spring",
-  bounce: 0.15,
-  duration: 0.25,
-} as const;
-
-/**
- * Stagger config for framer-motion variants. Capped at the first 6 items —
- * long lists must not delay-tail forever.
- */
-export function staggerChildren(delay = 0.05) {
-  return {
-    staggerChildren: delay,
-    /** Items past the 6th all land at the 6th item's delay. */
-    delayChildren: 0,
-    staggerDirection: 1,
-    // framer caps via custom per-item delay; expose the cap for callers.
-    maxItems: 6,
-    itemDelay: (index: number) => Math.min(Math.max(index, 0), 5) * delay,
-  } as const;
-}
-
-/**
- * Modal panel enter/exit — opacity + scale + y only (GPU). Pair with
- * springBounce on enter for the "pop open" read.
- */
-export const modalEnter = {
-  panel: {
-    initial: { opacity: 0, scale: 0.94, y: 20 },
-    animate: { opacity: 1, scale: 1, y: 0 },
-  },
-} as const;
-
-export const modalExit = {
-  panel: {
-    exit: { opacity: 0, scale: 0.94, y: 20 },
-  },
-} as const;
-
 type MotionBundle = {
   initial: { opacity: number; y?: number };
   animate: { opacity: number; y?: number };

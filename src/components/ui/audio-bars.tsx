@@ -3,7 +3,7 @@ import { cn } from "@/lib/cn";
 
 /** Compact spectrum: 6 bands across speech-range Hz. */
 export const SPECTRUM_BAR_COUNT = 6;
-const WAVE_W = 28;
+const WAVE_W = 36;
 /** Hard cap — bars must not exceed this (HUD glyph scale). */
 const WAVE_H = 16;
 

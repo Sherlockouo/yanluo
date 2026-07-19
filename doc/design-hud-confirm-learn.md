@@ -1,6 +1,6 @@
 # HUD 确认再贴 + 改字即学
 
-> 权威：本文件。UI 服从 [`design-jobs.md`](./design-jobs.md)；数据流服从 [`architecture-local-first.md`](./architecture-local-first.md)。
+> 权威：本文件。UI 服从 [`DESIGN.md`](./DESIGN.md)；数据流服从 [`architecture-local-first.md`](./architecture-local-first.md)。
 
 ## 一句话
 
@@ -11,7 +11,7 @@ Fn / ⇧Fn 识别完后 **HUD 停住可编辑**；再按 Fn（或 Enter）才粘
 | 时机 | 动作 |
 |------|------|
 | idle → Fn / ⇧Fn | 开始录音（同前） |
-| recording → 松开 Fn | 停录 → 进 **editing**（不粘贴） |
+| recording → 松开 Fn | 停录 → 进 **editing**（不粘贴）；识别结果为空则直接关 HUD |
 | editing → Fn / Enter | 粘贴确认稿 → 写 history → 关 HUD |
 | editing → Esc | 取消：不贴、不写 history |
 

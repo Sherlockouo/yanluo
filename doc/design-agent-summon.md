@@ -1,6 +1,6 @@
 # Agent Summon (Fn+Space)
 
-> 权威：本文件。UI 服从 [`design-jobs.md`](./design-jobs.md)；数据流服从 [`architecture-local-first.md`](./architecture-local-first.md)。
+> 权威：本文件。UI 服从 [`DESIGN.md`](./DESIGN.md)；数据流服从 [`architecture-local-first.md`](./architecture-local-first.md)。
 
 ## 一句话
 
@@ -12,7 +12,7 @@
 - **第一次**：显示 floating HUD（`intention=agent`）+ 开始录音。
 - **再按**（录音中）：停录 → 进入 **editing**（可改文本）。
 - **Enter** / 发送：`dispatch_agent`。
-- Esc：取消录音 / 关 HUD（仅 agent 态）。
+- Esc：取消录音 / 关 HUD（仅 agent 态）。关 HUD 时重置 picker / 附件 / 对话框飞行态。
 - 抑制本次 Fn 松开的转写粘贴。
 
 ### HUD 内快捷键（agent 态）

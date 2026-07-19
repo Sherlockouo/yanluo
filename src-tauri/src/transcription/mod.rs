@@ -1175,8 +1175,14 @@ pub(crate) fn finalize_successful_result(
     }
 
     // Fn / ⇧Fn: hold editable text on HUD — paste + history on confirm.
+    // Empty ASR → no edit HUD (nothing to confirm/paste).
     // pending.asr_text = text shown at edit start (post-vocab / LLM), for edit detection.
     // result.raw_text stays true ASR for learn triples.
+    if result.text.trim().is_empty() {
+        eprintln!("[asr] hud confirm-wait skipped: empty result mode={source}");
+        AsrEngine::set_pending_hud_confirm(app, None);
+        return Some(false);
+    }
     let shown_text = result.text.clone();
     AsrEngine::set_pending_hud_confirm(
         app,

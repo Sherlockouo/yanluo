@@ -1,7 +1,9 @@
 # Design System — 言落 (Yanluo)
 
-> Authority for brand, visual, and IA. Jobs/local-first rules still apply:
-> [`design-jobs.md`](./design-jobs.md) · [`architecture-local-first.md`](./architecture-local-first.md) · [`Sell-it.md`](./Sell-it.md).
+> Authority for brand, visual, and IA. Companion rules:
+> [`architecture-local-first.md`](./architecture-local-first.md) · [`Sell-it.md`](./Sell-it.md).
+>
+> **Jobs 原则**（原 design-jobs.md 已并入本文）: 一屏一个主任务；配置收敛到页头/设置，不垫底；减法优先；布局即说明。
 >
 > Repo root mirror: [`../../DESIGN.md`](../../DESIGN.md).
 
@@ -67,16 +69,17 @@
   - Ink `#E8E6E3`
   - Muted `#8B8A86`
   - Line `rgba(232, 230, 227, 0.08)`
-- **Light app mode (warm paper + bright orange — v3, replaces cool-slate/#B56A3F):**
-  - Paper `#F4F2EE` (warm near-white — not cool slate `#E6E8ED`, not flat white)
-  - Surface (cards) `#FFFFFF` / secondary `#F8F6F2`
-  - Ink `#1C1A17` (warm near-black) · Muted `#6E6862`
-  - **Accent = bright orange `#D9722E`** — CTA solid fill with white text; only primary action.
+- **Light app mode (clean warm-white + bright orange — v4, replaces warm-beige #F4F2EE):**
+  - Paper `#F6F5F2` (clean warm-white — not beige `#f0ede6`, not cool slate `#E6E8ED`, not flat white)
+  - Surface (cards) `#FFFFFF` / secondary `#FAF9F6` / inset wells `#EDEBE6` — three readable layers
+  - Ink `#1C1A17` (warm near-black) · Muted `#6B6660` · Faint `#8E8983`
+  - Border `rgba(30,28,25,0.15)` / separator `rgba(30,28,25,0.09)` — thin hairlines, no heavy frames
+  - **Accent = bright orange `#D9722E`** — CTA solid fill with white text; recording light; only primary action.
   - **Accent text `#A0561F`** — deeper copper for small copper text on paper (≥4.5:1). Never use bright `#D9722E` for small text on light.
-  - Soft fill = warm orange wash `rgba(217,114,46,0.11)`, not peach pastel; hairline borders over drop shadows.
+  - Soft fill = warm orange wash `rgba(217,114,46,0.10)`, not peach pastel; hairline borders + whisper of cool-neutral ambient shadow on cards.
   - Rail mark: ink block on light (inverse of copper pill).
-- **Why v3:** cold slate + deep copper read dirty/muddy; warmed + brightened paper with a purer orange keeps the accent alive, not brown. Design contract: `asr-cli/doc/design/v2/yanluo-ui.html` (settings/HUD) + `asr-cli/doc/design/v2/draft-a.html` (出稿 editorial).
-- **Semantic:** keep clear success/warning/danger; retune away from pure Apple system blue as accent. Focus ring follows the accent, not `#007AFF`.
+- **Why v4:** 米黄底色大面积显脏、白卡浮在泥浆上；去黄降饱和后纸/卡/嵌三层清晰。Design contract: `asr-cli/doc/design/v3/theme.html` (双主题概念) + `asr-cli/doc/design/v3/` (页面稿).
+- **Semantic:** keep clear success/warning/danger (light danger `#C24238`, success `#2F7A4C`, warning `#A66C12`); retune away from Apple system blue. Focus ring follows the accent, not `#007AFF`.
 - **Dark mode strategy:** Dark is the brand face (copper `#C4784A`) and stays unchanged; light is a first-class alternate, not an afterthought.
 - **App background is flat** (`var(--background)` both themes). No radial/decorative gradient on `.app-content` — a solid sticky masthead over a gradient leaves a visible layer seam. Keep surfaces flat; depth = hairlines, not glows.
 - **Accent discipline:** bright `#D9722E` = solid CTA fill + recording light + active-tab 2px underline only. Never as a large fill, small text, or a second persistent accent surface.
@@ -93,7 +96,7 @@
 - **Shell:** Narrow icon rail (3 destinations) — **not** a wide labeled sidebar of feature groups.
 - **Scroll:** `.app-content` is the single scroll region. **No nested scroll containers** (no `max-h + overflow` on result/record lists) — lists flow, the page scrolls.
 - **Max content width:** ~720–880px for reading/results; full width for job timelines when needed. 设置 fills width (two-pane), left-aligned — not a centered narrow column.
-- **Radius:** sm 6 · md 10 · lg 14 · capsule 9999 (HUD only).
+- **Radius:** sm 8 · md 12 · lg 16 · xl 20 · capsule 999 (HUD/pills) — rounded, friendly; tokens `--radius-sm/md/lg/xl/pill`.
 - **Jobs hierarchy:** One primary job per screen; config via header secondary; never config cemetery under scroll.
 
 ### 出稿 — editorial masthead (contract: `design/v2/draft-a.html`)
@@ -105,17 +108,58 @@
 
 ### 设置 — macOS-style two-pane
 
-- Left source list (`.setnav`, ~250px) + right detail (`.setbody`, fills width). Serif section heading atop the detail pane.
+- Left source list (`.setnav`, 240px) + right detail (`.setbody`, fills width). Serif section heading atop the detail pane. Form rows = hairline（左标签右控件，无盒）; 保存条 sticky 底部通栏。
 - **Secondary tabs** (配置/纠错学习/词库 · 快捷键/权限) = quiet underline text on a hairline (`.set-subtabs`), copper active — **not** a boxed segmented control.
 - Per-tab, results/primary first, advanced collapsed: 识别 = 引擎/型号/对齐 + `模型目录与高级参数` fold; 润色 = 服务商 list rows (view/edit/set-current/reset) + `自定义` slot; 派活 = 3 fixed built-in agents (Claude/Codex/Pi), no free-form add.
 
-## Motion
+## Interaction & Motion（含 Apple Design 原则）
 
-- **Approach:** Intentional minimal-functional (matches local-first rules).
-- **Only:** `opacity` + `transform`. Never layout props.
-- **Duration:** micro 80ms · short ≤220ms · no showy stagger.
-- **Pages / modes:** enter-only; never `AnimatePresence mode="sync"` / `mode="wait"` on `<Outlet />`.
-- **HUD:** subtle bar pulse while listening; confirm state clear, not theatrical.
+> 合并自原 `DESIGN-RECORD.md`（已并入，原文件删除）。
+
+### 硬规则
+
+- **只动** `opacity` + `transform`。Never layout props（width/height/top/left）。
+- **时长：** micro 80ms · short ≤220ms · 无炫技 stagger。
+- **Pages / modes:** enter-only；never `AnimatePresence mode="sync"` / `mode="wait"` on `<Outlet />`。
+- **Route/nav/PageShell 保持 tween**；UI 元素（卡片/面板/popover/弹窗）可用 spring：`springUI = { type: "spring", bounce: 0, duration: 0.2 }`（临界阻尼、可中断、无 overshoot）。视觉享受点（modal 出现/落位）可到 `bounce: 0.2–0.25, duration: 0.3–0.35`。
+- **HUD:** subtle bar pulse while listening；confirm state clear, not theatrical。
+
+### 响应 — 消灭延迟
+
+- **pointer-down 反馈，非 release。** 所有可交互元素 `:active` 即时响应：
+  按钮 `scale(0.97)` · 卡片 `scale(0.985)` · 列表行 `scale(0.99)` · chip `scale(0.96)`，`transition: transform 100ms ease-out`，全部包 `prefers-reduced-motion` guard。
+- 拖拽/滑动全程 1:1 跟手，非手势结束才动画；`setPointerCapture` + 抓取偏移。
+
+### 可中断性与 spring
+
+- 动画可被随时抓取和反转；中断时从当前屏幕值开始新动画（framer-motion spring 默认如此）。
+- 手势驱动不用 CSS transition/@keyframes；反转时混合速度，不硬切。
+- Damping `1.0`（临界）为默认；仅手势携带动量（flick/drag release）时 `~0.8`。
+
+### 空间一致性
+
+- **进入和退出同路径**（右侧滑入 → 右侧滑出）。
+- popover/sheet 从触发源起源（`transform-origin` 设为触发器）。
+- 可逆过渡镜像 easing。
+
+### 材质与深度
+
+- 主 shell 背景 flat；**仅 HUD 胶囊**用 `backdrop-filter: blur(20px) saturate(180%)` + 半透明背景。
+- 永不堆叠浅色半透明层；更大表面 = 更强 blur + 更深 shadow。
+- 滚动区域用 scroll-edge mask fade（`transparent 0 / #000 12px / #000 calc(100% - 16px) / transparent 100%`），不用硬分隔线。
+
+### 减少动态
+
+- `prefers-reduced-motion: reduce`：slide/spring → 短 opacity cross-fade；去掉 overshoot。
+- `prefers-reduced-transparency`：半透明面 → 更实。
+- `prefers-contrast: more`：近实背景 + 清晰对比边框。
+
+### 关键规格
+
+- 页面进入：PageShell `opacity 0.92→1, y 12→0, scale 0.995→1`，180ms tween。
+- 列表行：Reveal capped stagger（前 4 行 ×40ms，opacity 0.92 + y 6）。
+- 弹窗（转录详情等）：backdrop fade 180ms + panel spring（scale 0.95→1, y 24→0, bounce ≤0.2），exit 镜像。
+- HUD 出现：圆点 ease-in → 左右弹开成胶囊（scale 0.35→1, springBounce）→ 音频条从左流入（x -8→0, delay 0.12s）。
 
 ## Information Architecture
 
@@ -172,7 +216,6 @@ Ship in order. Each step should still pass Jobs 3-second test.
 
 - [ ] Overview / empty states use Sell-it language (有稿 / 派活 / 本地), not engine jargon
 - [ ] Update `doc/Sell-it.md` product name to 言落
-- [ ] Update `doc/design-jobs.md` title references
 - [ ] README product blurb (keep stack facts for devs; marketing voice separate)
 
 ### Verify
@@ -198,5 +241,5 @@ Ship in order. Each step should still pass Jobs 3-second test.
 
 ## Artifacts
 
-- Brand HTML preview: `~/.gstack/projects/asrrrr/designs/yanluo-20260715/brand-preview.html`
+- 双主题颜色概念 + 页面设计稿（HTML 可预览）: `asr-cli/doc/design/v3/`（先看 `theme.html` 与 `README.md`）
 - Cursor canvas: `canvases/yanluo-brand.canvas.tsx` (workspace)

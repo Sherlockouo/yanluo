@@ -181,13 +181,20 @@ export function AsrHudAgentMenu() {
   );
 
   const addCwd = useCallback(async () => {
+    await new Promise<void>((r) => {
+      window.setTimeout(r, 0);
+    });
     const selected = await open({
       directory: true,
       multiple: false,
       defaultPath: cwd || undefined,
     }).catch(() => null);
+    await invoke("restore_floating_interaction").catch(() => {});
     const path = typeof selected === "string" ? selected : null;
-    if (!path) return;
+    if (!path) {
+      // ESC cancel — keep picker usable; don't leave HUD/menu dead.
+      return;
+    }
     pickCwd(path);
   }, [cwd, pickCwd]);
 
