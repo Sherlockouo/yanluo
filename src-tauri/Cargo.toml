@@ -40,12 +40,11 @@ objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSGeomet
 
 # Qwen3-ASR Rust implementation (MLX — macOS).
 # Enable with `--features qwen-local` (Apple Silicon recommended).
-# Local path (has init_streaming_with_context + pub chunk_id).
-# CI/release may pin git once main catches up:
-#   git = "https://github.com/XBCoder128/qwen3_asr_rs"
-#   branch = "main"
+# Git dep for CI/release. Local path override while co-developing:
+#   path = "../../qwen3_asr_rs"
 [dependencies.qwen3-asr-rs]
-path = "../../qwen3_asr_rs"
+git = "https://github.com/XBCoder128/qwen3_asr_rs"
+branch = "main"
 default-features = false
 features = ["mlx"]
 optional = true

@@ -101,6 +101,7 @@ jobs:
 
       - name: Build release notes from CHANGELOG
         if: steps.ver.outputs.publish == 'true'
+        id: notes
         shell: bash
         env:
           VERSION: ${{ steps.ver.outputs.version }}
@@ -131,6 +132,11 @@ jobs:
           Path("release-notes.md").write_text(body + "\n", encoding="utf-8")
           print(body)
           PY
+          {
+            echo "body<<EOF"
+            cat release-notes.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub Release (tagged)
         if: steps.ver.outputs.publish == 'true'
@@ -140,7 +146,7 @@ jobs:
         with:
           tagName: ${{ steps.ver.outputs.tag }}
           releaseName: 言落 ${{ steps.ver.outputs.tag }}
-          releaseBodyFile: release-notes.md
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
