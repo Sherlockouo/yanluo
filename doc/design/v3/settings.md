@@ -68,4 +68,5 @@
 
 - 【yes】保存按钮常驻底部 sticky → **已实现：savebar sticky 通栏**
 - 【layout】整体太紧凑 → **已重做：v3.1 填宽 + 去盒 + hairline rows**
+- 【yes】tab/sub + 每 tab 滚动：sessionStorage 记忆；裸 `/settings` 还原上次分类；URL `?tab=`（含 alias）优先；切 tab/sub / 离页再进各自还原 `.app-content` scrollTop
 - 【 】左栏图标是否保留？（现保留小 icon；纯文字更编辑感）

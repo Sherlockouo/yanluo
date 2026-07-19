@@ -1,4 +1,12 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { CSSProperties } from "react";
 import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -85,8 +93,14 @@ import {
 } from "@/lib/changelog";
 import { LlmPage } from "@/views/llm-page";
 import { VocabularyPage } from "@/views/vocabulary-page";
-
-type SettingsTab = "general" | "asr" | "polish" | "agent" | "system" | "updates";
+import { useTabScroll } from "@/hooks/use-tab-scroll";
+import {
+  isSettingsTab,
+  patchSettingsUi,
+  readSettingsUi,
+  settingsScrollKey,
+  type SettingsTab,
+} from "@/lib/ui-session";
 
 type PolishSub = "config" | "refine" | "vocab";
 type SystemSub = "hotkeys" | "permissions";
@@ -108,9 +122,35 @@ function resolveTabParam(raw: string | null): {
   tab: SettingsTab;
   sub?: string;
 } {
-  if (raw && TABS.some((t) => t.id === raw)) return { tab: raw as SettingsTab };
+  if (raw && isSettingsTab(raw)) return { tab: raw };
   if (raw && raw in TAB_ALIASES) return TAB_ALIASES[raw];
   return { tab: "general" };
+}
+
+function effectiveSub(tab: SettingsTab, sub: string | undefined): string | undefined {
+  if (tab === "polish") {
+    return POLISH_SUBS.some((s) => s.id === sub) ? sub : "config";
+  }
+  if (tab === "system") {
+    return SYSTEM_SUBS.some((s) => s.id === sub) ? sub : "hotkeys";
+  }
+  return undefined;
+}
+
+function resolveInitialSettings(
+  tabParam: string | null,
+  subParam: string | null,
+): { tab: SettingsTab; sub?: string; fromStorage: boolean } {
+  if (tabParam) {
+    const resolved = resolveTabParam(tabParam);
+    const sub = subParam ?? resolved.sub;
+    return { tab: resolved.tab, sub, fromStorage: false };
+  }
+  const stored = readSettingsUi();
+  if (stored && isSettingsTab(stored.tab)) {
+    return { tab: stored.tab, sub: stored.sub, fromStorage: true };
+  }
+  return { tab: "general", fromStorage: false };
 }
 
 type PermissionStatus = {
@@ -332,34 +372,120 @@ function SubTabs<T extends string>({
 
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const resolved = resolveTabParam(searchParams.get("tab"));
-  const [tab, setTab] = useState<SettingsTab>(resolved.tab);
-  const [sub, setSub] = useState<string | undefined>(resolved.sub);
+  const seeded = useRef(
+    resolveInitialSettings(searchParams.get("tab"), searchParams.get("sub")),
+  );
+  const [tab, setTab] = useState<SettingsTab>(seeded.current.tab);
+  const [sub, setSub] = useState<string | undefined>(seeded.current.sub);
+  const scroll = useTabScroll(readSettingsUi()?.scroll ?? {});
+  const tabRef = useRef(tab);
+  const subRef = useRef(sub);
+  tabRef.current = tab;
+  subRef.current = sub;
+  const urlFromClick = useRef(false);
+  const urlHydrated = useRef(false);
 
-  // Old ids (?tab=refine etc.) resolve above; normalize the URL once so the
-  // address reflects the canonical tab/sub instead of the retired alias.
+  const scrollKeyFor = (t: SettingsTab, s: string | undefined) =>
+    settingsScrollKey(t, effectiveSub(t, s));
+
+  const persistNav = (t: SettingsTab, s: string | undefined) => {
+    patchSettingsUi({
+      tab: t,
+      sub: effectiveSub(t, s),
+    });
+  };
+
+  const applyNav = (
+    nextTab: SettingsTab,
+    nextSub: string | undefined,
+    opts?: { skipScroll?: boolean },
+  ) => {
+    const fromKey = scrollKeyFor(tabRef.current, subRef.current);
+    const toKey = scrollKeyFor(nextTab, nextSub);
+    if (!opts?.skipScroll) {
+      const y = scroll.save(fromKey);
+      patchSettingsUi({
+        tab: nextTab,
+        sub: effectiveSub(nextTab, nextSub),
+        scrollPatch: { [fromKey]: y },
+      });
+    } else {
+      persistNav(nextTab, nextSub);
+    }
+    setTab(nextTab);
+    setSub(nextSub);
+    if (!opts?.skipScroll && fromKey !== toKey) {
+      requestAnimationFrame(() => scroll.restore(toKey));
+    }
+  };
+
+  // Alias → canonical URL once (before storage seed URL write).
   useEffect(() => {
     const raw = searchParams.get("tab");
-    if (raw && !TABS.some((t) => t.id === raw) && raw in TAB_ALIASES) {
+    if (raw && !isSettingsTab(raw) && raw in TAB_ALIASES) {
       const next = TAB_ALIASES[raw];
       const params: Record<string, string> = { tab: next.tab };
       if (next.sub) params.sub = next.sub;
+      setSearchParams(params, { replace: true });
+      return;
+    }
+    // Bare `/settings`: push stored tab/sub into URL.
+    if (!raw && seeded.current.fromStorage) {
+      const t = seeded.current.tab;
+      const s = effectiveSub(t, seeded.current.sub);
+      if (t === "general") return;
+      const params: Record<string, string> = { tab: t };
+      if (s) params.sub = s;
       setSearchParams(params, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useLayoutEffect(() => {
+    scroll.restore(scrollKeyFor(tab, sub));
+    persistNav(tab, sub);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
-    const resolvedNext = resolveTabParam(searchParams.get("tab"));
-    if (resolvedNext.tab !== tab) setTab(resolvedNext.tab);
+    return () => {
+      const key = scrollKeyFor(tabRef.current, subRef.current);
+      const y = scroll.save(key);
+      patchSettingsUi({
+        tab: tabRef.current,
+        sub: effectiveSub(tabRef.current, subRef.current),
+        scrollPatch: { [key]: y },
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (urlFromClick.current) {
+      urlFromClick.current = false;
+      return;
+    }
+    const raw = searchParams.get("tab");
+    if (!urlHydrated.current) {
+      urlHydrated.current = true;
+      if (!raw && seeded.current.fromStorage) return;
+    }
+    const resolvedNext = resolveTabParam(raw);
     const nextSub = searchParams.get("sub") ?? resolvedNext.sub;
-    if (nextSub !== sub) setSub(nextSub);
+    if (
+      resolvedNext.tab !== tabRef.current ||
+      nextSub !== subRef.current
+    ) {
+      applyNav(resolvedNext.tab, nextSub);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
   const selectTab = (id: SettingsTab) => {
-    setTab(id);
-    setSub(undefined);
+    // Same primary tab with no sub already open — no-op.
+    if (id === tab && sub == null) return;
+    applyNav(id, undefined);
+    urlFromClick.current = true;
     if (id === "general") {
       setSearchParams({}, { replace: true });
     } else {
@@ -368,7 +494,9 @@ export function SettingsPage() {
   };
 
   const selectSub = (nextSub: string) => {
-    setSub(nextSub);
+    if (nextSub === sub) return;
+    applyNav(tab, nextSub);
+    urlFromClick.current = true;
     setSearchParams({ tab, sub: nextSub }, { replace: true });
   };
 

@@ -70,4 +70,5 @@
 
 - 【 右上 】`＋新转写` 位置：masthead 右上（现）vs 手稿区顶部一行？
 - 【保持现状】历史 tab 的 inline 展开是否也统一改弹窗？（现仅文件 tab 弹窗）
+- 【yes】模式 + 每模式滚动：sessionStorage 记忆；裸 `/draft` 还原上次 mode；URL `?mode=` 优先；切 tab / 离页再进各自还原 `.app-content` scrollTop
 - 【 动画 】draft 的 header 模块，在切换时会出现跳动，页面闪烁的问题，优化下 不要有闪烁要丝滑动画

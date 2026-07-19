@@ -3151,6 +3151,138 @@ mod distill_term_tests {
     }
 }
 
+// Live refine A/B eval against a real Ollama model. Ignored by default (needs
+// a running model). Run e.g.:
+//   REFINE_EVAL_MODEL=qwen3:1.7b \
+//   REFINE_EVAL_URL=http://127.0.0.1:11434/v1 \
+//   cargo test --lib refine_eval -- --ignored --nocapture
+#[cfg(test)]
+mod refine_eval {
+    use super::{refine_transcript_with_cases, FewShotCase};
+    use crate::config::AppConfig;
+
+    /// (asr_with_errors, gold_correct). The homophone/term errors here mimic
+    /// what Qwen3-ASR emits on CN speech with English tech terms.
+    fn eval_pairs() -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("我用配森写了个杰森接口", "我用Python写了个JSON接口"),
+            ("打开麦赛口数据库", "打开MySQL数据库"),
+            ("部署到库伯内战斯集群", "部署到Kubernetes集群"),
+            ("用道克尔打包镜像", "用Docker打包镜像"),
+            ("提交了一个普尔请求", "提交了一个PR"),
+            ("这个接口返回未定义", "这个接口返回undefined"),
+            ("今天开会讨论了项目进度", "今天开会讨论了项目进度"), // no-op: must not over-edit
+            ("我们用容器化部署微服务", "我们用容器化部署微服务"), // no-op
+        ]
+    }
+
+    /// Cases used as few-shot conditioning (the "user already corrected these").
+    fn train_cases() -> Vec<FewShotCase> {
+        vec![
+            FewShotCase { asr: "库伯内战斯".into(), gold: "Kubernetes".into() },
+            FewShotCase { asr: "道克尔".into(), gold: "Docker".into() },
+            FewShotCase { asr: "普尔请求".into(), gold: "PR".into() },
+            FewShotCase { asr: "未定义".into(), gold: "undefined".into() },
+        ]
+    }
+
+    fn char_accuracy(pred: &str, gold: &str) -> f64 {
+        let p: Vec<char> = pred.chars().collect();
+        let g: Vec<char> = gold.chars().collect();
+        if g.is_empty() {
+            return if p.is_empty() { 1.0 } else { 0.0 };
+        }
+        // Levenshtein distance → 1 - dist/len(gold).
+        let n = p.len();
+        let m = g.len();
+        let mut prev: Vec<usize> = (0..=m).collect();
+        let mut cur = vec![0usize; m + 1];
+        for i in 1..=n {
+            cur[0] = i;
+            for j in 1..=m {
+                let cost = if p[i - 1] == g[j - 1] { 0 } else { 1 };
+                cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut cur);
+        }
+        let dist = prev[m];
+        1.0 - (dist as f64 / m as f64)
+    }
+
+    fn eval_config() -> AppConfig {
+        let mut c = AppConfig::default();
+        c.llm_enabled = true;
+        c.llm_api_base_url =
+            std::env::var("REFINE_EVAL_URL").unwrap_or_else(|_| "http://127.0.0.1:11434/v1".into());
+        c.llm_model = std::env::var("REFINE_EVAL_MODEL").unwrap_or_else(|_| "qwen3:1.7b".into());
+        c.llm_api_key = std::env::var("REFINE_EVAL_KEY").unwrap_or_default();
+        c
+    }
+
+    #[test]
+    #[ignore = "needs a live LLM (Ollama). See module comment."]
+    fn ab_fewshot_vs_none() {
+        let config = eval_config();
+        let pairs = eval_pairs();
+        let train = train_cases();
+
+        let mut acc_none = 0.0;
+        let mut acc_shot = 0.0;
+        let mut hits_none = 0usize;
+        let mut hits_shot = 0usize;
+        let mut overedit_none = 0usize;
+        let mut overedit_shot = 0usize;
+        let n = pairs.len();
+
+        println!("\n=== refine A/B eval  model={}  url={} ===", config.llm_model, config.llm_api_base_url);
+        println!("{:<3} {:<7} {:<7}  input", "#", "none", "+shot");
+
+        for (i, (asr, gold)) in pairs.iter().enumerate() {
+            let none = refine_transcript_with_cases(&config, asr, &[])
+                .unwrap_or_else(|e| panic!("refine(none) failed: {e}"));
+            let shot = refine_transcript_with_cases(&config, asr, &train)
+                .unwrap_or_else(|e| panic!("refine(shot) failed: {e}"));
+
+            let a_none = char_accuracy(&none, gold);
+            let a_shot = char_accuracy(&shot, gold);
+            acc_none += a_none;
+            acc_shot += a_shot;
+            if none.trim() == gold.trim() {
+                hits_none += 1;
+            }
+            if shot.trim() == gold.trim() {
+                hits_shot += 1;
+            }
+            // Over-edit: gold == asr (no-op case) but model changed it.
+            if asr == gold {
+                if none.trim() != gold.trim() {
+                    overedit_none += 1;
+                }
+                if shot.trim() != gold.trim() {
+                    overedit_shot += 1;
+                }
+            }
+            println!("{:<3} {:<7.3} {:<7.3}  {}", i + 1, a_none, a_shot, asr);
+            if none.trim() != gold.trim() {
+                println!("      none  → {}", none.trim());
+            }
+            if shot.trim() != gold.trim() {
+                println!("      +shot → {}", shot.trim());
+            }
+        }
+
+        println!("\n--- summary (n={n}) ---");
+        println!("exact-match  none={hits_none}/{n}  +shot={hits_shot}/{n}");
+        println!(
+            "char-acc     none={:.3}  +shot={:.3}",
+            acc_none / n as f64,
+            acc_shot / n as f64
+        );
+        println!("over-edit    none={overedit_none}  +shot={overedit_shot}  (lower is better)");
+        println!("========================================\n");
+    }
+}
+
 #[cfg(test)]
 mod fewshot_tests {
     use super::{build_refine_fewshot, FewShotCase};

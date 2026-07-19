@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PageShell } from "@/components/shared/page-shell";
 import { AsrPage } from "@/views/asr-page";
@@ -8,7 +8,13 @@ import { TranslatePage } from "@/views/translate-page";
 import { providerLabel, asrLanguageOptions } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/app-context";
-type DraftMode = "file" | "live" | "translate" | "history";
+import { useTabScroll } from "@/hooks/use-tab-scroll";
+import {
+  isDraftMode,
+  patchDraftUi,
+  readDraftUi,
+  type DraftMode,
+} from "@/lib/ui-session";
 
 const MODES: { id: DraftMode; label: string }[] = [
   { id: "file", label: "文件" },
@@ -16,6 +22,18 @@ const MODES: { id: DraftMode; label: string }[] = [
   { id: "translate", label: "翻译" },
   { id: "history", label: "历史" },
 ];
+
+function resolveInitialMode(param: string | null): {
+  mode: DraftMode;
+  fromStorage: boolean;
+} {
+  if (isDraftMode(param)) return { mode: param, fromStorage: false };
+  const stored = readDraftUi();
+  if (stored && isDraftMode(stored.mode)) {
+    return { mode: stored.mode, fromStorage: true };
+  }
+  return { mode: "file", fromStorage: false };
+}
 
 /**
  * 出稿 — file/URL transcript · live draft · translate · history as
@@ -26,15 +44,18 @@ const MODES: { id: DraftMode; label: string }[] = [
  * and each panel keeps its own state/scroll/history — no remount, no re-run of
  * its IPC/listeners, no layout-animated indicator to measure. That removes the
  * click hitch and the "history resets on tab switch" bug.
+ *
+ * Session: bare `/draft` restores last mode + per-mode `.app-content` scroll;
+ * URL `?mode=` wins and writes back to sessionStorage.
  */
 export function DraftPage() {
   const { config, modelLoaded } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
-  const initial = (searchParams.get("mode") as DraftMode | null) ?? "file";
-  const [mode, setMode] = useState<DraftMode>(
-    MODES.some((m) => m.id === initial) ? initial : "file",
+  const seeded = useRef(resolveInitialMode(searchParams.get("mode")));
+  const [mode, setMode] = useState<DraftMode>(seeded.current.mode);
+  const [visited, setVisited] = useState<Set<DraftMode>>(
+    () => new Set([seeded.current.mode]),
   );
-  const [visited, setVisited] = useState<Set<DraftMode>>(() => new Set([mode]));
   // Masthead top-right slot. Each mode's active panel portals its contextual
   // action here (keeps the panel's own state fresh — no node-in-effect churn).
   const [actionEl, setActionEl] = useState<HTMLDivElement | null>(null);
@@ -43,34 +64,81 @@ export function DraftPage() {
   // render between setMode and the router commit and reverts the click
   // (first click on 文件 deleted `mode`, next=null never corrected it back).
   const urlFromClick = useRef(false);
+  const urlHydrated = useRef(false);
+  const scroll = useTabScroll(readDraftUi()?.scroll ?? {});
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
+  const applyMode = (from: DraftMode, to: DraftMode) => {
+    if (from === to) return;
+    const y = scroll.save(from);
+    patchDraftUi({ mode: to, scrollPatch: { [from]: y } });
+    setMode(to);
+    startTransition(() => {
+      setVisited((v) => (v.has(to) ? v : new Set(v).add(to)));
+    });
+    requestAnimationFrame(() => scroll.restore(to));
+  };
+
+  // Bare `/draft` (no mode param): push stored mode into the URL once.
+  useEffect(() => {
+    if (!seeded.current.fromStorage) return;
+    const m = seeded.current.mode;
+    if (m === "file") return; // file = no mode param by convention
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        p.set("mode", m);
+        return p;
+      },
+      { replace: true },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Enter page: restore this mode's scroll (after paint).
+  useLayoutEffect(() => {
+    scroll.restore(mode);
+    patchDraftUi({ mode });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Leave page: persist current mode scroll.
+  useEffect(() => {
+    return () => {
+      const y = scroll.save(modeRef.current);
+      patchDraftUi({
+        mode: modeRef.current,
+        scrollPatch: { [modeRef.current]: y },
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (urlFromClick.current) {
       urlFromClick.current = false;
       return;
     }
-    const next = searchParams.get("mode") as DraftMode | null;
-    if (next && MODES.some((m) => m.id === next) && next !== mode) {
-      setMode(next);
-      // URL-driven switch (deep link) — not the click path, but keep the
-      // mount off the urgent render anyway.
-      startTransition(() => {
-        setVisited((v) => (v.has(next) ? v : new Set(v).add(next)));
-      });
+    const next = searchParams.get("mode");
+    // First commit after storage seed: URL still bare — don't treat as 「文件」.
+    if (!urlHydrated.current) {
+      urlHydrated.current = true;
+      if (next == null && seeded.current.fromStorage) return;
     }
-  }, [searchParams, mode]);
+    if (next == null) {
+      if (modeRef.current !== "file") applyMode(modeRef.current, "file");
+      return;
+    }
+    if (isDraftMode(next) && next !== modeRef.current) {
+      applyMode(modeRef.current, next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const selectMode = (id: DraftMode) => {
-    if (id === mode) return; // no-op click must not churn URL / re-render
-    setMode(id); // urgent — tab underline paints first
-    // Panel mount is heavy (first visit): transition so it never blocks the
-    // click task. Mounting in an effect would flush synchronously for
-    // discrete clicks and stall the underline paint.
-    startTransition(() => {
-      setVisited((v) => (v.has(id) ? v : new Set(v).add(id)));
-    });
-    // Preserve sibling params (view/id used by keep-alive TranscribePage) —
-    // wiping them re-derives + re-renders the hidden panel on every switch.
+    if (id === mode) return;
+    applyMode(mode, id);
     urlFromClick.current = true;
     setSearchParams(
       (prev) => {

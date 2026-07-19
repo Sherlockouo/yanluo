@@ -2,6 +2,18 @@
 
 All notable changes to 言落 (Yanluo) are documented in this file.
 
+## [0.9.0] — 2026-07-19
+
+### Added
+- 出稿 / 设置 tab 记忆：记住上次打开的 mode/tab/sub，以及各自 `.app-content` 滚动位置（裸侧栏链接从 session 还原；URL 深链优先）
+- Refine 护栏：长度/句子数/删句拦截，跑偏回退原文
+- Refine few-shot：历史已确认修正注入纠错 prompt
+- Distill 频次门槛 + 常用词 hotword 提炼；词库单 CJK 字 pair 防误伤
+
+### Changed
+- 言落出稿 / 派活 / 设置与 HUD 体验打磨（v0.8.0 以来）
+- Refine 默认 prompt 前后端单一真源；长文分段纠错 + 瞬态失败重试
+
 ## [0.8.0] — 2026-07-16
 
 ### Added
