@@ -71,6 +71,34 @@ pub(crate) struct HistoryEntry {
     pub(crate) learn_terms: Vec<String>,
 }
 
+#[cfg(test)]
+impl HistoryEntry {
+    /// Minimal entry for tests: fill only the fields the learn/distill logic reads.
+    pub(crate) fn test_new(id: &str, raw: &str) -> Self {
+        HistoryEntry {
+            id: id.into(),
+            text: raw.into(),
+            raw_text: raw.into(),
+            llm_text: None,
+            user_text: None,
+            language: "zh-CN".into(),
+            duration_seconds: 1.0,
+            created_at: "2026-01-01T00:00:00Z".into(),
+            refined: false,
+            audio_path: None,
+            media_kind: "audio".into(),
+            segments: Vec::new(),
+            alignment: None,
+            source: "fn".into(),
+            translate_target_language: None,
+            quality_rating: None,
+            rated_at: None,
+            learn_status: None,
+            learn_terms: Vec::new(),
+        }
+    }
+}
+
 pub(crate) fn default_media_kind() -> String {
     "audio".into()
 }

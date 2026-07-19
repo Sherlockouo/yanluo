@@ -21,10 +21,81 @@
   flex-shrink: 0;
 }
 
-.agent-job-head {
+/* 派活 masthead — mono kicker + serif 44px title (v3 agent.html) */
+.amast {
+  margin-bottom: 24px;
+  padding-top: 32px;
+}
+
+.amast-top {
   display: flex;
-  align-items: flex-center;
-  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 20px;
+}
+
+.amast-kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-soft-foreground);
+}
+
+.amast-action {
+  height: 26px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.amast-action:hover,
+.amast-action[data-hovered="true"] {
+  background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  color: var(--foreground);
+}
+
+.amast-title {
+  font-family: var(--font-display);
+  font-size: 44px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--foreground);
+}
+
+/* Job detail header — quiet back link, serif title row, mono meta */
+.agent-job-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.agent-job-title {
+  font-family: var(--font-display);
+  font-size: 1.875rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--foreground);
+}
+
+.agent-job-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-top: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+  color: var(--muted);
 }
 
 
@@ -45,7 +116,7 @@
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: color-mix(in oklab, var(--surface) 88%, transparent);
   color: var(--muted);
   opacity: 0;
@@ -84,11 +155,12 @@
   font-family: var(--font-mono);
   font-size: var(--text-meta);
   font-weight: 400;
-  letter-spacing: 0;
+  letter-spacing: 0.01em;
   line-height: 1.4;
   color: var(--muted);
 }
 
+/* —— keyframes: agent-pulse (opacity) + agent-row-in (enter-only) —— */
 /* Copper pulse — "job is alive" cue. Opacity only, reduced-motion guarded. */
 @keyframes agent-pulse {
   0%,
@@ -135,7 +207,7 @@
   align-items: center;
   gap: 4px;
   padding: 0 8px;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 0;
   background: color-mix(in oklab, var(--foreground) 6%, transparent);
   font-size: 12px;
@@ -152,6 +224,20 @@
 .agent-list-body {
   margin-inline: -0.25rem;
   padding-inline: 0.25rem;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
 }
 
 .agent-list-composer {
@@ -163,29 +249,23 @@
 }
 
 /* Job list — manuscript-index language: mono-meta rows on hairlines */
-.agent-job-list {
-  border-top: 1px solid var(--separator);
-}
-
 .agent-job-row {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.7rem 0.65rem;
+  gap: 12px;
+  padding: 14px 10px;
   border-bottom: 1px solid var(--separator);
-  transition: background 140ms ease;
+  transition:
+    background 140ms ease,
+    transform 100ms ease-out;
 }
 
 .agent-job-row:hover {
   background: color-mix(in oklab, var(--foreground) 4%, transparent);
 }
 
-.agent-job-row.is-active {
-  background: color-mix(in oklab, var(--accent) 7%, transparent);
-}
-
-.agent-job-row.is-error:hover {
-  background: color-mix(in oklab, var(--danger) 6%, transparent);
+.agent-job-row:active {
+  transform: scale(0.99);
 }
 
 /* Kicker: agent · status · time — mono meta, status carries the color */
@@ -193,9 +273,10 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.45rem;
+  gap: 8px;
   font-family: var(--font-mono);
-  font-size: var(--text-meta);
+  font-size: 12px;
+  letter-spacing: 0.01em;
   line-height: 1.4;
   color: var(--muted);
 }
@@ -213,8 +294,8 @@
 }
 
 .agent-job-prompt {
-  margin-top: 0.2rem;
-  font-size: var(--text-ui);
+  margin-top: 3px;
+  font-size: 14.5px;
   line-height: 1.45;
   color: var(--foreground);
 }
@@ -222,14 +303,15 @@
 .agent-job-status-dot {
   width: 7px;
   height: 7px;
+  margin-top: 7px;
   border-radius: 999px;
-  background: color-mix(in oklab, var(--muted) 55%, transparent);
+  background: var(--muted);
   flex-shrink: 0;
 }
 
 .agent-job-status-dot.is-active {
   background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 22%, transparent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
   animation: agent-pulse 1.6s ease-in-out infinite;
 }
 
@@ -257,7 +339,7 @@
   align-items: center;
   gap: 4px;
   padding: 0 8px;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 0;
   background: color-mix(in oklab, var(--foreground) 6%, transparent);
   font-size: 12px;
@@ -277,23 +359,8 @@
   opacity: 0.85;
 }
 
-.agent-composer-send.is-accent {
-  background: var(--accent);
-  color: var(--accent-foreground);
-}
-
-.agent-composer-send.is-accent:hover:not(:disabled):not([aria-disabled="true"]),
-.agent-composer-send.is-accent[data-hovered="true"]:not([aria-disabled="true"]) {
-  background: var(--accent-hover);
-}
-
-.agent-composer-send.is-accent:disabled,
-.agent-composer-send.is-accent[aria-disabled="true"] {
-  opacity: 0.35;
-}
-
 .agent-chat {
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 55%, transparent);
 }
 
@@ -307,6 +374,20 @@
 
 .agent-chat-timeline {
   scroll-behavior: smooth;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
 }
 
 .agent-chat-row {
@@ -320,16 +401,20 @@
 }
 
 .agent-chat-row.is-assistant,
-.agent-chat-row.is-tool,
-.agent-chat-row.is-tool-result,
 .agent-chat-row.is-error {
   align-items: flex-start;
 }
 
+/* Tool rows share the assistant text's left edge — same w-full constraint */
+.agent-chat-row.is-tool,
+.agent-chat-row.is-tool-result {
+  align-items: stretch;
+}
+
 .agent-chat-bubble {
   padding: 0.65rem 0.95rem;
-  border-radius: 14px;
-  border-bottom-right-radius: 4px;
+  border-radius: var(--radius-lg);
+  border-bottom-right-radius: 6px;
   background: var(--surface-secondary);
   color: var(--foreground);
 }
@@ -349,13 +434,20 @@
   color: var(--danger);
 }
 
-/* Tool: only bordered object in the stream */
+/* Tool: only bordered object in the stream — left-aligned, full width of
+   the message flow (same left edge + measure as the assistant text block) */
 .agent-tool-card {
   width: 100%;
+  max-width: 100%;
   padding: 0.7rem 0.85rem;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
-  background: var(--surface);
+  background: var(--surface-secondary);
+  transition: transform 100ms ease-out;
+}
+
+.agent-tool-card:active {
+  transform: scale(0.985);
 }
 
 .agent-tool-card-head {
@@ -376,10 +468,19 @@
   margin-top: 0.35rem;
 }
 
+/* Card 0.985 is the single press feedback — cancel the global .button
+   pressed scale (0.97) on the fold-toggle head so the two never stack.
+   agent.css loads after base.css, same-specificity transform wins. */
+.agent-tool-card-head:active,
+.agent-tool-card-head[data-pressed="true"] {
+  transform: none;
+}
+
 .agent-tool-brief {
   margin-top: 0.25rem;
   font-family: var(--font-mono);
   font-size: 0.75rem;
+  letter-spacing: 0.01em;
   line-height: 1.4;
   color: var(--muted);
   overflow: hidden;
@@ -411,8 +512,7 @@
 }
 
 .agent-tool-result {
-  padding: 0 1rem;
-  min-width: 100%;
+  min-width: 0;
   font-size: 0.8125rem !important;
   opacity: 0.88;
 }
@@ -489,7 +589,7 @@
   font-family: var(--font-mono);
   font-size: 0.86em;
   padding: 0.12em 0.42em;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: color-mix(in oklab, var(--default) 55%, transparent);
   color: var(--foreground);
 }
@@ -498,7 +598,7 @@
   margin: 0.65em 0;
   padding: 0.85em 1em;
   overflow-x: auto;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   border: 0;
   background: var(--surface-secondary);
   font-size: 0.8125em;
@@ -559,12 +659,12 @@
   margin: 0.35em 0;
   padding: 0.45em 0.55em;
   font-size: 10.5px;
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .agent-attach-preview-card {
   padding: 0.7rem 0.85rem;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
   background: var(--surface);
 }
@@ -576,7 +676,7 @@
   flex-direction: column;
   gap: 0;
   border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   transition: border-color 140ms ease;
 }
@@ -605,11 +705,12 @@
   max-width: 220px;
   height: 24px;
   padding: 0 6px 0 8px;
-  border-radius: 6px;
+  border-radius: 10px;
   border: 0;
   background: color-mix(in oklab, var(--foreground) 5%, transparent);
   font-family: var(--font-mono);
   font-size: 11px;
+  letter-spacing: 0.01em;
   color: var(--foreground);
 }
 
@@ -681,7 +782,7 @@
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
   color: color-mix(in oklab, var(--foreground) 55%, transparent);
   cursor: pointer;
@@ -715,13 +816,9 @@
   margin-left: auto;
   padding: 0;
   border: 0;
-  border-radius: 999px;
+  /* lg 档 squircle — capsule 9999 仅 HUD */
+  border-radius: 14px;
   cursor: pointer;
-}
-
-.agent-composer-send:not(.button) {
-  background: var(--foreground);
-  color: var(--background, #fff);
 }
 
 .agent-composer-send svg {
@@ -743,17 +840,24 @@
   align-items: center;
   gap: 2px;
   padding: 2px 2px 2px 6px;
-  border-radius: 6px;
+  border-radius: 10px;
   border: 0;
   background: color-mix(in oklab, var(--foreground) 5%, transparent);
   font-family: var(--font-mono);
   font-size: 11px;
+  letter-spacing: 0.01em;
   color: var(--foreground);
-  transition: background 120ms ease;
+  transition:
+    background 120ms ease,
+    transform 100ms ease-out;
 }
 
 .agent-reply-chip:hover {
   background: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.agent-reply-chip:active {
+  transform: scale(0.96);
 }
 
 .agent-reply-chip.is-selected {
@@ -764,6 +868,7 @@
 .agent-chat-ts {
   font-family: var(--font-mono);
   font-size: var(--text-micro);
+  letter-spacing: 0.01em;
   line-height: 1.3;
   color: var(--muted);
   opacity: 0.75;
@@ -797,7 +902,94 @@
   text-align: center;
 }
 
+/* Sidebar scroll — same scroll-edge fade as .agent-chat-timeline */
+.agent-side-scroll {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+}
+
 /* Sidebar 文件 — hairline section, not a boxed card */
 .agent-side-files {
   padding-top: 0.25rem;
+}
+
+.agent-side-file-row {
+  transition:
+    background 140ms ease,
+    transform 100ms ease-out;
+}
+
+.agent-side-file-row:active {
+  transform: scale(0.99);
+}
+
+/* Press feedback — chip 0.96 / small buttons 0.97, 100ms ease-out */
+.agent-msg-copy,
+.agent-attach-chip-x {
+  transition:
+    opacity 120ms ease,
+    background 120ms ease,
+    color 120ms ease,
+    transform 100ms ease-out;
+}
+
+.agent-msg-copy:active,
+.agent-attach-chip-x:active {
+  transform: scale(0.96);
+}
+
+.agent-profile-trigger,
+.agent-model-trigger {
+  transition:
+    background 120ms ease,
+    transform 100ms ease-out;
+}
+
+.agent-profile-trigger:active,
+.agent-model-trigger:active,
+.agent-profile-trigger[data-pressed="true"],
+.agent-model-trigger[data-pressed="true"] {
+  transform: scale(0.97);
+}
+
+/* Press feedback off under reduced motion — rows/chips cross-fade color only */
+@media (prefers-reduced-motion: reduce) {
+  .agent-job-row,
+  .agent-job-row:active,
+  .agent-reply-chip,
+  .agent-reply-chip:active,
+  .agent-tool-card,
+  .agent-tool-card:active,
+  .agent-side-file-row,
+  .agent-side-file-row:active,
+  .agent-msg-copy,
+  .agent-msg-copy:active,
+  .agent-attach-chip-x,
+  .agent-attach-chip-x:active,
+  .agent-profile-trigger,
+  .agent-profile-trigger:active,
+  .agent-model-trigger,
+  .agent-model-trigger:active {
+    transform: none;
+  }
+
+  .agent-job-row {
+    transition: background 140ms ease;
+  }
+
+  .agent-reply-chip {
+    transition: background 120ms ease;
+  }
 }

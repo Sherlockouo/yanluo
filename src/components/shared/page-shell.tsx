@@ -179,9 +179,8 @@ export function CollapseTrigger({
     <Button
       variant="ghost"
       className={cn(
-        "h-auto min-h-0 w-full items-center justify-start gap-2 rounded-xl px-1 py-2 text-left font-normal shadow-none",
+        "collapse-trigger h-auto min-h-0 w-full items-center justify-start gap-2 rounded-xl px-1 py-2 text-left font-normal shadow-none",
         "hover:bg-default/60 data-[hovered=true]:bg-default/60",
-        "data-[pressed=true]:scale-100",
         className,
       )}
       onPress={onToggle}

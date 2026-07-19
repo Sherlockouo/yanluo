@@ -1,30 +1,16 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { createPortal } from "react-dom";
-import {
-  Button,
-  Kbd,
-  Label,
-  ListBox,
-  Select,
-  TextArea,
-  TextField,
-} from "@heroui/react";
-import { ChevronDown, Languages, RotateCcw, Save } from "lucide-react";
-import {
-  PageHeader,
-  PageShell,
-  Reveal,
-  SoftCollapse,
-} from "@/components/shared/page-shell";
+import { Link } from "react-router-dom";
+import { Kbd, ListBox, Select } from "@heroui/react";
+import { ChevronDown, Languages } from "lucide-react";
+import { PageHeader, PageShell, Reveal } from "@/components/shared/page-shell";
 import { SemanticPair } from "@/components/ui/refine-diff";
 import { LlmProviderSelect } from "@/components/ui/llm-provider-select";
-import {
-  DEFAULT_LLM_TRANSLATE_PROMPT,
-  TRANSLATE_LANGUAGES,
-  translateTargetLabel,
-} from "@/lib/constants";
+import { TRANSLATE_LANGUAGES, translateTargetLabel } from "@/lib/constants";
 import { useApp } from "@/app-context";
-import { cn } from "@/lib/cn";
+
+/** 翻译 Prompt 编辑已收敛到 设置 → 润色 → 配置。 */
+const PROMPT_SETTINGS_URL = "/settings?tab=polish&sub=config";
 
 /** Translate mode panel — ⇧Fn results. Used standalone or embedded in 出稿. */
 export function TranslatePage({
@@ -37,9 +23,6 @@ export function TranslatePage({
   actionSlot?: HTMLElement | null;
 } = {}) {
   const { config, updateConfig, saveConfig, history } = useApp();
-  const [configOpen, setConfigOpen] = useState(false);
-  const translateValue =
-    config.llm_translate_prompt || DEFAULT_LLM_TRANSLATE_PROMPT;
 
   const entries = useMemo(
     () =>
@@ -71,14 +54,7 @@ export function TranslatePage({
         setTargetLanguage(String(key));
       }}
     >
-      <Select.Trigger
-        className={cn(
-          "h-7 gap-1 rounded-lg border border-border/80 bg-surface px-2.5",
-          "text-[12px] font-medium text-foreground items-center",
-          "transition-[border-color,background-color] duration-150",
-          "hover:border-foreground/20 hover:bg-surface-secondary/60",
-        )}
-      >
+      <Select.Trigger className="qsel-quiet">
         <Select.Value>
           {() => (
             <span className="inline-flex items-center gap-1.5">
@@ -111,80 +87,38 @@ export function TranslatePage({
       <span className="text-muted/40">·</span>
       {targetSelect}
       <span className="text-muted/40">·</span>
-      <LlmProviderSelect />
+      <LlmProviderSelect triggerCls="qsel-quiet" />
     </div>
   );
   const headerAction = (
-    <Button
-      size="sm"
-      variant={configOpen ? "primary" : "secondary"}
-      onPress={() => setConfigOpen((v) => !v)}
-    >
-      配置
-    </Button>
+    <Link to={PROMPT_SETTINGS_URL} className="dlink muted">
+      配置 ▾
+    </Link>
   );
 
   const content = (
     <>
-      {embedded && active && actionSlot
+      {embedded && actionSlot
         ? createPortal(
-            <>
+            // Keep the slot content MOUNTED across tab switches (visibility
+            // toggle only) — unmount/remount replayed LlmProviderSelect's
+            // mount motion inside the masthead → the 切换闪烁 bug.
+            <span
+              className="dmast-actgrp"
+              style={active ? undefined : { display: "none" }}
+            >
               {targetSelect}
-              <LlmProviderSelect />
-              <button
-                type="button"
-                className="dlink muted"
-                onClick={() => setConfigOpen((v) => !v)}
-              >
-                配置{configOpen ? " ▴" : " ▾"}
-              </button>
-            </>,
+              <LlmProviderSelect triggerCls="qsel-quiet" />
+              <Link to={PROMPT_SETTINGS_URL} className="dlink muted">
+                配置 ▾
+              </Link>
+            </span>,
             actionSlot,
           )
         : null}
       {embedded ? null : (
         <PageHeader title="翻译" status={header} action={headerAction} />
       )}
-
-      <SoftCollapse open={configOpen}>
-        <div className="surface-card mb-1 flex flex-col gap-5 p-4">
-          <TextField
-            fullWidth
-            variant="secondary"
-            value={translateValue}
-            onChange={(value) => updateConfig("llm_translate_prompt", value)}
-          >
-            <Label>翻译 Prompt</Label>
-            <TextArea
-              rows={8}
-              className="min-h-[10rem] font-mono type-meta !text-[12px]"
-              placeholder={"{target} → 目标语言名"}
-            />
-          </TextField>
-
-          <div className="form-actions">
-            <div className="form-actions-secondary">
-              <Button
-                size="sm"
-                variant="secondary"
-                onPress={() => updateConfig("llm_translate_prompt", "")}
-              >
-                <RotateCcw size={14} />
-                恢复默认
-              </Button>
-            </div>
-            <Button
-              className="form-actions-primary btn-press"
-              fullWidth
-              variant="primary"
-              onPress={() => void saveConfig()}
-            >
-              <Save size={14} />
-              保存
-            </Button>
-          </div>
-        </div>
-      </SoftCollapse>
 
       {entries.length === 0 ? (
         <div className="dropzone" style={{ minHeight: 200 }}>

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-Hans" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>出稿 × 4 模式 · v3 设计稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  [data-theme="light"] {
+    --bg: #F6F5F2; --fg: #1C1A17; --muted: #6B6660; --faint: #8E8983;
+    --border: rgba(30,28,25,0.15); --sep: rgba(30,28,25,0.09);
+    --accent: #D9722E; --accent-soft: rgba(217,114,46,0.10); --accent-fg: #A0561F;
+    --surface: #FFFFFF; --surface2: #FAF9F6; --default: #EDEBE6;
+    --rail: color-mix(in oklab, #F6F5F2 96%, #1C1A17);
+    --card-shadow: 0 1px 0 rgba(255,255,255,0.8) inset, 0 1px 2px rgba(30,28,25,0.04), 0 8px 24px rgba(30,28,25,0.05);
+    --live: #C24238;
+  }
+  [data-theme="dark"] {
+    --bg: #0E0F12; --fg: #E8E6E3; --muted: #8B8A86; --faint: #7A7978;
+    --border: rgba(232,230,227,0.08); --sep: rgba(232,230,227,0.07);
+    --accent: #C4784A; --accent-soft: rgba(196,120,74,0.18); --accent-fg: #E0A075;
+    --surface: #17191E; --surface2: #1E2128; --default: #23262D;
+    --rail: #0E0F12;
+    --card-shadow: 0 1px 0 rgba(255,255,255,0.06) inset;
+    --live: #E2695F;
+  }
+  body {
+    font-family: "Satoshi", "Noto Sans SC", system-ui, sans-serif;
+    background: var(--bg); color: var(--fg); min-height: 100vh;
+    display: grid; grid-template-columns: 76px 1fr;
+    transition: background 200ms ease, color 200ms ease;
+  }
+  .toggle {
+    position: fixed; top: 16px; right: 20px; z-index: 100;
+    font-family: "IBM Plex Mono", monospace; font-size: 11px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+    border-radius: 999px; padding: 6px 14px; cursor: pointer;
+  }
+  .rail {
+    border-right: 1px solid var(--border); background: var(--rail);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px 8px; gap: 8px;
+  }
+  .mark { width: 40px; height: 40px; border-radius: 11px; margin-bottom: 10px; display: grid; place-items: center; font-family: "Instrument Serif", serif; font-size: 20px; background: var(--fg); color: var(--bg); }
+  [data-theme="dark"] .mark { background: var(--accent); color: #0E0F12; }
+  .ritem-nav { width: 60px; padding: 8px 4px; border-radius: 11px; border: 1px solid transparent; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--muted); font-size: 11px; cursor: pointer; }
+  .ritem-nav .ico { font-size: 16px; }
+  .ritem-nav.on { color: var(--accent-fg); border-color: color-mix(in oklab, var(--accent) 22%, transparent); background: var(--accent-soft); }
+  .rail .spacer { flex: 1; }
+
+  .content { padding: 0 40px 60px; max-width: 880px; width: 100%; }
+  /* ———— masthead ———— */
+  .mast { position: sticky; top: 0; background: var(--bg); padding: 24px 0 14px; z-index: 5; }
+  .mast-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent-fg); }
+  .mast-links { display: flex; gap: 14px; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+  .mast-links a { color: var(--accent-fg); text-decoration: none; cursor: pointer; }
+  .mast-links .plain { color: var(--muted); }
+  .mast-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+  .big { font-family: "Instrument Serif", serif; font-size: 56px; font-weight: 400; letter-spacing: -0.01em; line-height: 0.92; }
+  .modes { display: flex; gap: 22px; align-items: baseline; padding-bottom: 4px; }
+  .mode { font-size: 15.5px; color: var(--muted); cursor: pointer; padding-bottom: 10px; margin-bottom: -13px; position: relative; background: none; border: 0; font-family: inherit; }
+  .mode.on { color: var(--fg); font-weight: 600; }
+  .mode.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); border-radius: 2px; }
+  .mast-sub { display: flex; gap: 18px; margin-top: 10px; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); }
+  .mast-sub b { color: var(--fg); font-weight: 500; }
+  .mast-sub .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--faint); align-self: center; }
+
+  /* ———— 手稿行 ———— */
+  .rec { padding: 22px 4px; border-bottom: 1px solid var(--sep); display: flex; gap: 16px; cursor: pointer; }
+  .rec:hover { background: color-mix(in oklab, var(--fg) 3%, transparent); }
+  .rec-n { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--faint); padding-top: 3px; width: 22px; flex-shrink: 0; }
+  .rec-body { min-width: 0; flex: 1; }
+  .rec-meta { display: flex; gap: 12px; align-items: center; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--faint); }
+  .rec-meta .tag { color: var(--accent-fg); display: inline-flex; align-items: center; gap: 3px; }
+  .rec-txt { margin-top: 8px; font-size: 16px; line-height: 1.7; color: var(--fg); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .rec-del { opacity: 0; color: var(--faint); font-size: 14px; align-self: center; transition: opacity 120ms; }
+  .rec:hover .rec-del { opacity: 1; }
+
+  /* ———— dropzone ———— */
+  .dropzone {
+    margin-top: 24px; min-height: 200px; border: 1.5px dashed var(--border);
+    border-radius: 18px; background: var(--surface2);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    color: var(--muted); text-align: center; padding: 32px;
+  }
+  .dz-ic { width: 52px; height: 52px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); display: grid; place-items: center; font-size: 20px; color: var(--accent-fg); }
+  .dz-t { font-size: 16px; font-weight: 600; color: var(--fg); }
+  .dz-fmt { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); }
+
+  .tswitch { display: inline-flex; gap: 14px; align-items: center; font-size: 13.5px; margin-top: 20px; }
+  .tswitch .o { color: var(--faint); cursor: pointer; }
+  .tswitch .o.on { color: var(--fg); font-weight: 600; }
+  .tswitch .sep { color: var(--border); }
+
+  /* ———— 实时 ———— */
+  .live-status { display: flex; align-items: center; gap: 10px; margin-top: 28px; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+  .live-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--live); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .live-bars { display: flex; align-items: flex-end; gap: 2px; height: 16px; }
+  .live-bars i { width: 3px; border-radius: 999px; background: var(--accent); animation: bar 1.1s ease-in-out infinite; }
+  .live-bars i:nth-child(1) { height: 5px; animation-delay: 0s; }
+  .live-bars i:nth-child(2) { height: 11px; animation-delay: 0.1s; }
+  .live-bars i:nth-child(3) { height: 16px; animation-delay: 0.2s; }
+  .live-bars i:nth-child(4) { height: 9px; animation-delay: 0.15s; }
+  .live-bars i:nth-child(5) { height: 6px; animation-delay: 0.05s; }
+  @keyframes bar { 0%,100% { transform: scaleY(0.55); opacity: 0.5; } 50% { transform: scaleY(1); opacity: 1; } }
+  .live-current {
+    margin-top: 20px; font-family: "Instrument Serif", "Noto Serif SC", serif;
+    font-size: 34px; line-height: 1.3; letter-spacing: -0.01em; color: var(--fg);
+    padding: 26px 0; border-top: 1px solid var(--sep); border-bottom: 1px solid var(--sep);
+  }
+  .live-committed { margin-top: 18px; font-size: 15px; line-height: 1.75; color: var(--muted); }
+  .live-committed p { margin-bottom: 10px; }
+  .live-hint { margin-top: 26px; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--faint); }
+  .live-hint b { color: var(--fg); font-weight: 500; }
+
+  /* ———— 翻译 ———— */
+  .tr-head { display: flex; align-items: center; gap: 14px; margin-top: 24px; font-size: 14px; }
+  .tr-lang { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--fg); cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+  .tr-lang .chev { color: var(--muted); font-size: 10px; }
+  .tr-arrow { color: var(--accent-fg); }
+  .pair { padding: 18px 4px; border-bottom: 1px solid var(--sep); }
+  .pair .src { font-size: 14.5px; line-height: 1.65; color: var(--muted); }
+  .pair .dst { margin-top: 6px; font-size: 15.5px; line-height: 1.7; color: var(--fg); }
+  .pair .dst::before { content: "→ "; color: var(--accent-fg); }
+  .pair .pt { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); margin-bottom: 6px; }
+
+  /* ———— 历史 inline 展开 ———— */
+  .expand { padding: 0 4px 22px 38px; }
+  .expand-card { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--card-shadow); padding: 16px 18px; }
+  .expand-meta { display: flex; justify-content: space-between; align-items: center; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .expand-meta .copy { color: var(--accent-fg); cursor: pointer; }
+  .expand-txt { font-size: 14.5px; line-height: 1.7; max-height: 200px; overflow: hidden; position: relative; }
+  .expand-txt::after { content: ""; position: absolute; inset: auto 0 0 0; height: 40px; background: linear-gradient(to bottom, transparent, var(--surface)); }
+  .expand-more { margin-top: 8px; font-size: 12.5px; color: var(--accent-fg); cursor: pointer; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">⇄ 深/浅切换</button>
+
+<aside class="rail">
+  <div class="mark">言</div>
+  <div class="ritem-nav on"><span class="ico">ॐ</span>出稿</div>
+  <div class="ritem-nav"><span class="ico">⚡</span>派活</div>
+  <div class="spacer"></div>
+  <div class="ritem-nav"><span class="ico">⚙</span>设置</div>
+</aside>
+
+<main class="content">
+  <div class="mast">
+    <div class="mast-top">
+      <span class="kicker">本机识别 · 已就绪</span>
+      <div class="mast-links"><span class="plain">转写记录 · 11</span><a>＋ 新转写</a></div>
+    </div>
+    <div class="mast-row">
+      <h1 class="big">出稿</h1>
+      <nav class="modes">
+        <button class="mode on" data-m="file">文件</button>
+        <button class="mode" data-m="live">实时</button>
+        <button class="mode" data-m="translate">翻译</button>
+        <button class="mode" data-m="history">历史</button>
+      </nav>
+    </div>
+    <div class="mast-sub">
+      <span><b>Fn</b> 出稿</span><span class="dot"></span>
+      <span><b>⇧Fn</b> 翻译</span><span class="dot"></span>
+      <span>自动检测语言</span>
+    </div>
+  </div>
+
+  <!-- ═══════ 文件 ═══════ -->
+  <section id="m-file">
+    <div class="rec">
+      <span class="rec-n">01</span>
+      <div class="rec-body">
+        <div class="rec-meta"><span>2026/7/16 22:36:07</span><span class="tag">▣ 视频</span><span>127.0s</span></div>
+        <div class="rec-txt">你看到大街上开法拉利的、开劳斯莱斯的，就是傻叔啊！你也别觉得他好像是狗屎运，人家背后比你付出的一定比你多，一定比你聪明…</div>
+      </div>
+      <span class="rec-del">🗑</span>
+    </div>
+    <div class="rec">
+      <span class="rec-n">02</span>
+      <div class="rec-body">
+        <div class="rec-meta"><span>2026/7/16 14:38:24</span><span class="tag">♪ 音频</span><span>291.2s</span></div>
+        <div class="rec-txt">他来听我的演唱会，在十七岁的初恋第一次约会，男孩为了她彻夜排队，半年的积蓄买了门票一对…</div>
+      </div>
+      <span class="rec-del">🗑</span>
+    </div>
+    <div class="dropzone">
+      <span class="dz-ic">⬆</span>
+      <span class="dz-t">拖入音频 / 视频文件</span>
+      <span class="dz-fmt">mp3 · wav · m4a · mp4 · mov — 或粘贴链接</span>
+    </div>
+    <div class="tswitch">
+      <span class="o on">本地文件</span><span class="sep">·</span><span class="o">网络链接</span>
+      <span style="width:20px"></span>
+      <span class="o on">音频</span><span class="sep">·</span><span class="o">视频</span>
+    </div>
+  </section>
+
+  <!-- ═══════ 实时 ═══════ -->
+  <section id="m-live" class="hidden">
+    <div class="live-status">
+      <span class="live-dot"></span>
+      <span>录音中 · 本机识别</span>
+      <div class="live-bars"><i></i><i></i><i></i><i></i><i></i></div>
+      <span style="margin-left:auto">00:42</span>
+    </div>
+    <div class="live-current">所以我说，赚钱这个事，跟努力没有必然关系…</div>
+    <div class="live-committed">
+      <p>我和我爸最大的冲突就是，我觉得赚钱挺容易的，而且努力是肯定挣不到钱。但他信的是钱是一分一分熬出来的。</p>
+      <p>所以我这个人比较狂一点，我坚持我的理解。我从破三本毕业出来创业四年，见过太多埋头苦干却原地踏步的人。</p>
+    </div>
+    <div class="live-hint"><b>Fn</b> 停止并确认 · <b>Esc</b> 取消 · <b>⇧Fn</b> 切换翻译</div>
+  </section>
+
+  <!-- ═══════ 翻译 ═══════ -->
+  <section id="m-translate" class="hidden">
+    <div class="tr-head">
+      <span class="tr-lang">English <span class="chev">▾</span></span>
+      <span class="tr-arrow">→</span>
+      <span class="tr-lang">简体中文 <span class="chev">▾</span></span>
+      <span style="margin-left:auto"></span>
+      <span class="tr-lang" style="color:var(--muted)">OpenAI <span class="chev">▾</span></span>
+      <span class="tr-lang" style="color:var(--muted)">gpt-4o-mini <span class="chev">▾</span></span>
+    </div>
+    <div style="margin-top:8px">
+      <div class="pair">
+        <div class="pt">0:00 – 0:08</div>
+        <div class="src">He came to my concert. On our first date at seventeen, the boy queued all night for her, spent half a year's savings on a pair of tickets.</div>
+        <div class="dst">他来听我的演唱会。十七岁初恋的第一次约会，男孩为她彻夜排队，花半年积蓄买下一对门票。</div>
+      </div>
+      <div class="pair">
+        <div class="pt">0:08 – 0:15</div>
+        <div class="src">I sang his heart away, I sang his heart to pieces. Three years of love, taken back with a single letter.</div>
+        <div class="dst">我唱得他心醉，我唱得他心碎。三年的感情，一封信就要收回。</div>
+      </div>
+      <div class="pair">
+        <div class="pt">0:15 – 0:21</div>
+        <div class="src">He remembers the night train whistle, urging him on, one blast after another.</div>
+        <div class="dst">他记得夜台汽笛，声声在催。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════ 历史 ═══════ -->
+  <section id="m-history" class="hidden">
+    <div class="rec">
+      <span class="rec-n">01</span>
+      <div class="rec-body">
+        <div class="rec-meta"><span>2026/7/16 22:36:07</span><span class="tag">▣ 视频</span><span>127.0s</span></div>
+        <div class="rec-txt">你看到大街上开法拉利的、开劳斯莱斯的，就是傻叔啊！你也别觉得他好像是狗屎运…</div>
+      </div>
+    </div>
+    <div class="expand">
+      <div class="expand-card">
+        <div class="expand-meta"><span>127.0s · 中文 · forced</span><span class="copy">⧉ 复制</span></div>
+        <div class="expand-txt">你看到大街上开法拉利的、开劳斯莱斯的，就是傻叔啊！你也别觉得他好像是狗屎运，人家背后比你付出的一定比你多，一定比你聪明。表达完毕啊！如果你现在的条件不优越，那你更应该努力。我不是在嘲讽谁，我是说在座的各位，都有机会。他来听我的演唱会，在十七岁的初恋第一次约会…</div>
+        <span class="expand-more">展开全文 ↓</span>
+      </div>
+    </div>
+    <div class="rec">
+      <span class="rec-n">02</span>
+      <div class="rec-body">
+        <div class="rec-meta"><span>2026/7/13 16:45:16</span><span class="tag">♪ 音频</span><span>1992.5s</span></div>
+        <div class="rec-txt">啊，so that's a rough. We got it. It's again. Uh, today's day five hundred and twelve, growing a software to one million dollar…</div>
+      </div>
+    </div>
+    <div class="rec">
+      <span class="rec-n">03</span>
+      <div class="rec-body">
+        <div class="rec-meta"><span>2026/7/11 09:55:11</span><span class="tag">▣ 视频</span><span>221.9s</span></div>
+        <div class="rec-txt">我和我爸最大的冲突就是，我觉得赚钱挺容易的，而且努力是肯定挣不到钱…</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+  const modes = document.querySelectorAll('.mode');
+  const panels = { file: 'm-file', live: 'm-live', translate: 'm-translate', history: 'm-history' };
+  modes.forEach(m => m.addEventListener('click', () => {
+    modes.forEach(x => x.classList.remove('on'));
+    m.classList.add('on');
+    Object.values(panels).forEach(id => document.getElementById(id).classList.add('hidden'));
+    document.getElementById(panels[m.dataset.m]).classList.remove('hidden');
+  }));
+</script>
+
+</body>
+</html>

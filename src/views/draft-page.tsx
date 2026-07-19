@@ -90,7 +90,7 @@ export function DraftPage() {
         config.language);
 
   return (
-    <PageShell className="max-w-3xl">
+    <PageShell className="max-w-[880px]">
       <div className="dmast">
         <div className="dmast-top">
           <span className="dmast-kicker">

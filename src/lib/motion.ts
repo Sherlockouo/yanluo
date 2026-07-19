@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useReducedMotion, type Transition, type Variants } from "framer-motion";
+import { useReducedMotion, type Transition } from "framer-motion";
 
 /** Compositor-friendly ease. Keep transitions short — no springs on route/nav. */
 export const easeOut = [0.22, 1, 0.36, 1] as const;
@@ -7,7 +7,8 @@ export const easeOut = [0.22, 1, 0.36, 1] as const;
 export const duration = {
   fast: 0.14,
   normal: 0.18,
-  slow: 0.24,
+  /** Cap: short motion must stay ≤220ms. */
+  slow: 0.22,
 } as const;
 
 /** Nav pill — tween only (spring + layoutId = main-thread jank). */
@@ -16,6 +17,62 @@ export const navIndicatorTransition: Transition = {
   duration: duration.normal,
   ease: easeOut,
 };
+
+/**
+ * UI-element spring (cards, panels, popovers). bounce:0 = critically damped —
+ * interruptible with no overshoot. Never for route/nav (those stay tween).
+ */
+export const springUI = { type: "spring", bounce: 0, duration: 0.2 } as const;
+
+/**
+ * Delight spring — visual-enjoyment moments only (modal appear / card landing /
+ * popover pop). Slight overshoot is the point. Never for route/nav.
+ */
+export const springBounce = {
+  type: "spring",
+  bounce: 0.25,
+  duration: 0.35,
+} as const;
+
+/** Popover open — gentler bounce, quicker settle than springBounce. */
+export const popoverSpring = {
+  type: "spring",
+  bounce: 0.15,
+  duration: 0.25,
+} as const;
+
+/**
+ * Stagger config for framer-motion variants. Capped at the first 6 items —
+ * long lists must not delay-tail forever.
+ */
+export function staggerChildren(delay = 0.05) {
+  return {
+    staggerChildren: delay,
+    /** Items past the 6th all land at the 6th item's delay. */
+    delayChildren: 0,
+    staggerDirection: 1,
+    // framer caps via custom per-item delay; expose the cap for callers.
+    maxItems: 6,
+    itemDelay: (index: number) => Math.min(Math.max(index, 0), 5) * delay,
+  } as const;
+}
+
+/**
+ * Modal panel enter/exit — opacity + scale + y only (GPU). Pair with
+ * springBounce on enter for the "pop open" read.
+ */
+export const modalEnter = {
+  panel: {
+    initial: { opacity: 0, scale: 0.94, y: 20 },
+    animate: { opacity: 1, scale: 1, y: 0 },
+  },
+} as const;
+
+export const modalExit = {
+  panel: {
+    exit: { opacity: 0, scale: 0.94, y: 20 },
+  },
+} as const;
 
 type MotionBundle = {
   initial: { opacity: number; y?: number };
@@ -84,14 +141,9 @@ function softCollapse(reduce: boolean | null | undefined): SoftCollapseMotion {
     initial: { opacity: 0.92, y: 6 },
     animate: { opacity: 1, y: 0 },
     exit: { opacity: 0, y: -4 },
-    transition: { duration: duration.fast, ease: easeOut },
+    transition: springUI,
   };
 }
-
-export const pageEnterVariants: Variants = {
-  initial: { opacity: 0.96, y: 8 },
-  animate: { opacity: 1, y: 0 },
-};
 
 /** Cap list stagger: first 4 items, ≤40ms delay each. */
 export function revealDelay(index: number): number {

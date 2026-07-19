@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-Hans" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>首页 · v3 设计稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  [data-theme="light"] {
+    --bg: #F6F5F2; --fg: #1C1A17; --muted: #6B6660; --faint: #8E8983;
+    --border: rgba(30,28,25,0.15); --sep: rgba(30,28,25,0.09);
+    --accent: #D9722E; --accent-soft: rgba(217,114,46,0.10); --accent-fg: #A0561F;
+    --surface: #FFFFFF; --surface2: #FAF9F6; --default: #EDEBE6;
+    --rail: color-mix(in oklab, #F6F5F2 96%, #1C1A17);
+    --card-shadow: 0 1px 0 rgba(255,255,255,0.8) inset, 0 1px 2px rgba(30,28,25,0.04), 0 8px 24px rgba(30,28,25,0.05);
+  }
+  [data-theme="dark"] {
+    --bg: #0E0F12; --fg: #E8E6E3; --muted: #8B8A86; --faint: #7A7978;
+    --border: rgba(232,230,227,0.08); --sep: rgba(232,230,227,0.07);
+    --accent: #C4784A; --accent-soft: rgba(196,120,74,0.18); --accent-fg: #E0A075;
+    --surface: #17191E; --surface2: #1E2128; --default: #23262D;
+    --rail: #0E0F12;
+    --card-shadow: 0 1px 0 rgba(255,255,255,0.06) inset;
+  }
+  body {
+    font-family: "Satoshi", "Noto Sans SC", system-ui, sans-serif;
+    background: var(--bg); color: var(--fg); min-height: 100vh;
+    display: grid; grid-template-columns: 76px 1fr;
+    transition: background 200ms ease, color 200ms ease;
+  }
+  .toggle {
+    position: fixed; top: 16px; right: 20px; z-index: 100;
+    font-family: "IBM Plex Mono", monospace; font-size: 11px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+    border-radius: 999px; padding: 6px 14px; cursor: pointer;
+  }
+  .rail {
+    border-right: 1px solid var(--border); background: var(--rail);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px 8px; gap: 8px;
+  }
+  .mark { width: 40px; height: 40px; border-radius: 11px; margin-bottom: 10px; display: grid; place-items: center; font-family: "Instrument Serif", serif; font-size: 20px; background: var(--fg); color: var(--bg); }
+  [data-theme="dark"] .mark { background: var(--accent); color: #0E0F12; }
+  .ritem-nav { width: 60px; padding: 8px 4px; border-radius: 11px; border: 1px solid transparent; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--muted); font-size: 11px; cursor: pointer; }
+  .ritem-nav .ico { font-size: 16px; }
+  .ritem-nav.on { color: var(--accent-fg); border-color: color-mix(in oklab, var(--accent) 22%, transparent); background: var(--accent-soft); }
+  .rail .spacer { flex: 1; }
+
+  .stage { padding: 48px 48px 60px; max-width: 860px; display: flex; flex-direction: column; min-height: 100vh; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-fg); }
+  h1 { font-family: "Instrument Serif", serif; font-weight: 400; font-size: 54px; letter-spacing: -0.02em; line-height: 1.05; margin-top: 14px; }
+  .dests { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 36px; }
+  .dest {
+    min-height: 150px; border-radius: 14px; padding: 22px 20px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    background: var(--surface2); border: 1px solid var(--border);
+    cursor: pointer; transition: transform 160ms ease, border-color 160ms ease;
+  }
+  .dest:hover { transform: translateY(-2px); border-color: color-mix(in oklab, var(--fg) 20%, transparent); }
+  .dest:active { transform: scale(0.985); transition-duration: 100ms; }
+  .dest.primary { background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 32%, transparent); }
+  .dest.primary:hover { border-color: color-mix(in oklab, var(--accent) 55%, transparent); }
+  .dest .label { font-size: 21px; font-weight: 600; letter-spacing: -0.02em; }
+  .dest.primary .label { color: var(--accent-fg); }
+  .dest .hint { margin-top: 8px; font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+  .dest .hk { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 18px; }
+  .kbd { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; }
+  .legend { display: flex; gap: 22px; margin-top: auto; padding-top: 40px; font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.01em; color: var(--muted); }
+  .legend b { color: var(--fg); font-weight: 500; }
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">⇄ 深/浅切换</button>
+
+<aside class="rail">
+  <div class="mark">言</div>
+  <div class="ritem-nav on"><span class="ico">ॐ</span>出稿</div>
+  <div class="ritem-nav"><span class="ico">⚡</span>派活</div>
+  <div class="spacer"></div>
+  <div class="ritem-nav"><span class="ico">⚙</span>设置</div>
+</aside>
+
+<main class="stage">
+  <span class="kicker">Local · Mac</span>
+  <h1>今天开口<br />要什么结果？</h1>
+  <div class="dests">
+    <div class="dest primary">
+      <div>
+        <div class="label">出稿</div>
+        <div class="hint">开会 · 口述 · 文件转写<br />说完有一版能发的稿</div>
+      </div>
+      <div class="hk"><span></span><span class="kbd">Fn</span></div>
+    </div>
+    <div class="dest">
+      <div>
+        <div class="label">派活</div>
+        <div class="hint">说完派给 Claude / Codex<br />任务自己跑</div>
+      </div>
+      <div class="hk"><span></span><span class="kbd">Fn+Space</span></div>
+    </div>
+  </div>
+  <div class="legend">
+    <span><b>Fn</b> 出稿</span>
+    <span><b>⇧Fn</b> 翻译</span>
+    <span><b>Fn+Space</b> 派活</span>
+  </div>
+</main>
+
+</body>
+</html>

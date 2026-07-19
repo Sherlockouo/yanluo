@@ -263,7 +263,9 @@ pub(crate) fn set_floating_hud_keyable(app: &tauri::AppHandle, keyable: bool) {
 
 #[cfg(target_os = "macos")]
 pub(crate) fn configure_floating_hud_panel(window: &tauri::WebviewWindow, corner_radius: f64) {
-    configure_floating_overlay_panel(window, corner_radius, true, true);
+    // No native shadow — rectangular NSWindow shadow rings the pill corners
+    // (same fringe lang/agent panels already avoid). Depth via CSS hairline only.
+    configure_floating_overlay_panel(window, corner_radius, false, true);
 }
 
 /// Translate-target chip / menu: frosted like the HUD, but never a native shadow

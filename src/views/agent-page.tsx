@@ -21,7 +21,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { PageHeader, PageShell, Reveal } from "@/components/shared/page-shell";
+import { PageShell, Reveal } from "@/components/shared/page-shell";
 import { defaultConfig, agentModelsFor } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import type { AgentJob, AgentKind, AgentProfile } from "@/types";
@@ -102,15 +102,23 @@ function AgentJobCard({
     <div
       className={cn(
         "agent-job-row group",
-        active && "is-active",
         job.status === "error" && "is-error",
         job.status === "done" && "is-done",
       )}
     >
+      <span
+        className={cn(
+          "agent-job-status-dot",
+          active && "is-active",
+          job.status === "error" && "is-error",
+          job.status === "done" && "is-done",
+          job.status === "cancelled" && "is-muted",
+        )}
+      />
       <Button
         variant="ghost"
         className={cn(
-          "h-auto min-h-0 min-w-0 flex-1 items-start justify-start gap-2.5 rounded-none",
+          "h-auto min-h-0 min-w-0 flex-1 items-start justify-start rounded-none",
           "bg-transparent px-0 py-0 text-left font-normal shadow-none",
           "hover:bg-transparent data-[hovered=true]:bg-transparent",
           "data-[pressed=true]:bg-transparent data-[pressed=true]:scale-100",
@@ -119,15 +127,6 @@ function AgentJobCard({
       >
         <div className="min-w-0 flex-1">
           <div className="agent-job-kicker">
-            <span
-              className={cn(
-                "agent-job-status-dot",
-                active && "is-active",
-                job.status === "error" && "is-error",
-                job.status === "done" && "is-done",
-                job.status === "cancelled" && "is-muted",
-              )}
-            />
             <span className="capitalize">{job.agent}</span>
             <span
               className={cn(
@@ -138,8 +137,13 @@ function AgentJobCard({
             >
               {jobStatusLabel(job.status)}
             </span>
-            {clock ? <span>{clock}</span> : null}
-            {duration ? <span>{duration}</span> : null}
+            {clock || duration ? (
+              <span>
+                {clock}
+                {clock && duration ? " · " : ""}
+                {duration}
+              </span>
+            ) : null}
             {attachCount > 0 ? <span>{attachCount} 附件</span> : null}
           </div>
           <div className="agent-job-prompt select-text line-clamp-2">
@@ -218,8 +222,6 @@ export function AgentPage() {
     "claude";
   const activeProfile = profiles.find((p) => p.id === profileId) ?? profiles[0];
 
-  const activeCount = agentJobs.filter((j) => isActive(j.status)).length;
-  const finishedCount = agentJobs.length - activeCount;
   const canSend = (Boolean(prompt.trim()) || attachments.length > 0) && !sending;
 
   const pickAttachments = async () => {
@@ -315,34 +317,22 @@ export function AgentPage() {
   };
 
   return (
-    <PageShell className="agent-list-shell max-w-3xl h-full min-h-0 gap-3 pb-0">
-      <PageHeader
-        title="派活"
-        status={
-          <span className="font-mono">
-            {activeCount > 0 ? (
-              <span className="text-accent-soft-foreground">
-                {activeCount} 运行
-              </span>
-            ) : null}
-            {activeCount > 0 && finishedCount > 0 ? " · " : null}
-            {finishedCount > 0 ? `${finishedCount} 完成` : null}
-            {activeCount || finishedCount ? " · " : null}
-            {config.hotkey_agent?.label ?? "Fn+Space"}
-          </span>
-        }
-        action={
+    <PageShell className="agent-list-shell max-w-3xl h-full min-h-0 gap-0 pb-0">
+      <header className="amast">
+        <div className="amast-top">
+          <span className="amast-kicker">派活 · agent jobs</span>
           <Button
             size="sm"
-            variant="secondary"
-            className="btn-press"
+            variant="ghost"
+            className="amast-action btn-press"
             onPress={() => navigate("/settings?tab=agent")}
           >
-            <Settings2 size={13} />
+            <Settings2 size={12} />
             能力
           </Button>
-        }
-      />
+        </div>
+        <h1 className="amast-title">派活</h1>
+      </header>
 
       <div className="agent-list-body min-h-0 flex-1 overflow-auto">
         {agentJobs.length === 0 ? (

@@ -16,8 +16,17 @@
   --color-panel: rgba(23, 25, 30, 0.72);
   --color-accent-fg: #ffffff;
 
+  /* Radius ladder — rounder face: panels lg, cards/menus md, chips sm+ */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
   /* Type ladder — Jobs: clear hierarchy, not denser soup */
   --text-display: 2.375rem;
+  /* Settings detail-pane serif sechead — mid rung per v2 contract (26px) */
+  --text-display-sm: 1.625rem;
   --text-section: 1.0625rem;
   --text-body: 0.9375rem;
   --text-ui: 0.875rem;
@@ -41,24 +50,26 @@
   --border-width: 1px;
   --field-border-width: 1px;
 
-  /* Warm near-white paper + clean white cards + warm ink (浅色 v3) */
-  --background: #f4f2ee;
+  /* 浅色 v4 — clean warm-white, NOT beige/muddy.
+     Three readable layers: paper #F6F5F2 → card #FFFFFF → inset #EDEBE6.
+     Ink stays warm near-black; bright orange only for CTA/recording/tab. */
+  --background: #f6f5f2;
   --foreground: #1c1a17;
-  --muted: #5f5952;
-  --faint: #6e6860;
-  --border: rgba(28, 26, 23, 0.18);
-  --separator: rgba(28, 26, 23, 0.13);
-  --focus: #e37226;
+  --muted: #6b6660;
+  --faint: #8e8983;
+  --border: rgba(30, 28, 25, 0.15);
+  --separator: rgba(30, 28, 25, 0.09);
+  --focus: #d9722e;
   --link: #a0561f;
 
   /* Bright orange = only primary action / recording light. White text on solid;
      copper text on paper uses the deeper --accent-soft-foreground (≥4.5:1 on paper). */
-  --accent: #f78438;
+  --accent: #d9722e;
   --accent-foreground: #ffffff;
   --accent-hover: #be611f;
-  --accent-soft: rgba(217, 114, 46, 0.11);
+  --accent-soft: rgba(217, 114, 46, 0.10);
   --accent-soft-foreground: #a0561f;
-  --accent-soft-hover: rgba(217, 114, 46, 0.16);
+  --accent-soft-hover: rgba(217, 114, 46, 0.15);
 
   --danger: #c24238;
   --danger-foreground: #ffffff;
@@ -83,32 +94,32 @@
 
   --surface: #ffffff;
   --surface-foreground: #1c1a17;
-  --surface-secondary: #f8f6f2;
+  --surface-secondary: #faf9f6;
   --surface-secondary-foreground: #1c1a17;
-  --surface-hover: #f1eee9;
+  --surface-hover: #f0eee9;
 
   --overlay: #ffffff;
   --overlay-foreground: #1c1a17;
 
-  --default: #eae6e0;
+  --default: #edebe6;
   --default-foreground: #1c1a17;
-  --default-hover: #e1dcd4;
-  --default-soft: rgba(28, 26, 23, 0.045);
+  --default-hover: #e4e1da;
+  --default-soft: rgba(30, 28, 25, 0.05);
   --default-soft-foreground: #1c1a17;
-  --default-soft-hover: rgba(28, 26, 23, 0.07);
+  --default-soft-hover: rgba(30, 28, 25, 0.08);
 
   --field-background: #ffffff;
   --field-foreground: #1c1a17;
-  --field-placeholder: #726b63;
-  --field-border: rgba(28, 26, 23, 0.20);
-  --field-hover: #f5f2ed;
+  --field-placeholder: #9a948d;
+  --field-border: rgba(30, 28, 25, 0.18);
+  --field-hover: #f5f3ee;
   --field-focus: #ffffff;
-  --field-border-hover: rgba(28, 26, 23, 0.22);
+  --field-border-hover: rgba(30, 28, 25, 0.22);
   --field-border-focus: rgba(217, 114, 46, 0.55);
 
   --segment: #ffffff;
   --segment-foreground: #1c1a17;
-  --scrollbar: rgba(28, 26, 23, 0.3);
+  --scrollbar: rgba(30, 28, 25, 0.25);
 }
 .dark,
 [data-theme="dark"] {

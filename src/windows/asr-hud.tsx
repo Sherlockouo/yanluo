@@ -11,7 +11,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { Button, TextArea, TextField } from "@heroui/react";
 import {
   AtSign,
@@ -35,11 +35,9 @@ import { defaultConfig } from "@/lib/constants";
 import { useSmoothedRms } from "@/hooks/useAudioBars";
 import { AudioBars } from "@/components/ui/audio-bars";
 import { cn } from "@/lib/cn";
-import { duration, easeOut } from "@/lib/motion";
+import { duration, easeOut, springBounce, springUI } from "@/lib/motion";
 
-import { useApp } from "@/app-context";
-
-const CAPSULE_W = 400;
+const CAPSULE_W = 420;
 const CAPSULE_H = 56;
 const AGENT_W = 520;
 /** Pills row above + capsule row (attachments inline — no extra strip). */
@@ -77,7 +75,6 @@ async function loadPathInfo(path: string, at: boolean): Promise<Attachment> {
  * Floating HUD: ASR capsule + agent extras (rail / edit / dispatch).
  */
 export function AsrHud() {
-  const { config } = useApp();
   const [payload, setPayload] = useState<FloatingPayload>({
     visible: false,
     state: "idle",
@@ -95,6 +92,7 @@ export function AsrHud() {
   const [pickerMode, setPickerMode] = useState<"" | "agent" | "cwd">("");
   const [profiles, setProfiles] = useState(defaultConfig.agent_profiles);
   const [profileId, setProfileId] = useState(defaultConfig.agent_profile_id);
+  const [fnLabel, setFnLabel] = useState(defaultConfig.hotkey_transcribe.label);
 
   const payloadRef = useRef(payload);
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -380,6 +378,9 @@ export function AsrHud() {
             : defaultConfig.agent_profiles,
         );
         setProfileId(cfg.agent_profile_id || "claude");
+        setFnLabel(
+          cfg.hotkey_transcribe?.label ?? defaultConfig.hotkey_transcribe.label,
+        );
       })
       .catch(() => {});
 
@@ -407,13 +408,14 @@ export function AsrHud() {
               text: "",
             };
           }
+          const keepMeter = sameSession;
           return {
             ...next,
-            rms: next.rms > 0 ? next.rms : prev.rms,
+            rms: next.rms > 0 ? next.rms : keepMeter ? prev.rms : next.rms,
             bands:
               Array.isArray(next.bands) && next.bands.length > 0
                 ? next.bands
-                : keepLive
+                : keepMeter
                   ? prev.bands
                   : next.bands ?? [],
             committed:
@@ -574,6 +576,9 @@ export function AsrHud() {
             : defaultConfig.agent_profiles,
         );
         setProfileId(cfg.agent_profile_id || "claude");
+        setFnLabel(
+          cfg.hotkey_transcribe?.label ?? defaultConfig.hotkey_transcribe.label,
+        );
       }),
     );
 
@@ -710,16 +715,18 @@ export function AsrHud() {
         void getCurrentWindow().startDragging().catch(() => {});
       }}
     >
-      {show ? (
-        <motion.div
-          className={cn(
-            "flex h-full w-full items-center justify-center",
-            isAgent && "px-0",
-          )}
-          initial={{ opacity: 0.7, scale: 0.96, y: 6 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={{ duration: duration.normal, ease: easeOut }}
-        >
+      <AnimatePresence initial={false}>
+        {show ? (
+          <motion.div
+            className={cn(
+              "flex h-full w-full items-center justify-center",
+              isAgent && "px-0",
+            )}
+            initial={{ opacity: 0, scale: 0.35 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96, y: 6 }}
+            transition={springBounce}
+          >
           {isAgent ? (
             <AgentCapsule
               payload={payload}
@@ -753,13 +760,14 @@ export function AsrHud() {
               busy={busy}
               error={error}
               editRef={editRef}
-              fnLabel={config.hotkey_transcribe.label}
+              fnLabel={fnLabel}
               onEditChange={setEditText}
               onEditKey={onEditKey}
             />
           )}
-        </motion.div>
-      ) : null}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }
@@ -836,7 +844,7 @@ function AgentCapsule({
             variant="ghost"
             className={cn(
               "hud-agent-pill h-auto min-h-0 gap-1 px-1.5 py-0.5 text-[11px] font-semibold shadow-none",
-              "data-[pressed=true]:scale-100 data-[hovered=true]:bg-transparent",
+              "data-[hovered=true]:bg-transparent",
               pickerMode === "agent" && "is-open",
             )}
             aria-haspopup="listbox"
@@ -851,7 +859,7 @@ function AgentCapsule({
             variant="ghost"
             className={cn(
               "hud-agent-pill h-auto min-h-0 gap-1 px-1.5 py-0.5 text-[11px] font-semibold shadow-none",
-              "data-[pressed=true]:scale-100 data-[hovered=true]:bg-transparent",
+              "data-[hovered=true]:bg-transparent",
               pickerMode === "cwd" && "is-open",
             )}
             aria-haspopup="listbox"
@@ -870,7 +878,13 @@ function AgentCapsule({
         {processing ? (
           <span className="hud-spinner" aria-label="处理中" />
         ) : recording ? (
-          <AudioBars rms={smoothed} bands={payload.bands} active />
+          <motion.div
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ ...springUI, delay: 0.12 }}
+          >
+            <AudioBars rms={smoothed} bands={payload.bands} active />
+          </motion.div>
         ) : null}
 
         {attachments.length > 0 ? (
@@ -882,7 +896,7 @@ function AgentCapsule({
               >
                 <Button
                   variant="ghost"
-                  className="h-auto min-h-0 min-w-0 flex-1 justify-start gap-1 rounded-none bg-transparent px-0 py-0 shadow-none data-[hovered=true]:bg-transparent data-[pressed=true]:scale-100"
+                  className="h-auto min-h-0 min-w-0 flex-1 justify-start gap-1 rounded-none bg-transparent px-0 py-0 shadow-none data-[hovered=true]:bg-transparent"
                   aria-label={
                     a.at || a.kind === "dir"
                       ? `@${shortName(a.name, 8)}`
@@ -914,7 +928,7 @@ function AgentCapsule({
                   isIconOnly
                   variant="ghost"
                   aria-label="移除"
-                  className="hud-agent-chip-x h-auto min-h-0 w-auto min-w-0 p-0 shadow-none data-[pressed=true]:scale-100"
+                  className="hud-agent-chip-x h-auto min-h-0 w-auto min-w-0 p-0 shadow-none"
                   onPress={() => onRemoveAttach(a.path)}
                 >
                   <X size={10} />
@@ -1026,6 +1040,7 @@ function FloatingCapsule({
   const recording = payload.state === "recording";
   const switching = Boolean(payload.switching);
   const translating = payload.intention === "translate";
+  const smoothed = useSmoothedRms(payload.rms, recording);
   const lastTextRef = useRef("");
   const textViewportRef = useRef<HTMLDivElement>(null);
   const sizedRef = useRef(false);
@@ -1089,6 +1104,19 @@ function FloatingCapsule({
           />
         ) : busy ? (
           <span className="hud-spinner" aria-label="确认中" />
+        ) : recording ? (
+          <motion.div
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ ...springUI, delay: 0.12 }}
+          >
+            <AudioBars
+              rms={smoothed}
+              bands={payload.bands}
+              active
+              className="hud-brand-bars"
+            />
+          </motion.div>
         ) : (
           <div className="hud-brand-bars" aria-hidden>
             <div className="hud-brand-bar" />
@@ -1162,7 +1190,9 @@ function FloatingCapsule({
             </motion.span>
           </div>
         )}
-        {fnLabel ? <span className="hud-fn-badge">{fnLabel}</span> : null}
+        {editing && fnLabel ? (
+          <span className="hud-fn-badge">{fnLabel}</span>
+        ) : null}
       </div>
     </div>
   );

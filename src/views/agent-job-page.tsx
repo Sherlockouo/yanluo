@@ -1,11 +1,10 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Button, Dropdown, Label, ListBox, Select, TextArea, TextField, toast } from "@heroui/react";
-import { motion } from "framer-motion";
+import { Button, ListBox, Select, TextArea, TextField, toast } from "@heroui/react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
-  ArrowLeft,
   AtSign,
   Bot,
   ChevronDown,
@@ -36,7 +35,7 @@ import {
 } from "@/lib/agent-tool-md";
 import { defaultConfig, agentModelsFor } from "@/lib/constants";
 import { cn } from "@/lib/cn";
-import { easeOut } from "@/lib/motion";
+import { springUI } from "@/lib/motion";
 import type {
   AgentJob,
   AgentJobEvent,
@@ -213,7 +212,7 @@ function toolResultBrief(event: AgentJobEvent): {
   return { text: clip(line, 80), failed };
 }
 
-const EventRow = memo(function EventRow({
+function EventRowContent({
   event,
   streaming,
   jobActive,
@@ -249,7 +248,7 @@ const EventRow = memo(function EventRow({
 
   if (isUser) {
     return (
-      <article className="agent-chat-row is-user">
+      <article className="agent-chat-row agent-row-motion is-user">
         <div className="agent-chat-bubble">
           {body ? <MarkdownBody text={body} /> : null}
           {body ? (
@@ -270,11 +269,11 @@ const EventRow = memo(function EventRow({
 
   if (isTool) {
     return (
-      <article className="agent-chat-row is-tool">
+      <article className="agent-chat-row agent-row-motion is-tool">
         <div className="agent-tool-card">
           <Button
             variant="ghost"
-            className="agent-tool-card-head h-auto min-h-0 min-w-0 justify-start rounded-none px-0 py-0 shadow-none data-[pressed=true]:scale-100"
+            className="agent-tool-card-head h-auto min-h-0 min-w-0 justify-start rounded-none px-0 py-0 shadow-none"
             aria-expanded={foldOpen}
             onPress={() => setFoldOpen((v) => !v)}
           >
@@ -307,11 +306,11 @@ const EventRow = memo(function EventRow({
   if (isToolResult) {
     const brief = toolResultBrief(event);
     return (
-      <article className="agent-chat-row is-tool-result w-full">
-        <div className="agent-tool-card w-full">
+      <article className="agent-chat-row agent-row-motion is-tool-result">
+        <div className="agent-tool-card">
           <Button
             variant="ghost"
-            className="agent-tool-card-head h-auto min-h-0 min-w-0 justify-start rounded-none px-0 py-0 shadow-none data-[pressed=true]:scale-100"
+            className="agent-tool-card-head h-auto min-h-0 min-w-0 justify-start rounded-none px-0 py-0 shadow-none"
             aria-expanded={foldOpen}
             onPress={() => setFoldOpen((v) => !v)}
           >
@@ -349,7 +348,7 @@ const EventRow = memo(function EventRow({
   return (
     <article
       className={cn(
-        "agent-chat-row is-assistant",
+        "agent-chat-row agent-row-motion is-assistant",
         isError && "is-error",
       )}
     >
@@ -373,6 +372,32 @@ const EventRow = memo(function EventRow({
       </div>
       {clock ? <span className="agent-chat-ts">{clock}</span> : null}
     </article>
+  );
+}
+
+/** Row enter owned by framer (opacity + y, springUI) — CSS agent-row-in stays as reference. */
+const EventRow = memo(function EventRow({
+  event,
+  streaming,
+  jobActive,
+}: {
+  event: AgentJobEvent;
+  streaming?: boolean;
+  jobActive?: boolean;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.div
+      initial={reduce ? false : { opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={springUI}
+    >
+      <EventRowContent
+        event={event}
+        streaming={streaming}
+        jobActive={jobActive}
+      />
+    </motion.div>
   );
 }, (prev, next) => {
   if (prev.streaming !== next.streaming) return false;
@@ -488,6 +513,7 @@ export function AgentJobPage() {
     }
   });
   const timelineRef = useRef<HTMLDivElement>(null);
+  const reduceMotion = useReducedMotion();
 
   const toggleSide = () => {
     setSideOpen((v) => {
@@ -713,6 +739,25 @@ export function AgentJobPage() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [canContinue, canDispatchNew, mergeReplyAttach]);
 
+  // "+" attachment menu: close on outside pointerdown / Escape (mirrors popover).
+  useEffect(() => {
+    if (!addMenu) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.("[data-add-menu],[data-add-menu-trigger]")) return;
+      setAddMenu(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAddMenu(false);
+    };
+    window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onEsc, true);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("keydown", onEsc, true);
+    };
+  }, [addMenu]);
+
   if (!job) {
     return (
       <PageShell>
@@ -741,77 +786,76 @@ export function AgentJobPage() {
 
   return (
     <PageShell className="agent-job-shell max-w-5xl h-full min-h-0 gap-3 pb-0">
-      <header className="agent-job-head shrink-0 items-center ">
-        <Button
-          size="lg"
-          variant="secondary"
-          className="agent-job-back"
-          onPress={() => navigate("/dispatch")}
+      <header className="agent-job-header shrink-0">
+        <button
+          type="button"
+          className="dlink muted self-start"
+          onClick={() => navigate("/dispatch")}
         >
-          <ArrowLeft size={14} />
-          返回
-        </Button>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <h1 className="type-display truncate capitalize">{job.agent}</h1>
-            <span
-              className="badge-soft"
-              data-tone={
-                active
-                  ? "accent"
-                  : job.status === "error"
-                    ? "danger"
-                    : job.status === "done"
-                      ? "success"
-                      : "neutral"
-              }
-            >
-              {jobStatusLabel(job.status)}
-            </span>
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 type-meta">
-            {startedClock ? (
-              <span className="font-mono">
-                {startedClock}
-                {jobDuration ? ` · ${jobDuration}` : ""}
+          ← 派活
+        </button>
+        <div className="flex w-full items-end justify-between gap-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <h1 className="agent-job-title truncate capitalize">
+                {job.agent}
+              </h1>
+              <span
+                className="badge-soft"
+                data-tone={
+                  active
+                    ? "accent"
+                    : job.status === "error"
+                      ? "danger"
+                      : job.status === "done"
+                        ? "success"
+                        : "neutral"
+                }
+              >
+                {jobStatusLabel(job.status)}
               </span>
-            ) : null}
-            <span className="truncate" title={job.cwd}>
-              {job.cwd.replace(/^\/Users\/[^/]+/, "~")}
-            </span>
-            {job.session_id ? (
-              <span className="font-mono" title={job.session_id}>
-                {job.session_id.slice(0, 8)}
+            </div>
+            <div className="agent-job-meta">
+              {startedClock ? (
+                <span>
+                  {startedClock}
+                  {jobDuration ? ` · ${jobDuration}` : ""}
+                </span>
+              ) : null}
+              <span className="truncate" title={job.cwd}>
+                {job.cwd.replace(/^\/Users\/[^/]+/, "~")}
               </span>
-            ) : null}
+              {job.session_id ? (
+                <span title={job.session_id}>{job.session_id.slice(0, 8)}</span>
+              ) : null}
+            </div>
           </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {active ? (
+          <div className="flex shrink-0 items-center gap-1 pb-0.5">
+            {active ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-danger"
+                onPress={() => void cancelAgentJob(job.id)}
+              >
+                <Square size={12} fill="currentColor" />
+                取消
+              </Button>
+            ) : null}
             <Button
+              isIconOnly
               size="sm"
               variant="ghost"
-              onPress={() => void cancelAgentJob(job.id)}
+              aria-label={sideOpen ? "收起文件栏" : "文件栏"}
+              onPress={toggleSide}
             >
-              <Square size={12} fill="currentColor" />
-              取消
+              {sideOpen ? (
+                <PanelRightClose size={14} />
+              ) : (
+                <PanelRight size={14} />
+              )}
             </Button>
-          ) : null}
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-label={sideOpen ? "收起文件栏" : "文件栏"}
-            onPress={toggleSide}
-          >
-            {sideOpen ? (
-              <PanelRightClose size={14} />
-            ) : (
-              <PanelRight size={14} />
-            )}
-            <span className="hidden sm:inline">
-              {sideOpen ? "收起" : "文件"}
-            </span>
-          </Button>
+          </div>
         </div>
       </header>
 
@@ -851,13 +895,14 @@ export function AgentJobPage() {
               ) : (
                 <>
                   {hiddenEventCount > 0 ? (
-                    <button
+                    <motion.button
                       type="button"
                       className="dlink self-center py-2"
+                      whileTap={{ scale: 0.97 }}
                       onClick={() => setShowAllEvents(true)}
                     >
                       ↑ 还有 {hiddenEventCount} 条更早的消息
-                    </button>
+                    </motion.button>
                   ) : null}
                   {visibleEvents.map((e, i) => (
                     <EventRow
@@ -885,13 +930,18 @@ export function AgentJobPage() {
                   {replyAttach.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5">
                       {replyAttach.map((a) => (
-                        <div
+                        <motion.div
                           key={a.path}
                           title={a.path}
                           className={cn(
                             "agent-reply-chip",
                             preview?.path === a.path && "is-selected",
                           )}
+                          initial={
+                            reduceMotion ? false : { opacity: 0, scale: 0.8 }
+                          }
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={springUI}
                         >
                           <Button
                             variant="ghost"
@@ -931,24 +981,28 @@ export function AgentJobPage() {
                           >
                             <X size={10} />
                           </Button>
-                        </div>
+                        </motion.div>
                       ))}
                     </div>
                   ) : null}
 
-                  {preview &&
-                  replyAttach.some((a) => a.path === preview.path) ? (
-                    <motion.div
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ duration: 0.18, ease: easeOut }}
-                    >
-                      <AttachPreview
-                        item={preview as Attachment}
-                        onClose={() => setPreview(null)}
-                      />
-                    </motion.div>
-                  ) : null}
+                  <AnimatePresence initial={false}>
+                    {preview &&
+                    replyAttach.some((a) => a.path === preview.path) ? (
+                      <motion.div
+                        key="composer-preview"
+                        initial={{ opacity: 0, x: 20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 20 }}
+                        transition={springUI}
+                      >
+                        <AttachPreview
+                          item={preview as Attachment}
+                          onClose={() => setPreview(null)}
+                        />
+                      </motion.div>
+                    ) : null}
+                  </AnimatePresence>
 
                   <div className="agent-composer">
                     <TextField
@@ -984,47 +1038,53 @@ export function AgentJobPage() {
                       />
                     </TextField>
                     <div className="agent-composer-bar">
-                      <Dropdown
-                        isOpen={addMenu}
-                        onOpenChange={setAddMenu}
+                      <Button
+                        isIconOnly
+                        variant="ghost"
+                        aria-label="添加"
+                        aria-expanded={addMenu}
+                        data-add-menu-trigger
+                        className={cn(
+                          "agent-composer-icon h-7 w-7 min-h-7 min-w-7 p-0",
+                          addMenu && "is-open",
+                        )}
+                        isDisabled={sending}
+                        onPress={() => setAddMenu((v) => !v)}
                       >
-                        <Button
-                          isIconOnly
-                          variant="ghost"
-                          aria-label="添加"
-                          className={cn(
-                            "agent-composer-icon h-7 w-7 min-h-7 min-w-7 p-0",
-                            addMenu && "is-open",
-                          )}
-                          isDisabled={sending}
-                        >
-                          <Plus size={15} strokeWidth={2.25} />
-                        </Button>
-                        <Dropdown.Popover
-                          placement="top start"
-                          className="min-w-[220px]"
-                        >
-                          <Dropdown.Menu
+                        <Plus size={15} strokeWidth={2.25} />
+                      </Button>
+                      <AnimatePresence initial={false}>
+                        {addMenu ? (
+                          <motion.div
+                            key="add-menu"
+                            role="menu"
                             aria-label="添加附件"
-                            onAction={(key) => {
-                              if (key === "files") void addReplyAttach(false);
-                              if (key === "dirs") void addReplyAttach(true);
-                            }}
+                            data-add-menu
+                            className="agent-add-menu absolute bottom-full left-2 z-50 mb-1.5 flex min-w-[220px] flex-col gap-0.5 rounded-xl border border-border bg-surface p-1 shadow-lg"
+                            initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                            transition={springUI}
                           >
-                            <Dropdown.Item
-                              id="files"
-                              textValue="文件和文件夹"
+                            <Button
+                              variant="ghost"
+                              className="h-auto min-h-0 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-sm font-normal shadow-none hover:bg-default/50 data-[hovered=true]:bg-default/50"
+                              onPress={() => void addReplyAttach(false)}
                             >
                               <Paperclip size={14} className="opacity-60" />
-                              <Label>文件和文件夹</Label>
-                            </Dropdown.Item>
-                            <Dropdown.Item id="dirs" textValue="仅文件夹">
+                              文件和文件夹
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              className="h-auto min-h-0 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-sm font-normal shadow-none hover:bg-default/50 data-[hovered=true]:bg-default/50"
+                              onPress={() => void addReplyAttach(true)}
+                            >
                               <FolderOpen size={14} className="opacity-60" />
-                              <Label>仅文件夹</Label>
-                            </Dropdown.Item>
-                          </Dropdown.Menu>
-                        </Dropdown.Popover>
-                      </Dropdown>
+                              仅文件夹
+                            </Button>
+                          </motion.div>
+                        ) : null}
+                      </AnimatePresence>
 
                       <Select
                         className="inline-flex w-auto"
@@ -1102,8 +1162,16 @@ export function AgentJobPage() {
           </section>
         </div>
 
-        {sideOpen ? (
-          <aside className="flex w-full shrink-0 flex-col gap-2 overflow-auto border-t border-border pt-3 lg:w-72 lg:border-t-0 lg:border-l lg:pl-3 lg:pt-0">
+        <AnimatePresence initial={false}>
+          {sideOpen ? (
+            <motion.aside
+              key="agent-side"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              transition={springUI}
+              className="agent-side-scroll flex w-full shrink-0 flex-col gap-2 overflow-auto border-t border-border pt-3 lg:w-72 lg:border-t-0 lg:border-l lg:pl-3 lg:pt-0"
+            >
             <div className="agent-side-files">
               <div className="mb-2 flex items-center justify-between">
                 <span className="type-meta font-medium text-foreground">
@@ -1134,7 +1202,7 @@ export function AgentJobPage() {
                           aria-label={p}
                           isDisabled={previewBusy}
                           className={cn(
-                            "h-auto min-h-0 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-normal shadow-none hover:bg-default/50 data-[hovered=true]:bg-default/50 data-[pressed=true]:scale-100",
+                            "agent-side-file-row h-auto min-h-0 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-normal shadow-none hover:bg-default/50 data-[hovered=true]:bg-default/50",
                             preview?.path === p && "bg-default/40",
                           )}
                           onPress={() => {
@@ -1163,17 +1231,25 @@ export function AgentJobPage() {
               )}
             </div>
 
-            {preview && !replyAttach.some((a) => a.path === preview.path) ? (
-              <motion.div
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.18, ease: easeOut }}
-              >
-                <AttachPreview item={preview} onClose={() => setPreview(null)} />
-              </motion.div>
-            ) : null}
-          </aside>
-        ) : null}
+            <AnimatePresence initial={false}>
+              {preview && !replyAttach.some((a) => a.path === preview.path) ? (
+                <motion.div
+                  key="side-preview"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  transition={springUI}
+                >
+                  <AttachPreview
+                    item={preview}
+                    onClose={() => setPreview(null)}
+                  />
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+            </motion.aside>
+          ) : null}
+        </AnimatePresence>
       </div>
     </PageShell>
   );

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-Hans" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HUD · v3 设计稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root, [data-theme="light"] {
+    --bg: #F6F5F2; --fg: #1C1A17; --muted: #6B6660; --faint: #8E8983;
+    --border: rgba(30,28,25,0.15); --sep: rgba(30,28,25,0.09);
+    --accent: #D9722E; --accent-soft: rgba(217,114,46,0.10); --accent-fg: #A0561F;
+    --capsule-bg: rgba(255,255,255,0.88); --capsule-border: rgba(28,26,23,0.14);
+    --capsule-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    --capsule-text: rgba(16,16,18,0.88); --capsule-dim: rgba(16,16,18,0.48);
+    --pill-bg: rgba(0,0,0,0.08); --pill-bg-hover: rgba(0,0,0,0.14);
+    --badge-border: rgba(28,26,23,0.14);
+  }
+  [data-theme="dark"] {
+    --bg: #0E0F12; --fg: #E8E6E3; --muted: #8B8A86; --faint: #7A7978;
+    --border: rgba(232,230,227,0.08); --sep: rgba(232,230,227,0.07);
+    --accent: #C4784A; --accent-soft: rgba(196,120,74,0.18); --accent-fg: #E0A075;
+    --capsule-bg: rgba(23,25,30,0.92); --capsule-border: rgba(255,255,255,0.12);
+    --capsule-shadow: 0 8px 24px rgba(0,0,0,0.28);
+    --capsule-text: rgba(255,255,255,0.92); --capsule-dim: rgba(255,255,255,0.48);
+    --pill-bg: rgba(255,255,255,0.14); --pill-bg-hover: rgba(255,255,255,0.24);
+    --badge-border: rgba(255,255,255,0.14);
+  }
+  body {
+    font-family: "Satoshi", "Noto Sans SC", system-ui, sans-serif;
+    background: var(--bg); color: var(--fg);
+    min-height: 100vh; padding: 48px 32px 96px;
+    transition: background 200ms ease, color 200ms ease;
+  }
+  .eyebrow { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-fg); margin-bottom: 8px; }
+  h1 { font-family: "Instrument Serif", serif; font-weight: 400; font-size: 36px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .toggle {
+    position: fixed; top: 20px; right: 24px; z-index: 10;
+    font-family: "IBM Plex Mono", monospace; font-size: 11px;
+    border: 1px solid var(--border); background: var(--capsule-bg); color: var(--fg);
+    border-radius: 999px; padding: 6px 14px; cursor: pointer;
+  }
+  section { margin-top: 44px; }
+  .sec-label { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); letter-spacing: 0.1em; margin-bottom: 14px; }
+
+  /* ———— capsule 共用 ———— */
+  .capsule {
+    display: flex; align-items: center; gap: 12px;
+    min-width: 420px; height: 56px; padding: 10px 18px 10px 14px;
+    background: var(--capsule-bg); border: 1px solid var(--capsule-border);
+    border-radius: 999px; box-shadow: var(--capsule-shadow);
+    backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%);
+    color: var(--capsule-text);
+    width: fit-content; max-width: 100%;
+  }
+  .bars { display: flex; align-items: flex-end; gap: 2px; height: 20px; flex-shrink: 0; }
+  .bars i {
+    width: 3px; border-radius: 999px; background: var(--accent);
+    opacity: 0.5; transform-origin: bottom;
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  .bars i:nth-child(1) { height: 6px; animation-delay: 0s; }
+  .bars i:nth-child(2) { height: 14px; animation-delay: 0.1s; }
+  .bars i:nth-child(3) { height: 20px; animation-delay: 0.2s; }
+  .bars i:nth-child(4) { height: 12px; animation-delay: 0.15s; }
+  .bars i:nth-child(5) { height: 8px; animation-delay: 0.05s; }
+  @keyframes pulse { 0%,100% { transform: scaleY(0.55); opacity: 0.5; } 50% { transform: scaleY(1); opacity: 1; } }
+  .colon { font-weight: 600; font-size: 15px; margin-top: -1px; flex-shrink: 0; }
+  .hud-text { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; font-weight: 500; }
+  .hud-text .dim { color: var(--capsule-dim); font-weight: 450; }
+  .kbd {
+    font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--muted);
+    border: 1px solid var(--badge-border); border-radius: 6px; padding: 1px 5px; flex-shrink: 0;
+  }
+  .spinner {
+    width: 14px; height: 14px; border-radius: 999px; flex-shrink: 0;
+    border: 2px solid var(--capsule-dim); border-top-color: var(--capsule-text);
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .dots { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle; }
+  .dots i { width: 3px; height: 3px; border-radius: 999px; background: currentColor; opacity: 0.35; animation: dot 1s ease-in-out infinite; }
+  .dots i:nth-child(2) { animation-delay: 0.15s; }
+  .dots i:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes dot { 0%,80%,100% { opacity: 0.25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-1px); } }
+
+  /* ———— agent 胶囊（更宽，带 pill 行 + 工具） ———— */
+  .agent-capsule {
+    display: flex; flex-direction: column; gap: 6px;
+    width: 520px; max-width: 100%; padding: 8px 10px 6px;
+    background: var(--capsule-bg); border: 1px solid var(--capsule-border);
+    border-radius: 20px; box-shadow: var(--capsule-shadow);
+    backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%);
+    color: var(--capsule-text);
+  }
+  .agent-pills { display: flex; gap: 6px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 22px; padding: 2px 8px; border-radius: 8px;
+    background: var(--pill-bg); font-size: 11px; font-weight: 600;
+  }
+  .pill .chev { font-size: 9px; opacity: 0.7; }
+  .agent-main { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 4px; }
+  .agent-input {
+    flex: 1; min-width: 0; font-size: 14px; font-weight: 500;
+    color: var(--capsule-dim);
+  }
+  .agent-input b { color: var(--capsule-text); font-weight: 500; }
+  .tools { display: flex; gap: 2px; flex-shrink: 0; }
+  .tool-btn {
+    width: 30px; height: 30px; display: grid; place-items: center;
+    border-radius: 9px; opacity: 0.72; font-size: 14px;
+  }
+  .tool-btn:hover { opacity: 1; background: var(--pill-bg); }
+  .send-btn {
+    width: 32px; height: 32px; display: grid; place-items: center;
+    border-radius: 10px; background: var(--accent); color: #fff; margin-left: 2px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; max-width: 110px;
+    padding: 3px 6px 3px 8px; border-radius: 8px;
+    background: var(--pill-bg); font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  }
+  .chip .x { opacity: 0.55; font-size: 10px; }
+
+  .note { margin-top: 40px; padding: 14px 18px; border: 1px solid var(--border); border-radius: 12px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+  .note b { color: var(--fg); }
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">⇄ 深/浅切换</button>
+
+<div class="eyebrow">HUD · v3 设计稿 · 待 review</div>
+<h1>悬浮胶囊 × 3 态</h1>
+<p class="sub">ASR 出稿胶囊 · 翻译胶囊 · Agent 派活胶囊。右上角切深浅主题。批注写到 hud.md。</p>
+
+<section>
+  <div class="sec-label">1 · ASR 出稿胶囊（recording · 无 badge）</div>
+  <div class="capsule">
+    <div class="bars"><i></i><i></i><i></i><i></i><i></i></div>
+    <span class="colon">:</span>
+    <div class="hud-text"><span class="dim">了。OK，</span>这就上国道了。国道。三三幺。今天把访谈整理成一版能发的稿子出来给大家看一下效果</div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-label">2 · ASR 出稿胶囊（processing / editing · badge 仅 editing 出现）</div>
+  <div style="display:flex; flex-direction:column; gap:14px">
+    <div class="capsule">
+      <div class="spinner"></div>
+      <span class="colon">:</span>
+      <div class="hud-text"><span class="dim">润色中 ·</span> 今天把访谈整理成一版能发的稿<span class="dots"><i></i><i></i><i></i></span></div>
+    </div>
+    <div class="capsule">
+      <div class="bars" style="visibility:hidden"><i></i><i></i><i></i><i></i><i></i></div>
+      <span class="colon">:</span>
+      <div class="hud-text" style="outline:none" contenteditable="true">今天把访谈整理成一版能发的稿，下午发你。</div>
+      <span class="kbd" style="color:var(--accent-fg);border-color:var(--accent)">Enter 确认</span>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-label">3 · 翻译胶囊（⇧Fn · EN → 简中 · 无 badge）</div>
+  <div class="capsule">
+    <div class="bars"><i></i><i></i><i></i><i></i><i></i></div>
+    <span class="colon">:</span>
+    <div class="hud-text"><span class="dim">He remembered the night train whistle…</span> 他记得夜台汽笛，三年的感情<span class="dots"><i></i><i></i><i></i></span></div>
+    <span class="kbd">简中</span>
+  </div>
+</section>
+
+<section>
+  <div class="sec-label">4 · 出现动画：圆点 ease-in → 向左右弹开 → 左侧流入音频条</div>
+  <div class="appear-stage">
+    <div class="capsule appear">
+      <div class="bars appear-bars"><i></i><i></i><i></i><i></i><i></i></div>
+      <span class="colon">:</span>
+      <div class="hud-text"><span class="dim">了。OK，</span>这就上国道了。国道。三三幺…</div>
+    </div>
+  </div>
+</section>
+
+<style>
+  /* 出现动画：圆 → 弹开 → bars 流入。循环演示。 */
+  .appear-stage { padding: 12px 0; }
+  .capsule.appear {
+    animation: capsule-in 2.8s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+    transform-origin: center;
+  }
+  @keyframes capsule-in {
+    0% { width: 56px; min-width: 56px; opacity: 0; transform: scale(0.6); }
+    12% { opacity: 1; transform: scale(1); }
+    30% { width: 56px; min-width: 56px; }
+    55% { width: 460px; min-width: 460px; }
+    82%, 100% { width: 460px; min-width: 460px; opacity: 1; transform: scale(1); }
+    96% { opacity: 0; }
+  }
+  .capsule.appear .colon, .capsule.appear .hud-text {
+    animation: text-in 2.8s ease-out infinite;
+  }
+  @keyframes text-in {
+    0%, 45% { opacity: 0; }
+    60%, 92% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  .capsule.appear .appear-bars {
+    animation: bars-in 2.8s ease-out infinite;
+    transform-origin: left center;
+  }
+  @keyframes bars-in {
+    0%, 38% { opacity: 0; transform: translateX(-8px) scaleX(0.6); }
+    55%, 92% { opacity: 1; transform: translateX(0) scaleX(1); }
+    100% { opacity: 0; }
+  }
+  .capsule.appear { overflow: hidden; white-space: nowrap; }
+</style>
+
+<section>
+  <div class="sec-label">4 · Agent 派活胶囊（Fn+Space · 编辑派发态）</div>
+  <div class="agent-capsule">
+    <div class="agent-pills">
+      <span class="pill">Claude <span class="chev">▴</span></span>
+      <span class="pill">📁 asr-cli <span class="chev">▴</span></span>
+    </div>
+    <div class="agent-main">
+      <div class="bars"><i></i><i></i><i></i><i></i><i></i></div>
+      <span class="chip">@src <span class="x">✕</span></span>
+      <span class="chip">📎 brief.md <span class="x">✕</span></span>
+      <div class="agent-input">把今天的访谈整理成<b>能发布的一版</b>…</div>
+      <div class="tools">
+        <span class="tool-btn">@</span>
+        <span class="tool-btn">📎</span>
+        <span class="send-btn">➤</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="sec-label">5 · Agent 派活胶囊（录音态）</div>
+  <div class="agent-capsule">
+    <div class="agent-pills">
+      <span class="pill">Codex <span class="chev">▴</span></span>
+      <span class="pill">📁 yanluo <span class="chev">▴</span></span>
+    </div>
+    <div class="agent-main">
+      <div class="bars"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="agent-input"><span style="color:var(--capsule-dim)">说完再按 Fn+Space ·</span> 重构设置页的双栏布局…</div>
+      <div class="tools">
+        <span class="tool-btn" style="color:#e2695f">■</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="note">
+  <b>规格：</b>胶囊 h56 圆角 999 · blur(20px) saturate(180%) · 无 native 矩形阴影 ·
+  5 bars 铜色 pulse（6/14/20/12/8px，delay 0/.1/.2/.15/.05s）·
+  Agent 胶囊 w520 圆角 20px，pill 行 + 附件 chip + 工具钮。
+  <b>位置：</b>跟随鼠标所在屏幕，同屏记住拖拽位。
+</div>
+
+</body>
+</html>

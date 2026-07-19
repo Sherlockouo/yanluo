@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>言落 · v3 主题概念</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Satoshi", "Noto Sans SC", system-ui, sans-serif;
+    font-size: 15px; line-height: 1.5;
+    background: #111; color: #eee;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 40px 28px 80px; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace; font-size: 11px;
+    letter-spacing: 0.14em; text-transform: uppercase; color: #C4784A;
+    margin-bottom: 10px;
+  }
+  h1 { font-family: "Instrument Serif", serif; font-weight: 400; font-size: 44px; letter-spacing: -0.02em; }
+  .sub { color: #999; margin-top: 8px; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 32px; }
+  @media (max-width: 900px) { .duo { grid-template-columns: 1fr; } }
+
+  .theme-card { border-radius: 18px; overflow: hidden; border: 1px solid rgba(128,128,128,0.25); }
+  .theme-head {
+    padding: 14px 20px; font-family: "IBM Plex Mono", monospace; font-size: 11px;
+    letter-spacing: 0.1em; display: flex; justify-content: space-between;
+  }
+  .theme-body { padding: 24px; }
+
+  /* ———— DARK tokens ———— */
+  .dark-prev { background: #0E0F12; color: #E8E6E3; }
+  .dark-prev .theme-head { background: #17191E; color: #8B8A86; border-bottom: 1px solid rgba(232,230,227,0.08); }
+  .dark-prev .panel {
+    background: #17191E; border: 1px solid rgba(232,230,227,0.08);
+    border-radius: 14px; padding: 18px;
+  }
+  .dark-prev .accent { color: #C4784A; }
+  .dark-prev .muted { color: #8B8A86; }
+  .dark-prev .faint { color: #7A7978; }
+
+  /* ———— LIGHT v4 tokens ———— */
+  .light-prev { background: #F6F5F2; color: #1C1A17; }
+  .light-prev .theme-head { background: #FFFFFF; color: #6B6660; border-bottom: 1px solid rgba(30,28,25,0.09); }
+  .light-prev .panel {
+    background: #FFFFFF; border: 1px solid rgba(30,28,25,0.15);
+    border-radius: 14px; padding: 18px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.8) inset, 0 1px 2px rgba(30,28,25,0.04), 0 8px 24px rgba(30,28,25,0.05);
+  }
+  .light-prev .accent { color: #A0561F; }
+  .light-prev .muted { color: #6B6660; }
+  .light-prev .faint { color: #8E8983; }
+
+  .swatches { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0; }
+  .sw {
+    width: 56px; height: 56px; border-radius: 10px; border: 1px solid rgba(128,128,128,0.2);
+    display: flex; align-items: flex-end; padding: 5px;
+    font-family: "IBM Plex Mono", monospace; font-size: 8.5px;
+  }
+  .serif { font-family: "Instrument Serif", "Noto Serif SC", serif; font-weight: 400; }
+  .display { font-size: 40px; letter-spacing: -0.02em; line-height: 1.05; }
+  .section { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .body-t { font-size: 15px; }
+  .mono { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.01em; }
+  .micro { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.01em; }
+
+  .cta {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 0; border-radius: 10px; padding: 8px 16px;
+    font: inherit; font-weight: 600; font-size: 14px; cursor: pointer;
+  }
+  .cta-primary { background: #D9722E; color: #fff; }
+  .dark-prev .cta-primary { background: #C4784A; }
+  .cta-ghost { background: transparent; }
+  .dark-prev .cta-ghost { color: #E8E6E3; }
+  .light-prev .cta-ghost { color: #1C1A17; }
+  .tag {
+    display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+    padding: 2px 7px; border-radius: 6px;
+  }
+  .dark-prev .tag { background: rgba(196,120,74,0.18); color: #E0A075; }
+  .light-prev .tag { background: rgba(217,114,46,0.10); color: #A0561F; }
+
+  .row-line {
+    display: flex; gap: 12px; padding: 12px 4px; align-items: baseline;
+    border-bottom: 1px solid;
+  }
+  .dark-prev .row-line { border-color: rgba(232,230,227,0.07); }
+  .light-prev .row-line { border-color: rgba(30,28,25,0.09); }
+
+  .tab-underline { display: inline-block; padding-bottom: 6px; position: relative; font-weight: 600; }
+  .tab-underline::after {
+    content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; border-radius: 2px;
+  }
+  .dark-prev .tab-underline::after { background: #C4784A; }
+  .light-prev .tab-underline::after { background: #D9722E; }
+
+  .note {
+    margin-top: 24px; padding: 16px 20px; border-radius: 12px;
+    font-size: 13px; line-height: 1.6;
+  }
+  .dark-prev .note { background: #17191E; color: #8B8A86; border: 1px solid rgba(232,230,227,0.08); }
+  .light-prev .note { background: #EDEBE6; color: #6B6660; border: 1px solid rgba(30,28,25,0.09); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">言落 · v3 theme concept · 待 review</div>
+  <h1>深色 × 浅色</h1>
+  <p class="sub">深色 = 品牌脸（不动）。浅色 v4 = 干净暖白，去黄去浊。批注请写到 theme.md。</p>
+
+  <div class="duo">
+    <!-- ============ DARK ============ -->
+    <div class="theme-card dark-prev">
+      <div class="theme-head"><span>DARK · 品牌脸（保持）</span><span>#0E0F12</span></div>
+      <div class="theme-body">
+        <div class="swatches">
+          <div class="sw" style="background:#0E0F12;color:#E8E6E3">bg</div>
+          <div class="sw" style="background:#17191E;color:#E8E6E3">sfc</div>
+          <div class="sw" style="background:#1E2128;color:#E8E6E3">sfc2</div>
+          <div class="sw" style="background:#C4784A;color:#0E0F12">copper</div>
+          <div class="sw" style="background:rgba(196,120,74,0.18);color:#E0A075">soft</div>
+        </div>
+        <div class="panel">
+          <div class="mono faint">本机识别 · 已就绪</div>
+          <div class="serif display" style="margin-top:8px">出稿</div>
+          <div style="margin-top:14px">
+            <span class="tab-underline">文件</span>
+            <span class="muted" style="margin-left:18px">实时</span>
+            <span class="muted" style="margin-left:18px">翻译</span>
+            <span class="muted" style="margin-left:18px">历史</span>
+          </div>
+          <div class="row-line" style="margin-top:16px">
+            <span class="mono faint">01</span>
+            <span class="mono faint">2026/7/16 22:36</span>
+            <span class="tag">视频</span>
+            <span class="mono faint">127.0s</span>
+          </div>
+          <div class="body-t" style="padding:10px 4px">你看到大街上开法拉利的、开劳斯莱斯的，就是傻叔啊…</div>
+          <div style="margin-top:14px; display:flex; gap:10px; align-items:center">
+            <button class="cta cta-primary">保存</button>
+            <button class="cta cta-ghost">取消</button>
+            <span class="accent" style="font-size:13px">铜色链接 →</span>
+          </div>
+        </div>
+        <div class="note">深色已认可，无改动。铜 #C4784A 是唯一强调。</div>
+      </div>
+    </div>
+
+    <!-- ============ LIGHT v4 ============ -->
+    <div class="theme-card light-prev">
+      <div class="theme-head"><span>LIGHT · v4 重做</span><span>#F6F5F2</span></div>
+      <div class="theme-body">
+        <div class="swatches">
+          <div class="sw" style="background:#F6F5F2;color:#1C1A17">bg</div>
+          <div class="sw" style="background:#FFFFFF;color:#1C1A17">sfc</div>
+          <div class="sw" style="background:#FAF9F6;color:#1C1A17">sfc2</div>
+          <div class="sw" style="background:#EDEBE6;color:#1C1A17">inset</div>
+          <div class="sw" style="background:#D9722E;color:#fff">cta</div>
+          <div class="sw" style="background:rgba(217,114,46,0.10);color:#A0561F">soft</div>
+        </div>
+        <div class="panel">
+          <div class="mono faint">本机识别 · 已就绪</div>
+          <div class="serif display" style="margin-top:8px">出稿</div>
+          <div style="margin-top:14px">
+            <span class="tab-underline">文件</span>
+            <span class="muted" style="margin-left:18px">实时</span>
+            <span class="muted" style="margin-left:18px">翻译</span>
+            <span class="muted" style="margin-left:18px">历史</span>
+          </div>
+          <div class="row-line" style="margin-top:16px">
+            <span class="mono faint">01</span>
+            <span class="mono faint">2026/7/16 22:36</span>
+            <span class="tag">视频</span>
+            <span class="mono faint">127.0s</span>
+          </div>
+          <div class="body-t" style="padding:10px 4px">你看到大街上开法拉利的、开劳斯莱斯的，就是傻叔啊…</div>
+          <div style="margin-top:14px; display:flex; gap:10px; align-items:center">
+            <button class="cta cta-primary">保存</button>
+            <button class="cta cta-ghost">取消</button>
+            <span class="accent" style="font-size:13px">铜色链接 →</span>
+          </div>
+        </div>
+        <div class="note">
+          v4 关键：背景去黄（#f0ede6 → #F6F5F2）· 三层分离（纸/白卡/暖嵌 #EDEBE6）· hairline 更细（0.15）· 卡片加极轻冷中性环境光。
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

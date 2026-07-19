@@ -9,7 +9,9 @@
   position: sticky;
   top: 0;
   z-index: 20;
-  margin: -1.5rem 0 24px;
+  /* cancel the 3rem stage top-padding so the kicker sits 24px from the
+     stage top, as in the v3 mock (.mast padding-top: 24px) */
+  margin: -3rem 0 0;
   padding: 1.5rem 0 14px;
   background: var(--background);
 }
@@ -32,10 +34,21 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: none;
+  /* fixed slot height — tab switches portal different action sets in here,
+     the masthead must not reflow when the set changes or transiently empties */
   min-height: 28px;
 }
 .dmast-action .dlink {
   font-size: 12.5px;
+}
+/* portal wrapper: keeps a panel's masthead actions mounted across tab
+   switches (visibility-toggled inline), so nothing remounts/replays */
+.dmast-actgrp {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  height: 28px;
 }
 .dmast-meta {
   font-family: var(--font-mono);
@@ -64,10 +77,16 @@
   align-items: center;
   gap: 18px;
   margin-top: 10px;
+  /* reserved height: language label width changes must never reflow the page */
+  min-height: 16px;
   font-family: var(--font-mono);
   font-size: 11.5px;
+  line-height: 16px;
   color: var(--muted);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+.dmast-sub > span {
+  white-space: nowrap;
 }
 .dmast-sub b {
   color: var(--foreground);
@@ -96,7 +115,9 @@
   white-space: nowrap;
   background: none;
   border: 0;
-  transition: color 0.14s;
+  transition:
+    color 0.14s,
+    opacity 80ms ease-out;
 }
 .dmode:hover {
   color: var(--foreground);
@@ -125,11 +146,48 @@
 .dpanel > * {
   animation: dpanel-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
+/* —— keyframes: dpanel-in (enter-only, translateY + opacity) —— */
 @keyframes dpanel-in {
   from {
     opacity: 0.6;
     transform: translateY(4px);
   }
+}
+/*
+  .qsel-quiet — de-boxed select trigger (翻译 masthead: 目标语言 / LLM provider /
+  模型). No border, no bg, no inset shadow — quiet mono text with a ▾ chevron,
+  muted ink → foreground on hover. Same language as .dlink / .dmast-action.
+  Unlayered here so it beats HeroUI's layered boxed-trigger styles.
+*/
+.qsel-quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+  transition:
+    color 150ms ease-out,
+    opacity 80ms ease-out;
+}
+.qsel-quiet:hover,
+.qsel-quiet[data-hovered="true"] {
+  background: transparent;
+  color: var(--foreground);
+}
+.qsel-quiet[data-pressed="true"] {
+  opacity: 0.6;
+}
+.qsel-quiet:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 /* quiet inline text switch (本地/链接 · 音频/视频 · 专注/全文) */
 .tswitch {
@@ -144,13 +202,16 @@
   background: none;
   border: 0;
   padding: 0;
+  transition:
+    color 0.14s,
+    opacity 80ms ease-out;
 }
 .tswitch .o.is-active {
   color: var(--foreground);
   font-weight: 600;
 }
 .tswitch .sep {
-  color: var(--field-border);
+  color: var(--border);
 }
 
 /* manuscript index (results) */
@@ -162,8 +223,8 @@
   display: flex;
   gap: 16px;
   align-items: flex-start;
-  padding: 24px 4px;
-  border-bottom: 1px solid var(--border);
+  padding: 22px 4px;
+  border-bottom: 1px solid var(--separator);
   cursor: pointer;
   transition: background-color 120ms ease;
   text-align: left;
@@ -223,11 +284,18 @@
 }
 .rec {
   padding: 22px 4px;
-  border-bottom: 1px solid var(--border);
-  transition: background-color 120ms ease;
+  border-bottom: 1px solid var(--separator);
+  transition:
+    background-color 120ms ease,
+    transform 100ms ease-out;
 }
 .rec:hover {
   background: color-mix(in oklab, var(--foreground) 3%, transparent);
+}
+/* press scale only on clickable rows (history toggle rows carry .is-clickable);
+   live/translate .rec are static <article> — scaling them implies false affordance */
+.rec.is-clickable:active {
+  transform: scale(0.99);
 }
 .rec-l {
   display: flex;
@@ -250,9 +318,19 @@
   margin-top: 9px;
 }
 
-/* tighter .panel padding for inline detail cards (history expanded viewer) */
-.panel-compact {
-  padding: 1rem;
+/* expanded history row — contract frame F: the whole row (header included)
+   upgrades to one card; the inline viewer is separated by a top hairline,
+   no nested panel. */
+.rec.exp {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+}
+.rec.exp .expbody {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }
 
 /* quiet inline link (＋新转写 / ← 转写记录 / 模型 ▾) */
@@ -264,16 +342,27 @@
   border: 0;
   padding: 0;
   cursor: pointer;
-  transition: color 0.14s;
+  transition:
+    color 0.14s,
+    opacity 80ms ease-out;
 }
+/* Hover stays in the copper family — bright #D9722E is never small text. */
 .dlink:hover {
-  color: var(--accent);
+  color: color-mix(in oklab, var(--accent-soft-foreground) 80%, var(--foreground));
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .dlink.muted {
   color: var(--muted);
 }
 .dlink.muted:hover {
   color: var(--foreground);
+}
+/* pointer-down feedback for quiet text controls — opacity, not scale (no glyph jitter) */
+.dmode:active,
+.tswitch .o:active,
+.dlink:active {
+  opacity: 0.55;
 }
 
 /* settings — quiet secondary tabs (配置/纠错学习/词库 · 快捷键/权限) */
@@ -286,7 +375,7 @@
 .set-subtab {
   position: relative;
   padding: 0 0 10px;
-  font-size: 13.5px;
+  font-size: var(--text-ui);
   color: var(--muted);
   background: none;
   border: 0;
@@ -321,7 +410,7 @@
 /* settings — switch row inside a card */
 .settings-switchrow {
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--surface-secondary);
 }
 
@@ -337,15 +426,19 @@
   gap: 10px;
   padding: 11px 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--surface);
   transition:
     border-color 0.14s,
-    background-color 0.14s;
+    background-color 0.14s,
+    transform 100ms ease-out;
 }
 .set-row:hover {
   border-color: color-mix(in oklab, var(--foreground) 18%, transparent);
   background: color-mix(in oklab, var(--foreground) 2.5%, transparent);
+}
+.set-row:active {
+  transform: scale(0.99);
 }
 .set-row.is-active {
   border-color: color-mix(in oklab, var(--accent) 45%, transparent);
@@ -358,12 +451,12 @@
 /* expandable provider row: row + inline editor read as one card when open */
 .set-row-wrap.is-open {
   border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--surface);
 }
 .set-row-wrap.is-open .set-row {
   border: 0;
-  border-radius: 12px 12px 0 0;
+  border-radius: 14px 14px 0 0;
   background: transparent;
 }
 .set-row-wrap.is-open .set-row:hover {
@@ -377,7 +470,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13.5px;
+  font-size: var(--text-ui);
   font-weight: 500;
   color: var(--foreground);
 }
@@ -399,27 +492,35 @@
 
 /* editorial dropzone */
 .dropzone {
-  min-height: 300px;
-  border: 1.5px dashed var(--field-border);
+  min-height: 200px;
+  border: 1.5px dashed var(--border);
   border-radius: 18px;
   background: var(--surface-secondary);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+  gap: 10px;
   color: var(--muted);
   text-align: center;
-  padding: 56px;
+  padding: 32px;
+  transition:
+    transform 100ms ease-out,
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+/* card press feedback — only when the dropzone IS the button (upload pick) */
+button.dropzone:active {
+  transform: scale(0.985);
 }
 .dropzone.is-drag {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
 .dropzone-ic {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
   display: grid;
   place-items: center;
   background: var(--surface);
@@ -434,8 +535,40 @@
 .dropzone-fmt {
   font-family: var(--font-mono);
   font-size: 11px;
-  letter-spacing: 0.04em;
   color: var(--faint);
+}
+
+/* processing — calm centered (contract frame B): no card chrome, copper-wash icon */
+.proc {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 64px 0;
+  text-align: center;
+}
+.proc-ic {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-lg);
+  display: grid;
+  place-items: center;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  color: var(--accent-soft-foreground);
+}
+.proc-prog {
+  width: min(340px, 100%);
+  height: 5px;
+  border-radius: 9999px;
+  background: var(--field-border);
+  overflow: hidden;
+}
+.proc-prog > div {
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--foreground);
+  transition: width 160ms ease;
 }
 
 /*
@@ -449,11 +582,12 @@
 .learn-embed .rec {
   padding: 16px 18px;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   transition:
     border-color 140ms ease,
-    background-color 140ms ease;
+    background-color 140ms ease,
+    transform 100ms ease-out;
 }
 .learn-embed .rec:hover {
   border-color: color-mix(in oklab, var(--foreground) 16%, transparent);
@@ -464,4 +598,63 @@
   font-family: var(--font-mono);
   font-size: 11.5px;
   letter-spacing: 0.01em;
+}
+
+/* Press feedback off under reduced motion — rows cross-fade color only */
+@media (prefers-reduced-motion: reduce) {
+  .rec.is-clickable,
+  .rec.is-clickable:active,
+  .ritem,
+  .ritem:active,
+  .set-row,
+  .set-row:active,
+  .setnav-item,
+  .setnav-item:active,
+  .dropzone,
+  .dropzone:active {
+    transform: none;
+  }
+
+  .rec,
+  .ritem {
+    transition: background-color 120ms ease;
+  }
+
+  .set-row {
+    transition:
+      border-color 0.14s,
+      background-color 0.14s;
+  }
+
+  .setnav-item {
+    transition:
+      color 140ms ease,
+      background 140ms ease;
+  }
+
+  .dropzone {
+    transition:
+      border-color 140ms ease,
+      background-color 140ms ease;
+  }
+
+  .learn-embed .rec {
+    transition:
+      border-color 140ms ease,
+      background-color 140ms ease;
+  }
+
+  /* no slide/transform — panel content appears instantly, underline snaps on */
+  .dpanel > * {
+    animation: none;
+  }
+
+  .dmode::after,
+  .set-subtab::after {
+    transition: none;
+  }
+
+  .proc-prog > div {
+    transition: none;
+  }
 }

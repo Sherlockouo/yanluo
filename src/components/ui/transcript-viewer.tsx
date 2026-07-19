@@ -548,7 +548,7 @@ function TranscriptModeToggle({ className }: { className?: string }) {
           variant="ghost"
           aria-pressed={mode === "focus"}
           className={cn(
-            "inline-flex h-auto min-h-0 items-center gap-1 rounded-none px-2.5 py-1 text-[11px] shadow-none data-[pressed=true]:scale-100",
+            "inline-flex h-auto min-h-0 items-center gap-1 rounded-none px-2.5 py-1 text-[11px] shadow-none",
             mode === "focus"
               ? "bg-accent/15 font-medium text-accent-soft-foreground data-[hovered=true]:bg-accent/15"
               : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
@@ -563,7 +563,7 @@ function TranscriptModeToggle({ className }: { className?: string }) {
           variant="ghost"
           aria-pressed={mode === "read"}
           className={cn(
-            "inline-flex h-auto min-h-0 items-center gap-1 rounded-none px-2.5 py-1 text-[11px] shadow-none data-[pressed=true]:scale-100",
+            "inline-flex h-auto min-h-0 items-center gap-1 rounded-none px-2.5 py-1 text-[11px] shadow-none",
             mode === "read"
               ? "bg-accent/15 font-medium text-accent-soft-foreground data-[hovered=true]:bg-accent/15"
               : "text-muted hover:text-foreground data-[hovered=true]:text-foreground",
@@ -692,7 +692,7 @@ function TranscriptContent({
                   <Button
                     variant="ghost"
                     aria-label={`跳转到 ${formatClock(para.startTime)}`}
-                    className="mb-1.5 h-auto min-h-0 justify-start rounded-none px-0 py-0 font-mono text-[10px] font-normal tabular-nums tracking-wider text-muted/70 shadow-none hover:text-accent-soft-foreground data-[hovered=true]:bg-transparent data-[hovered=true]:text-accent-soft-foreground data-[pressed=true]:scale-100 data-[pressed=true]:bg-transparent"
+                    className="mb-1.5 h-auto min-h-0 justify-start rounded-none px-0 py-0 font-mono text-[10px] font-normal tabular-nums tracking-wider text-muted/70 shadow-none hover:text-accent-soft-foreground data-[hovered=true]:bg-transparent data-[hovered=true]:text-accent-soft-foreground data-[pressed=true]:bg-transparent data-[pressed=true]:opacity-60"
                     onPress={() => seekToParagraph(para)}
                   >
                     {formatClock(para.startTime)}

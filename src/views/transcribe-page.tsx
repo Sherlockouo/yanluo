@@ -5,7 +5,8 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, Chip, Input, Label, Modal, TextField, toast } from "@heroui/react";
+import { Button, Input, Label, TextField, toast } from "@heroui/react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Clipboard,
   Download,
@@ -14,21 +15,14 @@ import {
   Plus,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import type { HistoryEntry, TranscriptionResult } from "@/types";
-import {
-  providerLabel,
-  TRANSCRIBE_FILE_FILTERS,
-  TRANSCRIBE_FORMAT_HINT,
-} from "@/lib/constants";
+import { providerLabel, TRANSCRIBE_FILE_FILTERS } from "@/lib/constants";
 import { isVideoMediaKind } from "@/lib/alignment";
-import {
-  ModeSwitch,
-  PageHeader,
-  PageShell,
-  SectionCard,
-} from "@/components/shared/page-shell";
+import { ModeSwitch, PageHeader, PageShell } from "@/components/shared/page-shell";
 import { useApp } from "@/app-context";
+import { springUI, duration, easeOut } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 
 type TranscriptViewerType =
@@ -457,9 +451,16 @@ export function TranscribePage({
     embedded && active && actionSlot
       ? createPortal(
           screen === "result" ? (
-            <button type="button" className="dlink" onClick={enterUpload}>
-              ＋ 新转写
-            </button>
+            <>
+              {sessionEntries.length > 0 ? (
+                <span className="dmast-meta">
+                  转写记录 · {sessionEntries.length}
+                </span>
+              ) : null}
+              <button type="button" className="dlink" onClick={enterUpload}>
+                ＋ 新转写
+              </button>
+            </>
           ) : screen === "upload" && sessionEntries.length > 0 ? (
             <button
               type="button"
@@ -757,34 +758,7 @@ function UploadPhase({
   const canUrlStart = urlLooksValid && !modelBlocked && !processing;
 
   return (
-    <div className="flex w-full flex-col gap-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="tswitch" role="tablist" aria-label="来源">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={source === "file"}
-            className={cn("o", source === "file" && "is-active")}
-            onClick={() => setSource("file")}
-          >
-            本地文件
-          </button>
-          <span className="sep">/</span>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={source === "link"}
-            className={cn("o", source === "link" && "is-active")}
-            onClick={() => setSource("link")}
-          >
-            网络链接
-          </button>
-        </div>
-        {source === "file" ? (
-          <span className="type-meta">拖入、粘贴或选择</span>
-        ) : null}
-      </div>
-
+    <div className="flex w-full flex-col">
       <ModeSwitch modeKey={source}>
         {source === "file" ? (
           <div className="flex flex-col gap-5">
@@ -804,9 +778,9 @@ function UploadPhase({
                 <>
                   <span className="dropzone-ic">
                     {selectedIsVideo ? (
-                      <FileVideo size={26} aria-hidden />
+                      <FileVideo size={22} aria-hidden />
                     ) : (
-                      <FileAudio size={26} aria-hidden />
+                      <FileAudio size={22} aria-hidden />
                     )}
                   </span>
                   <span className="dropzone-t max-w-full truncate">
@@ -817,12 +791,14 @@ function UploadPhase({
               ) : (
                 <>
                   <span className="dropzone-ic">
-                    <Upload size={26} aria-hidden />
+                    <Upload size={22} aria-hidden />
                   </span>
                   <span className="dropzone-t">
-                    {dragOver ? "松开以添加" : "拖拽或点击选择"}
+                    {dragOver ? "松开以添加" : "拖入音频 / 视频文件"}
                   </span>
-                  <span className="dropzone-fmt">{TRANSCRIBE_FORMAT_HINT}</span>
+                  <span className="dropzone-fmt">
+                    mp3 · wav · m4a · mp4 · mov — 或粘贴链接
+                  </span>
                 </>
               )}
             </button>
@@ -843,30 +819,7 @@ function UploadPhase({
           </div>
         ) : (
           <div className="flex flex-col gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="type-meta font-mono">{provider}</p>
-              <div className="tswitch" role="tablist" aria-label="媒体类型">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={urlMode === "audio"}
-                  className={cn("o", urlMode === "audio" && "is-active")}
-                  onClick={() => onUrlModeChange("audio")}
-                >
-                  音频
-                </button>
-                <span className="sep">/</span>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={urlMode === "video"}
-                  className={cn("o", urlMode === "video" && "is-active")}
-                  onClick={() => onUrlModeChange("video")}
-                >
-                  视频
-                </button>
-              </div>
-            </div>
+            <p className="type-meta font-mono">{provider}</p>
 
             <TextField
               fullWidth
@@ -898,6 +851,56 @@ function UploadPhase({
           </div>
         )}
       </ModeSwitch>
+
+      <div className="mt-5 flex items-center">
+        <div className="tswitch" role="tablist" aria-label="来源">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={source === "file"}
+            className={cn("o", source === "file" && "is-active")}
+            onClick={() => setSource("file")}
+          >
+            本地文件
+          </button>
+          <span className="sep">·</span>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={source === "link"}
+            className={cn("o", source === "link" && "is-active")}
+            onClick={() => setSource("link")}
+          >
+            网络链接
+          </button>
+        </div>
+        {source === "link" ? (
+          <>
+            <span className="w-5" />
+            <div className="tswitch" role="tablist" aria-label="媒体类型">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={urlMode === "audio"}
+                className={cn("o", urlMode === "audio" && "is-active")}
+                onClick={() => onUrlModeChange("audio")}
+              >
+                音频
+              </button>
+              <span className="sep">·</span>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={urlMode === "video"}
+                className={cn("o", urlMode === "video" && "is-active")}
+                onClick={() => onUrlModeChange("video")}
+              >
+                视频
+              </button>
+            </div>
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -920,8 +923,8 @@ function ProcessingPhase({
   const downloading =
     name?.includes("下载") === true || downloadPercent != null;
   return (
-    <SectionCard className="mx-auto flex w-full max-w-2xl flex-col items-center gap-4 py-16 text-center">
-      <div className="dropzone-ic">
+    <div className="proc mx-auto w-full max-w-2xl">
+      <div className="proc-ic">
         {downloading ? (
           <Download size={24} aria-hidden />
         ) : (
@@ -938,9 +941,18 @@ function ProcessingPhase({
           </p>
         ) : null}
         {downloadPercent != null ? (
-          <p className="mt-1 text-[12px] text-muted">
-            {downloadPercent.toFixed(0)}%
-          </p>
+          <>
+            <div className="proc-prog mx-auto mt-3">
+              <div
+                style={{
+                  width: `${Math.min(Math.max(downloadPercent, 0), 100)}%`,
+                }}
+              />
+            </div>
+            <p className="mt-1.5 text-[12px] text-muted">
+              {downloadPercent.toFixed(0)}%
+            </p>
+          </>
         ) : null}
         {downloadMessage ? (
           <p className="mt-1 max-w-md truncate text-[11px] text-muted">
@@ -954,7 +966,7 @@ function ProcessingPhase({
       <Button size="sm" variant="secondary" onPress={onCancel}>
         取消
       </Button>
-    </SectionCard>
+    </div>
   );
 }
 
@@ -973,19 +985,27 @@ function ResultPhase({
   onDelete: (id: string) => void;
   onNew: () => void;
 }) {
-  const [detailOpen, setDetailOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [Viewer, setViewer] = useState<TranscriptViewerType | null>(null);
-  /** Full entry w/ alignment — fetched only when modal opens. */
+  /** Full entry w/ alignment — fetched only when a row expands. */
   const [detailEntry, setDetailEntry] = useState<HistoryEntry | null>(null);
   // First paint: few rows. Rest after idle — tab-click must stay light.
   const [visibleCount, setVisibleCount] = useState(8);
 
   useEffect(() => {
     if (!activeEntry) {
-      setDetailOpen(false);
+      setExpandedId(null);
       setDetailEntry(null);
     }
   }, [activeEntry]);
+
+  // Expanded row deleted from under us → collapse.
+  useEffect(() => {
+    if (expandedId && !sessionEntries.some((e) => e.id === expandedId)) {
+      setExpandedId(null);
+      setDetailEntry(null);
+    }
+  }, [expandedId, sessionEntries]);
 
   useEffect(() => {
     const cancelDefer = deferWork(() => setVisibleCount(30), 400);
@@ -999,9 +1019,12 @@ function ResultPhase({
     return mod.TranscriptViewer;
   }, [Viewer]);
 
-  const selectAndOpen = (id: string) => {
+  // Modal reader: click a row → fetch full entry + open the dialog.
+  // (Inline expansion replaced by user directive — full-screen reader is the
+  // only way long transcripts stay readable.)
+  const openRow = (id: string) => {
     if (activeEntry?.id !== id) onSelect(id);
-    setDetailOpen(true);
+    setExpandedId(id);
     setDetailEntry(null);
     void (async () => {
       const [full] = await Promise.all([
@@ -1010,131 +1033,239 @@ function ResultPhase({
         ),
         ensureViewer(),
       ]);
-      setDetailEntry(full ?? sessionEntries.find((e) => e.id === id) ?? null);
+      // Render guards by id, so a stale resolve after close is ignored.
+      if (full) setDetailEntry(full);
     })();
   };
 
+  const closeModal = useCallback(() => {
+    setExpandedId(null);
+    setDetailEntry(null);
+  }, []);
+
   const rows = sessionEntries.slice(0, visibleCount);
-  const viewerEntry = detailEntry;
+  const openEntry =
+    detailEntry ?? sessionEntries.find((e) => e.id === expandedId) ?? null;
 
   return (
-    <>
-      <div className="w-full">
-        {sessionEntries.length === 0 ? (
-          <div className="dropzone" style={{ minHeight: 220 }}>
-            <span className="dropzone-ic">
-              <FileAudio size={22} aria-hidden />
-            </span>
-            <span className="dropzone-t">还没有转写结果</span>
-            <Button variant="primary" onPress={onNew}>
-              <Plus size={16} aria-hidden />
-              开始转写
-            </Button>
-          </div>
-        ) : (
-          <>
-            <div className="rlist">
-              {rows.map((entry, i) => (
-                <HistoryRow
-                  key={entry.id}
-                  entry={entry}
-                  index={i + 1}
-                  active={activeEntry?.id === entry.id}
-                  onSelect={() => selectAndOpen(entry.id)}
-                  onDelete={() => onDelete(entry.id)}
-                />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+    <div className="w-full">
+      {sessionEntries.length === 0 ? (
+        <div className="dropzone dropzone-empty">
+          <span className="dropzone-ic">
+            <FileAudio size={22} aria-hidden />
+          </span>
+          <span className="dropzone-t">还没有转写结果</span>
+          <Button variant="primary" onPress={onNew}>
+            <Plus size={16} aria-hidden />
+            开始转写
+          </Button>
+        </div>
+      ) : (
+        <div className="rlist">
+          {rows.map((entry, i) => (
+            <HistoryRow
+              key={entry.id}
+              entry={entry}
+              index={i + 1}
+              active={expandedId === entry.id}
+              onSelect={() => openRow(entry.id)}
+              onDelete={() => onDelete(entry.id)}
+            />
+          ))}
+        </div>
+      )}
 
-      {viewerEntry && detailOpen && Viewer ? (
-        <Modal.Backdrop
-          isOpen={detailOpen}
-          onOpenChange={(open) => {
-            setDetailOpen(open);
-            if (!open) setDetailEntry(null);
+      <TranscriptResultModal
+        open={Boolean(expandedId)}
+        entry={openEntry}
+        languageLabel={languageLabel}
+        Viewer={Viewer}
+        onClose={closeModal}
+      />
+    </div>
+  );
+}
+
+/** Full-screen transcript reader dialog — silky enter/exit, Esc/backdrop close. */
+function TranscriptResultModal({
+  open,
+  entry,
+  languageLabel,
+  Viewer,
+  onClose,
+}: {
+  open: boolean;
+  entry: HistoryEntry | null;
+  languageLabel: string;
+  Viewer: TranscriptViewerType | null;
+  onClose: () => void;
+}) {
+  // Esc to close.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  // Lock body scroll while open.
+  useEffect(() => {
+    if (!open) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [open]);
+
+  const isVideo = entry
+    ? isVideoMediaKind(entry.media_kind, entry.audio_path)
+    : false;
+  const fileName = entry?.audio_path
+    ? (entry.audio_path.split("/").filter(Boolean).pop() ?? "")
+    : "";
+
+  return createPortal(
+    <AnimatePresence>
+      {open && entry ? (
+        <motion.div
+          key="trm-backdrop"
+          className="trm-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: duration.normal, ease: easeOut }}
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) onClose();
           }}
-          variant="opaque"
         >
-          <Modal.Container scroll="inside">
-            <Modal.Dialog className="flex w-full max-w-6xl max-h-[calc(100dvh-1rem)] flex-col overflow-hidden sm:max-h-[calc(100dvh-5rem)]">
+          <motion.div
+            key="trm-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label="转写详情"
+            className="flex h-[min(85vh,44rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl"
+            initial={{ opacity: 0, scale: 0.95, y: 24 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 16 }}
+            transition={{ type: "spring", bounce: 0.2, duration: 0.3 }}
+          >
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-3">
+              <div className="flex flex-wrap items-center gap-3 font-mono text-[12px] text-muted">
+                <span>{new Date(entry.created_at).toLocaleString()}</span>
+                <span>{entry.duration_seconds.toFixed(1)}s</span>
+                <span className="text-accent-soft-foreground">
+                  {entry.language || languageLabel}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <motion.span className="inline-flex" whileTap={{ scale: 0.94 }}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onPress={() => {
+                      void navigator.clipboard.writeText(entry.text);
+                      toast.success("已复制");
+                    }}
+                  >
+                    <Clipboard size={14} aria-hidden />
+                    复制
+                  </Button>
+                </motion.span>
+                <motion.span className="inline-flex" whileTap={{ scale: 0.94 }}>
+                  <Button
+                    isIconOnly
+                    size="sm"
+                    variant="ghost"
+                    aria-label="关闭"
+                    onPress={onClose}
+                  >
+                    <X size={16} aria-hidden />
+                  </Button>
+                </motion.span>
+              </div>
+            </div>
+            {Viewer ? (
               <Viewer.Root
-                key={viewerEntry.id}
-                text={viewerEntry.text}
+                key={entry.id}
+                text={entry.text}
                 mediaSrc={
-                  viewerEntry.audio_path
-                    ? convertFileSrc(viewerEntry.audio_path)
-                    : null
+                  entry.audio_path ? convertFileSrc(entry.audio_path) : null
                 }
-                mediaKind={
-                  isVideoMediaKind(
-                    viewerEntry.media_kind,
-                    viewerEntry.audio_path,
-                  )
-                    ? "video"
-                    : "audio"
-                }
-                durationSeconds={viewerEntry.duration_seconds}
-                segments={viewerEntry.segments}
-                alignment={viewerEntry.alignment}
+                mediaKind={isVideo ? "video" : "audio"}
+                durationSeconds={entry.duration_seconds}
+                segments={entry.segments}
+                alignment={entry.alignment}
                 emptyLabel="（空结果）"
               >
-                <Modal.CloseTrigger />
-                <Modal.Body className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                  <div className="flex min-h-0 flex-1 flex-col gap-4">
-                    <div className="flex w-full shrink-0 flex-wrap items-start justify-between gap-2 pr-8">
-                      <div className="min-w-0">
-                        <Modal.Heading>转写详情</Modal.Heading>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted">
-                          <span>
-                            {new Date(viewerEntry.created_at).toLocaleString()}
-                          </span>
-                          <span>{viewerEntry.duration_seconds.toFixed(1)}s</span>
-                          <Chip size="sm" variant="soft" color="default">
-                            <Chip.Label>
-                              {viewerEntry.language || languageLabel}
-                            </Chip.Label>
-                          </Chip>
+                <div className="flex min-h-0 flex-1">
+                  {/* Left: media column — video player, or audio placeholder card */}
+                  <motion.div
+                    className="flex w-[38%] shrink-0 flex-col border-r border-border bg-surface-secondary/60"
+                    initial={{ opacity: 0, x: -16 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ ...springUI, delay: 0.08 }}
+                  >
+                    {entry.audio_path ? (
+                      <>
+                        {isVideo ? (
+                          <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+                            <Viewer.Media className="max-h-full" />
+                          </div>
+                        ) : (
+                          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6">
+                            <Viewer.Media />
+                            <div className="grid h-16 w-16 place-items-center rounded-2xl bg-accent-soft text-accent-soft-foreground">
+                              <FileAudio size={26} aria-hidden />
+                            </div>
+                            <div className="w-full min-w-0 text-center">
+                              <div className="truncate text-[13px] font-medium">
+                                {fileName}
+                              </div>
+                              <div className="mt-0.5 font-mono text-[11px] text-muted">
+                                {entry.duration_seconds.toFixed(1)}s · 音频
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        <div className="shrink-0 border-t border-border/60 p-3">
+                          <Viewer.Controls />
                         </div>
+                      </>
+                    ) : (
+                      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-muted">
+                        <FileAudio size={26} aria-hidden />
+                        <p className="text-[12px]">无媒体文件</p>
                       </div>
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onPress={() => {
-                          void navigator.clipboard.writeText(viewerEntry.text);
-                          toast.success("已复制");
-                        }}
-                      >
-                        <Clipboard size={14} aria-hidden />
-                        复制
-                      </Button>
-                    </div>
-
-                    <div className="flex min-h-0  gap-6">
-                      <div className="flex flex-3 w-[min(64%,24rem)] shrink-0 flex-col items-center justify-center gap-4 px-3">
-                        <Viewer.Media />
-                        <Viewer.Controls className="w-full" />
-                      </div>
-
-                      <div className="flex min-h-0 min-w-0 flex-2 flex-col gap-3">
-                        <Viewer.ModeToggle className="shrink-0" />
-                        <Viewer.Content
-                          scroll
-                          fill
-                          className="min-h-0"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </Modal.Body>
+                    )}
+                  </motion.div>
+                  {/* Right: transcript column — toggle + scrolling reader */}
+                  <motion.div
+                    className="flex min-w-0 flex-1 flex-col"
+                    initial={{ opacity: 0, x: 16 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ ...springUI, delay: 0.14 }}
+                  >
+                    <Viewer.ModeToggle className="shrink-0 border-b border-border/60 px-5 py-2.5" />
+                    <Viewer.Content
+                      fill
+                      className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
+                    />
+                  </motion.div>
+                </div>
               </Viewer.Root>
-            </Modal.Dialog>
-          </Modal.Container>
-        </Modal.Backdrop>
+            ) : (
+              <div className="grid flex-1 place-items-center text-[12px] text-muted">
+                加载阅读器…
+              </div>
+            )}
+          </motion.div>
+        </motion.div>
       ) : null}
-    </>
+    </AnimatePresence>,
+    document.body,
   );
 }
 

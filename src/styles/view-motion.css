@@ -1,0 +1,25 @@
+/* view-motion.css — design-fixed styles owned by the view layer.
+   Instance layout stays in tailwind utilities; these are semantic classes
+   extracted from tsx inline styles. No keyframes here (no reduced-motion
+   guard needed) — motion lives in framer-motion with useReducedMotion. */
+
+/* Transcript result modal — backdrop tint over the app surface. */
+.trm-backdrop {
+  background: color-mix(in oklab, var(--background) 55%, rgba(0, 0, 0, 0.45));
+}
+
+/* Empty-result dropzone — fixed placeholder height. */
+.dropzone-empty {
+  min-height: 220px;
+}
+
+/* EventRow enter is owned by framer-motion (tsx); the agent-row-in keyframe
+   stays in agent.css for reference but must not double-animate the row. */
+.agent-chat-row.agent-row-motion {
+  animation: none;
+}
+
+/* Composer "+" popover — springs open from its trigger corner. */
+.agent-add-menu {
+  transform-origin: bottom left;
+}

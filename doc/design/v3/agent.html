@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh-Hans" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>派活 · v3 设计稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  [data-theme="light"] {
+    --bg: #F6F5F2; --fg: #1C1A17; --muted: #6B6660; --faint: #8E8983;
+    --border: rgba(30,28,25,0.15); --sep: rgba(30,28,25,0.09);
+    --accent: #D9722E; --accent-soft: rgba(217,114,46,0.10); --accent-fg: #A0561F;
+    --surface: #FFFFFF; --surface2: #FAF9F6; --default: #EDEBE6;
+    --success: #2F7A4C; --danger: #C24238;
+    --card-shadow: 0 1px 0 rgba(255,255,255,0.8) inset, 0 1px 2px rgba(30,28,25,0.04), 0 8px 24px rgba(30,28,25,0.05);
+  }
+  [data-theme="dark"] {
+    --bg: #0E0F12; --fg: #E8E6E3; --muted: #8B8A86; --faint: #7A7978;
+    --border: rgba(232,230,227,0.08); --sep: rgba(232,230,227,0.07);
+    --accent: #C4784A; --accent-soft: rgba(196,120,74,0.18); --accent-fg: #E0A075;
+    --surface: #17191E; --surface2: #1E2128; --default: #23262D;
+    --success: #5FB37E; --danger: #E2695F;
+    --card-shadow: 0 1px 0 rgba(255,255,255,0.06) inset;
+  }
+  body {
+    font-family: "Satoshi", "Noto Sans SC", system-ui, sans-serif;
+    background: var(--bg); color: var(--fg); min-height: 100vh;
+    transition: background 200ms ease, color 200ms ease;
+  }
+  .toggle {
+    position: fixed; top: 16px; right: 20px; z-index: 100;
+    font-family: "IBM Plex Mono", monospace; font-size: 11px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+    border-radius: 999px; padding: 6px 14px; cursor: pointer;
+  }
+  .view-switch { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; gap: 8px; }
+
+  .wrap { max-width: 900px; margin: 0 auto; padding: 32px 28px 80px; }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-fg); }
+  h1 { font-family: "Instrument Serif", serif; font-weight: 400; font-size: 44px; letter-spacing: -0.02em; }
+
+  /* ———— 列表 ———— */
+  .job-row { display: flex; gap: 12px; padding: 14px 10px; border-bottom: 1px solid var(--sep); cursor: pointer; align-items: flex-start; }
+  .job-row:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
+  .job-dot { width: 7px; height: 7px; border-radius: 999px; margin-top: 7px; flex-shrink: 0; background: var(--muted); }
+  .job-dot.live { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); animation: pulse 1.6s ease-in-out infinite; }
+  .job-dot.done { background: var(--success); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+  .job-kicker { display: flex; gap: 8px; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); align-items: center; flex-wrap: wrap; }
+  .job-kicker .st-live { color: var(--accent-fg); }
+  .job-kicker .st-done { color: var(--success); }
+  .job-prompt { margin-top: 3px; font-size: 14.5px; line-height: 1.45; }
+
+  /* ———— 详情 ———— */
+  .detail { display: flex; flex-direction: column; height: calc(100vh - 64px); }
+  .d-back { font-size: 13px; color: var(--muted); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; margin-bottom: 14px; }
+  .d-back:hover { color: var(--fg); }
+  .d-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+  .d-title-row { display: flex; align-items: center; gap: 12px; }
+  .d-title { font-family: "Instrument Serif", serif; font-size: 34px; letter-spacing: -0.01em; text-transform: capitalize; }
+  .badge { font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: 6px; background: var(--accent-soft); color: var(--accent-fg); }
+  .badge.done { background: color-mix(in oklab, var(--success) 12%, transparent); color: var(--success); }
+  .d-meta { display: flex; gap: 10px; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .d-actions { display: flex; gap: 8px; flex-shrink: 0; padding-bottom: 2px; }
+  .d-actions span { font-size: 12.5px; color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 5px 11px; cursor: pointer; background: var(--surface); }
+  .d-actions .danger { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 30%, transparent); }
+
+  .d-cols { display: flex; gap: 14px; min-height: 0; flex: 1; }
+  .chat { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--card-shadow); overflow: hidden; }
+  .chat-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px 6px; font-size: 14px; font-weight: 500; }
+  .chat-head .bot { color: var(--accent); }
+  .chat-head .n { font-size: 12px; color: var(--faint); font-family: "IBM Plex Mono", monospace; }
+  .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 14px; mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 16px), transparent 100%); }
+  .msg { display: flex; flex-direction: column; margin-bottom: 16px; }
+  .msg.user { align-items: flex-end; }
+  .bubble { max-width: 78%; padding: 10px 14px; border-radius: 14px; border-bottom-right-radius: 4px; background: var(--surface2); font-size: 14.5px; line-height: 1.55; }
+  .msg.ai .text { font-size: 14.5px; line-height: 1.65; }
+  .ts { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--faint); margin-top: 4px; padding: 0 4px; }
+
+  .tool { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 10px 14px; max-width: 100%; }
+  .tool-head { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: color-mix(in oklab, var(--fg) 82%, transparent); cursor: pointer; }
+  .tool-head .w { opacity: 0.5; }
+  .tool-head .chev { margin-left: auto; opacity: 0.4; font-size: 11px; }
+  .tool-brief { margin-top: 4px; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .composer { flex-shrink: 0; border-top: 1px solid var(--sep); padding: 10px 12px 12px; background: linear-gradient(to top, var(--surface) 72%, transparent); }
+  .composer-box { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+  .composer-in { padding: 12px 14px 6px; font-size: 14px; color: var(--muted); }
+  .composer-bar { display: flex; align-items: center; gap: 6px; padding: 4px 10px 10px; }
+  .ic-btn { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--muted); font-size: 14px; }
+  .model-trig { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; border-radius: 8px; background: color-mix(in oklab, var(--fg) 6%, transparent); font-size: 12px; font-weight: 600; }
+  .send { margin-left: auto; width: 28px; height: 28px; border-radius: 999px; background: var(--fg); color: var(--bg); display: grid; place-items: center; font-size: 12px; }
+
+  .side { width: 260px; flex-shrink: 0; padding-top: 4px; }
+  .side h4 { font-size: 12px; color: var(--muted); font-weight: 500; margin-bottom: 8px; }
+  .side-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 9px; font-size: 12px; cursor: pointer; }
+  .side-row:hover { background: color-mix(in oklab, var(--fg) 5%, transparent); }
+  .side-row .f { opacity: 0.6; }
+  .side-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">⇄ 深/浅切换</button>
+
+<!-- ============ 列表 ============ -->
+<div class="wrap" id="view-list">
+  <div class="kicker">派活 · agent jobs</div>
+  <h1>派活</h1>
+  <div style="margin-top:24px">
+    <div class="job-row">
+      <span class="job-dot live"></span>
+      <div>
+        <div class="job-kicker"><span>claude</span><span class="st-live">运行中</span><span>14:32 · 3m</span></div>
+        <div class="job-prompt">把今天的访谈整理成可以发布的一版稿子，语气保留口语感…</div>
+      </div>
+    </div>
+    <div class="job-row">
+      <span class="job-dot done"></span>
+      <div>
+        <div class="job-kicker"><span>codex</span><span class="st-done">完成</span><span>12:08 · 42m</span></div>
+        <div class="job-prompt">重构设置页为 macOS 双栏布局，润色 tab 收敛服务商列表…</div>
+      </div>
+    </div>
+    <div class="job-row">
+      <span class="job-dot done"></span>
+      <div>
+        <div class="job-kicker"><span>claude</span><span class="st-done">完成</span><span>昨天 · 1h 05m</span></div>
+        <div class="job-prompt">调研 qwen3-asr streaming 的空段 rescue 策略…</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 详情 ============ -->
+<div class="wrap hidden" id="view-detail">
+  <div class="detail">
+    <span class="d-back">← 派活</span>
+    <div class="d-head">
+      <div style="min-width:0">
+        <div class="d-title-row">
+          <span class="d-title">claude</span>
+          <span class="badge">运行中</span>
+        </div>
+        <div class="d-meta"><span>14:32 · 3m</span><span>~/repos/asrrrr/asr-cli</span><span>a1b2c3d4</span></div>
+      </div>
+      <div class="d-actions">
+        <span class="danger">■ 取消</span>
+        <span>文件 ▸</span>
+      </div>
+    </div>
+    <div class="d-cols">
+      <div class="chat">
+        <div class="chat-head"><span class="bot">🤖</span>对话 <span class="n">12</span></div>
+        <div class="chat-scroll">
+          <div class="msg user">
+            <div class="bubble">把今天的访谈整理成可以发布的一版稿子，语气保留口语感</div>
+            <span class="ts">14:32</span>
+          </div>
+          <div class="msg ai">
+            <div class="text">好的，我先读一下访谈全文，梳理出三条主线：法拉利的比喻、初恋演唱会、以及创业四年的冲突。然后给你一版 800 字左右的稿子。</div>
+            <span class="ts">14:32</span>
+          </div>
+          <div class="msg ai">
+            <div class="tool">
+              <div class="tool-head"><span class="w">🔧</span>Bash<span class="chev">▾</span></div>
+              <div class="tool-brief">cat ~/notes/interview-0716.md | head -200</div>
+            </div>
+          </div>
+          <div class="msg ai">
+            <div class="tool">
+              <div class="tool-head"><span class="w">📄</span>结果<span class="chev">▾</span></div>
+              <div class="tool-brief">你看到大街上开法拉利的、开劳斯莱斯的，就是傻叔啊！你也别觉得他好像是狗屎运…</div>
+            </div>
+          </div>
+          <div class="msg ai">
+            <div class="text">读完了。三条主线我按「努力论 → 感情记忆 → 父子冲突」排，开头用法拉利那段钩子。第一版马上好。</div>
+            <span class="ts">14:33</span>
+          </div>
+        </div>
+        <div class="composer">
+          <div class="composer-box">
+            <div class="composer-in">继续对话…</div>
+            <div class="composer-bar">
+              <span class="ic-btn">＋</span>
+              <span class="model-trig">claude · 默认 ▾</span>
+              <span class="send">➤</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="side">
+        <h4>文件</h4>
+        <div class="side-row"><span class="f">📄</span><span>interview-0716.md</span></div>
+        <div class="side-row"><span class="f">📄</span><span>draft-v1.md</span></div>
+        <div class="side-row"><span class="f">📁</span><span>@notes</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="view-switch">
+  <button class="toggle" style="position:static" onclick="document.getElementById('view-list').classList.remove('hidden');document.getElementById('view-detail').classList.add('hidden')">列表</button>
+  <button class="toggle" style="position:static" onclick="document.getElementById('view-list').classList.add('hidden');document.getElementById('view-detail').classList.remove('hidden')">详情</button>
+</div>
+
+</body>
+</html>

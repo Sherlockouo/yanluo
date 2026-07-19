@@ -16,7 +16,7 @@ import type { LlmProvider } from "@/types";
 
 const CUSTOM = "__custom__";
 
-const triggerCls = cn(
+const boxedTriggerCls = cn(
   "h-7 gap-1 rounded-lg border border-border/80 bg-surface px-2.5",
   "shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)_inset]",
   "text-[12px] font-medium text-foreground items-center",
@@ -24,12 +24,36 @@ const triggerCls = cn(
   "hover:border-foreground/20 hover:bg-surface-secondary/60",
 );
 
+/*
+  Quiet mono variant (出稿 masthead contract): no box, no shadow — a text item
+  with a ▾ chevron, muted ink → foreground on hover. Matches .dlink language.
+*/
+const quietTriggerCls = cn(
+  "h-7 gap-1 rounded-none border-0 bg-transparent px-0 shadow-none",
+  "font-mono text-[12px] font-normal text-muted items-center",
+  "transition-[color,opacity] duration-150",
+  "hover:bg-transparent hover:text-foreground",
+  "data-[hovered=true]:bg-transparent data-[hovered=true]:text-foreground",
+  "data-[pressed=true]:opacity-60",
+);
+
 /**
  * Compact provider + model picker for feature-page headers.
  * Credentials live in Settings; this only switches the active provider/model
  * (mirroring stored per-provider creds into the flat active fields on save).
  */
-export function LlmProviderSelect({ className }: { className?: string }) {
+export function LlmProviderSelect({
+  className,
+  quiet = false,
+  triggerCls,
+}: {
+  className?: string;
+  /** De-boxed mono text triggers for editorial mastheads (出稿 翻译). */
+  quiet?: boolean;
+  /** Explicit trigger class override (e.g. "qsel-quiet") — wins over quiet/default. */
+  triggerCls?: string;
+}) {
+  const trigger = triggerCls ?? (quiet ? quietTriggerCls : boxedTriggerCls);
   const { config, saveConfig } = useApp();
   const reduce = useReducedMotion();
   const provider = config.llm_provider;
@@ -86,7 +110,7 @@ export function LlmProviderSelect({ className }: { className?: string }) {
           activate(String(key) as LlmProvider);
         }}
       >
-        <Select.Trigger className={triggerCls}>
+        <Select.Trigger className={trigger}>
           <Select.Value>{() => providerLabel}</Select.Value>
           <ChevronDown size={12} className="shrink-0 text-muted" />
         </Select.Trigger>
@@ -117,7 +141,7 @@ export function LlmProviderSelect({ className }: { className?: string }) {
             setModel(id);
           }}
         >
-          <Select.Trigger className={triggerCls}>
+          <Select.Trigger className={trigger}>
             <Select.Value>
               {() => config.llm_model || "选择模型"}
             </Select.Value>

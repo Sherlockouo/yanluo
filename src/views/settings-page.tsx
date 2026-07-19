@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -12,6 +12,7 @@ import {
   ListBox,
   Select,
   Switch,
+  TextArea,
   TextField,
   toast,
 } from "@heroui/react";
@@ -28,8 +29,8 @@ import {
   Keyboard,
   Mic,
   Monitor,
-  Plus,
   RefreshCw,
+  RotateCcw,
   Save,
   Shield,
   SlidersHorizontal,
@@ -53,6 +54,7 @@ import {
   activateLlmProviderPatch,
   agentModelsFor,
   defaultConfig,
+  DEFAULT_LLM_TRANSLATE_PROMPT,
   hotkeySegments,
   listLlmProviders,
   llmPreset,
@@ -61,11 +63,13 @@ import {
   LANGUAGES,
   QWEN_ASR_MODELS,
   resolveLlmCreds,
+  seedLlmCredentials,
 } from "@/lib/constants";
 import { useFade } from "@/lib/motion";
 import type {
   AgentKind,
   AgentProfile,
+  AppConfig,
   AsrProvider,
   HotkeyBinding,
   LlmCredential,
@@ -196,6 +200,58 @@ const SYSTEM_SUBS: { id: SystemSub; label: string }[] = [
   { id: "permissions", label: "权限" },
 ];
 
+/** One muted 13px description line under the serif section head (v3.1). */
+const TAB_DESC: Record<SettingsTab, string> = {
+  general: "语言、录音源与外观。改动即时生效，保存写入磁盘。",
+  asr: "识别引擎、型号与逐字对齐。",
+  polish: "服务商配置、纠错学习与词库。",
+  agent: "内置 Claude · Codex · Pi，选一个作为默认派活 Agent。",
+  system: "全局快捷键与 macOS 权限。",
+  updates: "当前版本、检查更新与更新说明。",
+};
+
+/**
+ * Quiet 文字开关 (v3.1) — 「·」-separated options, no box; active option gets
+ * 600 weight + 2px accent underline. Same language as .tswitch on 出稿.
+ */
+function QSwitch<T extends string>({
+  options,
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  options: { id: T; label: string }[];
+  value: T;
+  onChange: (id: T) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div className="qswitch" role="radiogroup" aria-label={ariaLabel}>
+      {options.map((item, i) => {
+        const active = value === item.id;
+        return (
+          <Fragment key={item.id}>
+            {i > 0 ? (
+              <span className="sep" aria-hidden>
+                ·
+              </span>
+            ) : null}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={active}
+              className={cn("o", active && "on")}
+              onClick={() => onChange(item.id)}
+            >
+              {item.label}
+            </button>
+          </Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
 const PERMS: {
   kind: PermKind;
   title: string;
@@ -319,7 +375,7 @@ export function SettingsPage() {
   const activeLabel = TABS.find((t) => t.id === tab)?.label ?? "设置";
 
   return (
-    <PageShell className="max-w-none!">
+    <PageShell className="max-w-none! set-page pt-8 -mb-15 gap-7!">
       <PageHeader title="设置" />
 
       {/* macOS System-Settings-style two-pane: left source list, right detail. */}
@@ -336,7 +392,7 @@ export function SettingsPage() {
                 className={cn("setnav-item", active && "setnav-item-active")}
                 onClick={() => selectTab(item.id)}
               >
-                <Icon size={15} className="setnav-icon" aria-hidden />
+                <Icon size={14} className="setnav-icon" aria-hidden />
                 <span className="relative z-10">{item.label}</span>
               </button>
             );
@@ -344,7 +400,10 @@ export function SettingsPage() {
         </nav>
 
         <div className="setbody">
-          <h2 className="set-sechead">{activeLabel}</h2>
+          <div>
+            <h2 className="set-sechead">{activeLabel}</h2>
+            <p className="set-secdesc">{TAB_DESC[tab]}</p>
+          </div>
           <motion.div
             key={tab}
             initial={fade.initial}
@@ -371,7 +430,126 @@ export function SettingsPage() {
           </motion.div>
         </div>
       </div>
+
+      {/* Sticky 保存条 — 只在有未保存修改时出现 (v3.1) */}
+      <SettingsSaveBar />
     </PageShell>
+  );
+}
+
+/** Mirror of app-context's loadConfig merge so the baseline matches hydrated config. */
+function mergeSavedConfig(saved: AppConfig): AppConfig {
+  const merged: AppConfig = {
+    ...defaultConfig,
+    ...saved,
+    language: saved.language || "auto",
+  };
+  merged.llm_credentials = seedLlmCredentials(merged);
+  return merged;
+}
+
+/** Key-order-independent stringify so seeded objects compare equal to spread ones. */
+function stableStringify(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj)
+    .sort()
+    .map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`)
+    .join(",")}}`;
+}
+
+/**
+ * Sticky savebar (v3.1) — appears only when the live config differs from what
+ * is persisted on disk. Baseline refetches (debounced) after every config
+ * change so silent saves elsewhere re-sync, plus a slow poll while dirty to
+ * catch same-reference saves that skip a re-render.
+ */
+function SettingsSaveBar() {
+  const { config, updateConfig, saveConfig } = useApp();
+  const [baseline, setBaseline] = useState<AppConfig | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    const t = window.setTimeout(() => {
+      void invoke<AppConfig>("get_app_config")
+        .then((saved) => {
+          if (alive) setBaseline(mergeSavedConfig(saved));
+        })
+        .catch(() => {});
+    }, 300);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+    };
+  }, [config]);
+
+  const dirtyKeys = useMemo(() => {
+    if (!baseline) return [];
+    const live = config as unknown as Record<string, unknown>;
+    const saved = baseline as unknown as Record<string, unknown>;
+    const keys = new Set([...Object.keys(live), ...Object.keys(saved)]);
+    return [...keys].filter(
+      (k) => stableStringify(live[k]) !== stableStringify(saved[k]),
+    );
+  }, [config, baseline]);
+
+  useEffect(() => {
+    if (dirtyKeys.length === 0) return;
+    const id = window.setInterval(() => {
+      void invoke<AppConfig>("get_app_config")
+        .then((saved) => setBaseline(mergeSavedConfig(saved)))
+        .catch(() => {});
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [dirtyKeys.length]);
+
+  if (dirtyKeys.length === 0 || !baseline) return null;
+
+  const discard = () => {
+    const apply = updateConfig as unknown as (
+      key: string,
+      value: unknown,
+    ) => void;
+    const saved = baseline as unknown as Record<string, unknown>;
+    for (const key of dirtyKeys) apply(key, saved[key]);
+  };
+
+  const save = () => {
+    void saveConfig()
+      .then(() => setBaseline(config))
+      .catch(() => {});
+  };
+
+  return (
+    <div className="set-savebar" role="status">
+      <span className="set-savebar-hint">
+        已修改 {dirtyKeys.length} 项 · 保存后生效
+      </span>
+      <div className="set-savebar-actions">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="set-savebar-ghost"
+          onPress={discard}
+        >
+          放弃
+        </Button>
+        <Button
+          size="sm"
+          variant="primary"
+          className="set-savebar-cta btn-press"
+          onPress={save}
+        >
+          保存
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -385,12 +563,17 @@ function PolishPanel({
 }) {
   const fade = useFade();
   return (
-    <div className="flex max-w-2xl flex-col gap-4">
-      <SubTabs
-        items={POLISH_SUBS}
-        active={sub}
-        onSelect={onSelectSub}
-      />
+    <div className="flex flex-col gap-4">
+      <div>
+        <div className="set-group-t">润色 · 服务商</div>
+        <div className="mt-2">
+          <SubTabs
+            items={POLISH_SUBS}
+            active={sub}
+            onSelect={onSelectSub}
+          />
+        </div>
+      </div>
       <motion.div
         key={sub}
         initial={fade.initial}
@@ -420,7 +603,7 @@ function SystemPanel({
 }) {
   const fade = useFade();
   return (
-    <div className="flex max-w-2xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <SubTabs
         items={SYSTEM_SUBS}
         active={sub}
@@ -541,7 +724,7 @@ function AsrProviderPanel() {
   const isQwen = config.asr_provider === "qwen";
 
   return (
-    <div className="flex max-w-2xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <Reveal index={0}>
       <SectionCard className="flex flex-col gap-5">
         <Select
@@ -1078,35 +1261,31 @@ function LlmProviderPanel() {
   };
 
   return (
-    <div className="flex max-w-2xl flex-col gap-4">
-      <SectionCard className="flex flex-col gap-4">
-        <div className="settings-switchrow">
-          <Switch
-            isSelected={config.llm_enabled}
-            onChange={(value) => updateConfig("llm_enabled", value)}
-          >
-            <Switch.Content className="w-full justify-between gap-2 p-3">
-              <div className="min-w-0 pr-2">
-                <div className="type-ui">启用纠错</div>
-                <div className="mt-0.5 type-meta">
-                  用所选服务商润色识别稿 · 关闭则出原始识别文字
-                </div>
-              </div>
-              <Switch.Control>
-                <Switch.Thumb />
-              </Switch.Control>
-            </Switch.Content>
-          </Switch>
+    <div className="flex flex-col gap-8">
+      <div className="set-lines">
+        <div className="set-row-line">
+          <div className="set-row-line-lab">
+            启用纠错
+            <small>用所选服务商润色识别稿 · 关闭则出原始识别文字</small>
+          </div>
+          <div className="set-row-line-ctl">
+            <Switch
+              aria-label="启用纠错"
+              isSelected={config.llm_enabled}
+              onChange={(value) => updateConfig("llm_enabled", value)}
+            >
+              <Switch.Content className="gap-2">
+                <Switch.Control>
+                  <Switch.Thumb />
+                </Switch.Control>
+              </Switch.Content>
+            </Switch>
+          </div>
         </div>
-      </SectionCard>
+      </div>
 
-      <SectionCard className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <h2 className="type-section">服务商</h2>
-          <span className="type-meta">点开编辑 · 设为当前</span>
-        </div>
-
-        <div className="set-rows">
+      <div>
+        <div className="set-prov-list">
           {providers.map((p) => {
             const isCur = p.id === config.llm_provider;
             const isOpen = openId === p.id;
@@ -1121,44 +1300,62 @@ function LlmProviderPanel() {
                 : hasKey
                   ? "有 Key"
                   : "未配";
+            const toggle = () => setOpenId(isOpen ? null : p.id);
             return (
-              <div key={p.id} className={cn("set-row-wrap", isOpen && "is-open")}>
-                <button
-                  type="button"
+              <div key={p.id} className={cn("set-prov-wrap", isOpen && "is-open")}>
+                <div
+                  role="button"
+                  tabIndex={0}
                   aria-expanded={isOpen}
-                  className={cn("set-row text-left", isOpen && "is-active")}
-                  onClick={() => setOpenId(isOpen ? null : p.id)}
+                  className={cn("set-prov-line", isCur && "current")}
+                  onClick={toggle}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      toggle();
+                    }
+                  }}
                 >
-                  <div className="set-row-body">
-                    <div className="set-row-meta">
-                      {p.label}
-                      {isCur ? (
-                        <span className="set-row-tag">· 当前</span>
-                      ) : null}
+                  <div className="set-prov-grow">
+                    <div className="set-prov-namerow">
+                      <span className="set-prov-name">{p.label}</span>
+                      <span
+                        className="badge-soft"
+                        data-tone={
+                          isCur ? "accent" : local || hasKey ? "success" : "neutral"
+                        }
+                      >
+                        {badge}
+                      </span>
                     </div>
-                    <div className="set-row-sub">
+                    <div className="set-prov-meta">
+                      {rc.model ? `${rc.model} · ` : ""}
                       {rc.api_base_url || "未设置地址"}
-                      {rc.model ? ` · ${rc.model}` : ""}
                     </div>
                   </div>
-                  <span className="flex items-center gap-2">
-                    <span
-                      className="badge-soft"
-                      data-tone={
-                        isCur ? "accent" : local || hasKey ? "success" : "neutral"
-                      }
+                  <button
+                    type="button"
+                    className="set-prov-act"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggle();
+                    }}
+                  >
+                    {isOpen ? "收起" : "编辑"}
+                  </button>
+                  {!isCur ? (
+                    <button
+                      type="button"
+                      className="set-prov-ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        activate(p.id);
+                      }}
                     >
-                      {badge}
-                    </span>
-                    <ChevronDown
-                      size={15}
-                      className={cn(
-                        "shrink-0 text-muted transition-transform duration-200",
-                        isOpen && "rotate-180",
-                      )}
-                    />
-                  </span>
-                </button>
+                      设为当前
+                    </button>
+                  ) : null}
+                </div>
 
                 <SoftCollapse open={isOpen}>
                   <ProviderEditor
@@ -1176,19 +1373,82 @@ function LlmProviderPanel() {
               </div>
             );
           })}
-        </div>
 
+          <div
+            role="button"
+            tabIndex={0}
+            className="set-prov-line"
+            onClick={addProvider}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                addProvider();
+              }
+            }}
+          >
+            <div className="set-prov-grow">
+              <span className="set-prov-name text-muted">自定义服务商…</span>
+            </div>
+            <span className="set-prov-ghost">＋ 添加</span>
+          </div>
+        </div>
+      </div>
+
+      <TranslatePromptSection />
+    </div>
+  );
+}
+
+/** 翻译 Prompt — 从出稿-翻译 tab 收敛至此 (v3.1: 使用处只留选择, 编辑在设置). */
+function TranslatePromptSection() {
+  const { config, updateConfig, saveConfig } = useApp();
+  const translateValue =
+    config.llm_translate_prompt || DEFAULT_LLM_TRANSLATE_PROMPT;
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <div className="set-group-t">翻译 Prompt</div>
+        <p className="mt-1 type-meta">
+          出稿-翻译 tab 使用此 Prompt · {"{target}"} 会替换为目标语言名
+        </p>
+      </div>
+      <TextField
+        fullWidth
+        variant="secondary"
+        value={translateValue}
+        onChange={(value) => updateConfig("llm_translate_prompt", value)}
+      >
+        <Label className="sr-only">翻译 Prompt</Label>
+        <TextArea
+          rows={8}
+          className="min-h-[10rem] font-mono type-meta !text-[12px]"
+          placeholder={"{target} → 目标语言名"}
+        />
+      </TextField>
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          size="sm"
+          variant="ghost"
+          onPress={() => updateConfig("llm_translate_prompt", "")}
+        >
+          <RotateCcw size={14} />
+          恢复默认
+        </Button>
         <Button
           size="sm"
           variant="secondary"
-          className="self-start"
-          onPress={addProvider}
+          className="btn-press"
+          onPress={() => {
+            void saveConfig();
+            toast.success("已保存");
+          }}
         >
-          <Plus size={14} />
-          添加服务商
+          <Save size={14} />
+          保存
         </Button>
-      </SectionCard>
-    </div>
+      </div>
+    </section>
   );
 }
 
@@ -1302,7 +1562,7 @@ function ProviderEditor({
             <button
               key={m}
               type="button"
-              className="rounded-md border border-border bg-surface-secondary px-2 py-1 font-mono text-[11px] text-muted transition-colors hover:border-foreground/20 hover:text-foreground"
+              className="rounded-md border border-border bg-surface-secondary px-2 py-1 font-mono text-[11px] text-muted transition-[color,border-color,background-color,transform] duration-100 ease-out hover:border-foreground/20 hover:text-foreground active:scale-[0.96] motion-reduce:active:transform-none"
               onClick={() => onPatch({ model: m })}
             >
               {m}
@@ -1347,68 +1607,82 @@ function ProviderEditor({
 }
 
 function GeneralPanel() {
-  const { config, updateConfig, saveConfig } = useApp();
+  const { config, updateConfig, theme, setTheme } = useApp();
 
   return (
-    <SectionCard className="max-w-2xl flex flex-col gap-6">
-      <Select
-        className="w-full"
-        selectedKey={config.language}
-        onSelectionChange={(key) => {
-          if (key == null) return;
-          updateConfig("language", String(key));
-        }}
-      >
-        <Label>识别语言</Label>
-        <Select.Trigger>
-          <Select.Value />
-          <Select.Indicator />
-        </Select.Trigger>
-        <Select.Popover>
-          <ListBox>
-            {LANGUAGES.map(([value, label]) => (
-              <ListBox.Item key={value} id={value} textValue={label}>
-                {label}
-                <ListBox.ItemIndicator />
-              </ListBox.Item>
-            ))}
-          </ListBox>
-        </Select.Popover>
-      </Select>
-
-      <div className="flex flex-col gap-2.5">
-        <div className="type-ui">录音源</div>
-        <div className="choice-row" role="radiogroup" aria-label="录音源">
-          {(
-            [
-              { id: "external" as const, title: "只录外部" },
-              { id: "system" as const, title: "只录系统" },
-              { id: "both" as const, title: "两者都录" },
-            ] as const
-          ).map((item) => {
-            const active =
-              (config.audio_capture_mode ?? "external") === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                className={cn("choice-cell", active && "is-active")}
-                onClick={() => updateConfig("audio_capture_mode", item.id)}
-              >
-                {item.title}
-              </button>
-            );
-          })}
+    <div className="set-lines">
+      {/* 识别语言 — quiet mono ▾ 触发器, 无盒 */}
+      <div className="set-row-line">
+        <div className="set-row-line-lab">
+          识别语言
+          <small>自动检测优先匹配系统语言</small>
+        </div>
+        <div className="set-row-line-ctl">
+          <Select
+            aria-label="识别语言"
+            selectedKey={config.language}
+            onSelectionChange={(key) => {
+              if (key == null) return;
+              updateConfig("language", String(key));
+            }}
+          >
+            <Select.Trigger className="qsel">
+              <Select.Value />
+              <Select.Indicator className="qsel-chev" />
+            </Select.Trigger>
+            <Select.Popover>
+              <ListBox>
+                {LANGUAGES.map(([value, label]) => (
+                  <ListBox.Item key={value} id={value} textValue={label}>
+                    {label}
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                ))}
+              </ListBox>
+            </Select.Popover>
+          </Select>
         </div>
       </div>
 
-      <Button fullWidth variant="primary" onPress={() => void saveConfig()}>
-        <Save size={16} />
-        保存
-      </Button>
-    </SectionCard>
+      {/* 录音源 — quiet 文字开关, 无盒 */}
+      <div className="set-row-line">
+        <div className="set-row-line-lab">
+          录音源
+          <small>系统声音需要屏幕录制权限</small>
+        </div>
+        <div className="set-row-line-ctl">
+          <QSwitch
+            ariaLabel="录音源"
+            value={config.audio_capture_mode ?? "external"}
+            onChange={(mode) => updateConfig("audio_capture_mode", mode)}
+            options={[
+              { id: "external" as const, label: "只录外部" },
+              { id: "system" as const, label: "只录系统" },
+              { id: "both" as const, label: "两者都录" },
+            ]}
+          />
+        </div>
+      </div>
+
+      {/* 外观 — quiet 文字开关 (即时生效, 不写 config) */}
+      <div className="set-row-line">
+        <div className="set-row-line-lab">
+          外观
+          <small>界面颜色主题 · 即时生效</small>
+        </div>
+        <div className="set-row-line-ctl">
+          <QSwitch
+            ariaLabel="外观"
+            value={theme}
+            onChange={(mode) => setTheme(mode)}
+            options={[
+              { id: "dark" as const, label: "深色" },
+              { id: "light" as const, label: "浅色" },
+            ]}
+          />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1511,7 +1785,7 @@ function HotkeysPanel() {
   ];
 
   return (
-    <SectionCard className="max-w-2xl flex flex-col gap-4" title="全局快捷键">
+    <SectionCard className="flex flex-col gap-4">
       <div>
         {rows.map((row) => {
           const active = listening === row.slot;
@@ -1626,15 +1900,15 @@ function PermissionsPanel() {
 
   if (!isMac) {
     return (
-      <SectionCard title="系统权限" className="max-w-2xl">
+      <SectionCard>
         <p className="type-meta">当前平台无需 macOS 隐私权限。</p>
       </SectionCard>
     );
   }
 
   return (
-    <div className="flex max-w-2xl flex-col gap-4">
-      <SectionCard title="系统权限">
+    <div className="flex flex-col gap-4">
+      <SectionCard>
         <div>
           {PERMS.map((item) => {
             const granted = perms?.[item.kind] ?? false;
@@ -1825,7 +2099,7 @@ function UpdatesPanel() {
 
   return (
     <>
-      <SectionCard className="max-w-2xl flex flex-col gap-4" title="当前版本">
+      <SectionCard className="flex flex-col gap-4" title="当前版本">
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
             <div className="type-ui">
@@ -1949,7 +2223,7 @@ function UpdatesPanel() {
         </div>
       </SectionCard>
 
-      <SectionCard className="max-w-2xl" title="更新说明">
+      <SectionCard title="更新说明">
         <div className="flex flex-col gap-5">
           {logEntries.map((entry) => (
             <article key={`${entry.version}-${entry.date}`} className="release-entry">
@@ -2088,7 +2362,7 @@ function AgentPanel() {
   };
 
   return (
-    <div className="flex max-w-2xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       <p className="-mb-1 type-meta">
         言落内置支持 Claude · Codex · Pi 三种 CLI。填好路径与默认模型，选一个作为默认派活 Agent。
       </p>

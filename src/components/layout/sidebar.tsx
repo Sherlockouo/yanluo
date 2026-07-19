@@ -40,7 +40,7 @@ export function Sidebar() {
         言
       </NavLink>
 
-      <nav className="mt-2 flex flex-1 flex-col items-center gap-1.5">
+      <nav className="flex flex-1 flex-col items-center gap-2">
         {RAIL_ITEMS.map((item) => {
           const Icon = ICONS[item.id];
           return (
@@ -64,7 +64,7 @@ export function Sidebar() {
                   ) : isActive ? (
                     <span className="rail-item-indicator" />
                   ) : null}
-                  <Icon size={17} className="relative z-10 shrink-0" />
+                  <Icon size={16} className="relative z-10 shrink-0" />
                   <span className="rail-item-label relative z-10">
                     {item.label}
                   </span>
@@ -75,7 +75,7 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="mt-auto flex flex-col items-center gap-1.5">
+      <div className="mt-auto flex flex-col items-center gap-2">
         <NavLink
           to="/settings"
           aria-label="设置"

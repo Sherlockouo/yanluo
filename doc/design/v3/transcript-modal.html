@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-Hans" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>转录详情弹窗 · v3 设计稿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  [data-theme="light"] {
+    --bg: #F6F5F2; --fg: #1C1A17; --muted: #6B6660; --faint: #8E8983;
+    --border: rgba(30,28,25,0.15); --sep: rgba(30,28,25,0.09);
+    --accent: #D9722E; --accent-soft: rgba(217,114,46,0.10); --accent-fg: #A0561F;
+    --surface: #FFFFFF; --surface2: #FAF9F6; --default: #EDEBE6;
+    --scrim: color-mix(in oklab, #F6F5F2 55%, rgba(0,0,0,0.45));
+    --card-shadow: 0 1px 0 rgba(255,255,255,0.8) inset, 0 1px 2px rgba(30,28,25,0.04), 0 8px 24px rgba(30,28,25,0.05);
+  }
+  [data-theme="dark"] {
+    --bg: #0E0F12; --fg: #E8E6E3; --muted: #8B8A86; --faint: #7A7978;
+    --border: rgba(232,230,227,0.08); --sep: rgba(232,230,227,0.07);
+    --accent: #C4784A; --accent-soft: rgba(196,120,74,0.18); --accent-fg: #E0A075;
+    --surface: #17191E; --surface2: #1E2128; --default: #23262D;
+    --scrim: color-mix(in oklab, #0E0F12 55%, rgba(0,0,0,0.55));
+    --card-shadow: 0 1px 0 rgba(255,255,255,0.06) inset;
+  }
+  body {
+    font-family: "Satoshi", "Noto Sans SC", system-ui, sans-serif;
+    background: var(--bg); color: var(--fg); min-height: 100vh;
+    transition: background 200ms ease, color 200ms ease;
+  }
+  .toggle {
+    position: fixed; top: 20px; right: 24px; z-index: 100;
+    font-family: "IBM Plex Mono", monospace; font-size: 11px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+    border-radius: 999px; padding: 6px 14px; cursor: pointer;
+  }
+
+  /* ———— 背景页（出稿列表，调暗示意） ———— */
+  .page { max-width: 720px; margin: 0 auto; padding: 40px 24px; opacity: 0.55; filter: saturate(0.7); }
+  .kicker { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.14em; color: var(--accent-fg); }
+  .big { font-family: "Instrument Serif", serif; font-size: 52px; letter-spacing: -0.02em; line-height: 1.05; }
+  .row { display: flex; gap: 14px; padding: 18px 4px; border-bottom: 1px solid var(--sep); align-items: baseline; }
+  .row .n { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--faint); width: 22px; }
+  .row .meta { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--faint); }
+  .row .txt { font-size: 15px; margin-top: 5px; color: var(--fg); }
+
+  /* ———— scrim + modal ———— */
+  .scrim {
+    position: fixed; inset: 0; z-index: 50;
+    background: var(--scrim);
+    display: flex; align-items: center; justify-content: center;
+    padding: 32px;
+  }
+  .modal {
+    width: 100%; max-width: 960px; height: min(85vh, 700px);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; box-shadow: var(--card-shadow), 0 24px 64px rgba(0,0,0,0.18);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .m-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 12px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .m-meta { display: flex; gap: 14px; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); }
+  .m-meta .lang { color: var(--accent-fg); }
+  .m-actions { display: flex; gap: 8px; align-items: center; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 13px; font-weight: 500;
+    border-radius: 8px; padding: 5px 12px; cursor: pointer; border: 1px solid var(--border);
+    background: var(--surface); color: var(--fg);
+  }
+  .btn-icon { padding: 5px 7px; border: 0; background: transparent; color: var(--muted); }
+  .m-body { display: flex; min-height: 0; flex: 1; }
+
+  /* 左栏媒体 */
+  .m-media {
+    width: 38%; flex-shrink: 0; border-right: 1px solid var(--border);
+    background: color-mix(in oklab, var(--surface2) 60%, transparent);
+    display: flex; flex-direction: column;
+  }
+  .video-box {
+    flex: 1; min-height: 0; display: grid; place-items: center; padding: 16px;
+  }
+  .video {
+    width: 100%; aspect-ratio: 16/9; border-radius: 12px; background: #000;
+    display: grid; place-items: center; color: rgba(255,255,255,0.4);
+    font-family: "IBM Plex Mono", monospace; font-size: 11px;
+  }
+  .audio-card {
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px; padding: 24px;
+  }
+  .audio-icon {
+    width: 64px; height: 64px; border-radius: 16px;
+    background: var(--accent-soft); color: var(--accent-fg);
+    display: grid; place-items: center; font-size: 26px;
+  }
+  .audio-name { font-size: 13px; font-weight: 500; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .audio-meta { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); }
+  .m-controls {
+    flex-shrink: 0; border-top: 1px solid var(--sep); padding: 12px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .scrub-row { display: flex; align-items: center; gap: 10px; }
+  .play {
+    width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface); display: grid; place-items: center; font-size: 11px; flex-shrink: 0;
+  }
+  .track { flex: 1; height: 4px; border-radius: 999px; background: var(--default); position: relative; }
+  .track i { position: absolute; left: 0; top: 0; bottom: 0; width: 34%; border-radius: 999px; background: var(--accent); }
+  .times { display: flex; justify-content: space-between; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--muted); }
+
+  /* 右栏文稿 */
+  .m-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .m-mode {
+    flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 20px; border-bottom: 1px solid var(--sep);
+  }
+  .m-mode p { font-size: 11px; color: var(--muted); }
+  .seg { display: flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden; }
+  .seg span { font-size: 11px; padding: 4px 12px; color: var(--muted); }
+  .seg .on { background: var(--accent-soft); color: var(--accent-fg); font-weight: 600; }
+  .m-scroll {
+    flex: 1; min-height: 0; overflow-y: auto; padding: 18px 20px;
+    mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 16px), transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 16px), transparent 100%);
+  }
+  .para { font-size: 15px; line-height: 1.75; margin-bottom: 14px; color: var(--fg); }
+  .para.current { color: var(--accent-fg); }
+  .para .t { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--faint); display: block; margin-bottom: 2px; }
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">⇄ 深/浅切换</button>
+
+<!-- 背景：出稿列表（调暗示意 scrim 下内容） -->
+<div class="page">
+  <div class="kicker">本机识别 · 已就绪</div>
+  <div class="big">出稿</div>
+  <div class="row"><span class="n">01</span><div><div class="meta">2026/7/16 22:36:07 · 视频 · 127.0s</div><div class="txt">你看到大街上开法拉利的、开劳斯莱斯的，就是傻叔啊…</div></div></div>
+  <div class="row"><span class="n">02</span><div><div class="meta">2026/7/16 14:38:24 · 音频 · 291.2s</div><div class="txt">他来听我的演唱会，在十七岁的初恋第一次约会…</div></div></div>
+</div>
+
+<!-- 弹窗：视频版（默认展示） -->
+<div class="scrim" id="modal-video">
+  <div class="modal">
+    <div class="m-head">
+      <div class="m-meta"><span>2026/7/16 22:36:07</span><span>127.0s</span><span class="lang">中文</span></div>
+      <div class="m-actions">
+        <button class="btn">⧉ 复制</button>
+        <button class="btn btn-icon">✕</button>
+      </div>
+    </div>
+    <div class="m-body">
+      <div class="m-media">
+        <div class="video-box"><div class="video">16:9 · video</div></div>
+        <div class="m-controls">
+          <div class="scrub-row">
+            <span class="play">▶</span>
+            <div class="track"><i></i></div>
+          </div>
+          <div class="times"><span>0:43</span><span>2:07</span></div>
+        </div>
+      </div>
+      <div class="m-text">
+        <div class="m-mode">
+          <p>全文模式 · 可滚动阅读</p>
+          <div class="seg"><span class="on">全文</span><span>专注</span></div>
+        </div>
+        <div class="m-scroll">
+          <p class="para"><span class="t">0:00</span>你看到大街上开法拉利的、开劳斯莱斯的，就是傻叔啊！你也别觉得他好像是狗屎运，人家背后比你付出的一定比你多，一定比你聪明。</p>
+          <p class="para current"><span class="t">0:43</span>表达完毕啊！如果你现在的条件不优越，那你更应该努力。我不是在嘲讽谁，我是说在座的各位，都有机会。</p>
+          <p class="para"><span class="t">1:12</span>他来听我的演唱会，在十七岁的初恋第一次约会，男孩为了她彻夜排队，半年的积蓄买了门票一对。</p>
+          <p class="para"><span class="t">1:47</span>我唱得他心醉，我唱得他心碎。他心碎，三年的感情，一封信就要收回。他记得夜台汽笛，声声在催。</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 音频占位卡版（点下方链接切换查看） -->
+<div class="scrim" id="modal-audio" style="display:none">
+  <div class="modal">
+    <div class="m-head">
+      <div class="m-meta"><span>2026/7/16 14:38:24</span><span>291.2s</span><span class="lang">中文</span></div>
+      <div class="m-actions">
+        <button class="btn">⧉ 复制</button>
+        <button class="btn btn-icon">✕</button>
+      </div>
+    </div>
+    <div class="m-body">
+      <div class="m-media">
+        <div class="audio-card">
+          <div class="audio-icon">♪</div>
+          <div class="audio-name">演唱会录音-final.mp3</div>
+          <div class="audio-meta">291.2s · 音频</div>
+        </div>
+        <div class="m-controls">
+          <div class="scrub-row">
+            <span class="play">▶</span>
+            <div class="track"><i></i></div>
+          </div>
+          <div class="times"><span>1:12</span><span>4:51</span></div>
+        </div>
+      </div>
+      <div class="m-text">
+        <div class="m-mode">
+          <p>专注模式 · 跟随当前一句</p>
+          <div class="seg"><span>全文</span><span class="on">专注</span></div>
+        </div>
+        <div class="m-scroll">
+          <p class="para current" style="font-size:19px;line-height:1.6">他来听我的演唱会，在十七岁的初恋第一次约会，男孩为了她彻夜排队，半年的积蓄买了门票一对。</p>
+          <p class="para" style="color:var(--faint)">我唱得他心醉，我唱得他心碎…</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div style="position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:100; display:flex; gap:10px">
+  <button class="toggle" style="position:static" onclick="document.getElementById('modal-video').style.display='flex';document.getElementById('modal-audio').style.display='none'">视频版</button>
+  <button class="toggle" style="position:static" onclick="document.getElementById('modal-video').style.display='none';document.getElementById('modal-audio').style.display='flex'">音频占位卡版</button>
+</div>
+
+</body>
+</html>

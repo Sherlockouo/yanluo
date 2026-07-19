@@ -20,7 +20,7 @@ export function VocabularyPage({ embedded = false }: { embedded?: boolean } = {}
   const headerAction = (
     <Button
       size="sm"
-      variant={addOpen ? "primary" : "secondary"}
+      variant="secondary"
       onPress={() => setAddOpen((v) => !v)}
     >
       <Plus size={14} />
@@ -78,7 +78,7 @@ export function VocabularyPage({ embedded = false }: { embedded?: boolean } = {}
             <Reveal key={term} index={i}>
               <Button
                 variant="ghost"
-                className="group h-auto min-h-0 p-0 shadow-none data-[pressed=true]:scale-100"
+                className="group h-auto min-h-0 p-0 shadow-none"
                 aria-label={`删除 ${term}`}
                 onPress={() =>
                   void saveVocabulary(terms.filter((t) => t !== term))

@@ -292,6 +292,25 @@ fn eligible_for_distill(e: &HistoryEntry) -> bool {
     }
 }
 
+/// Broader pool for frequency-gated distill: ANY entry where a correction
+/// happened (gold ≠ asr), including LLM-only refine changes without a user edit
+/// or bad rating. One-offs are filtered later by `gate_terms_by_frequency`,
+/// so this can be permissive without polluting the glossary.
+fn candidate_for_distill(e: &HistoryEntry) -> bool {
+    if e.source.as_str() == "translate" {
+        return false;
+    }
+    let asr = e.raw_text.trim();
+    if asr.is_empty() {
+        return false;
+    }
+    let gold = learn_gold_text(e).trim();
+    if gold.is_empty() || gold == asr {
+        return false;
+    }
+    !matches!(e.learn_status.as_deref(), Some("applied") | Some("skipped"))
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct DistillLearnResult {
     pub(crate) terms: Vec<String>,
@@ -316,6 +335,7 @@ pub(crate) async fn distill_learn_from_ratings(
         .map(|h| h.clone())
         .map_err(|e| e.to_string())?;
 
+    // Strong-signal entries feed the LLM distiller (user edits / bad ratings).
     let eligible: Vec<&HistoryEntry> = history.iter().filter(|e| eligible_for_distill(e)).collect();
     let source_ids: Vec<String> = eligible.iter().map(|e| e.id.clone()).collect();
     let cases: Vec<LearnCase> = eligible
@@ -327,13 +347,107 @@ pub(crate) async fn distill_learn_from_ratings(
         })
         .collect();
 
-    let terms = tauri::async_runtime::spawn_blocking(move || {
-        distill_learn_from_cases(&config, &cases)
-    })
-    .await
-    .map_err(|e| format!("学习提炼任务失败: {e}"))??;
+    // Frequency-gated deterministic pool: any correction, but a term must recur
+    // across ≥2 recordings to be promoted (protects against one-off mishearings).
+    let recurring: Vec<String> = {
+        let raw_pairs: Vec<String> = history
+            .iter()
+            .filter(|e| candidate_for_distill(e))
+            .filter_map(|e| {
+                let asr = e.raw_text.trim();
+                let gold = learn_gold_text(e).trim();
+                mine_homophone_pair(asr, gold)
+            })
+            .collect();
+        gate_terms_by_frequency(&raw_pairs, 2)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect()
+    };
+
+    // Proactive "常用词" mining: proper nouns / tech terms the user repeats
+    // across transcripts, so ASR gets them right before any mistake. Rule-based
+    // extraction + ≥ 2-transcript frequency gate. Excludes anything already in
+    // vocab (and the pair right-sides we're about to add above).
+    let frequent: Vec<String> = {
+        let corpus: Vec<String> = history
+            .iter()
+            .filter(|e| e.source.as_str() != "translate")
+            .map(|e| learn_gold_text(e).to_string())
+            .filter(|t| !t.trim().is_empty())
+            .collect();
+        let mut existing = config.vocabulary.clone();
+        existing.extend(recurring.iter().cloned());
+        mine_frequent_hotwords(&corpus, 2, &existing)
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect()
+    };
+
+    // Only spend an LLM call when there are correction cases; frequent-hotword
+    // and recurring-pair mining are rule-based and run regardless.
+    let mut terms: Vec<String> = if cases.is_empty() {
+        Vec::new()
+    } else {
+        tauri::async_runtime::spawn_blocking(move || distill_learn_from_cases(&config, &cases))
+            .await
+            .map_err(|e| format!("学习提炼任务失败: {e}"))
+            .unwrap_or_else(Err)
+            .unwrap_or_default()
+    };
+
+    // Merge deterministic pools (dedup case-insensitive). Order: AI distill
+    // → recurring homophone pairs → frequent hotwords.
+    let mut seen: std::collections::HashSet<String> =
+        terms.iter().map(|t| t.trim().to_lowercase()).collect();
+    for r in recurring.into_iter().chain(frequent.into_iter()) {
+        let key = r.to_lowercase();
+        if seen.insert(key) {
+            terms.push(r);
+        }
+    }
 
     Ok(DistillLearnResult { terms, source_ids })
+}
+
+/// Extract a single `wrong=right` homophone pair from an asr→gold correction
+/// by trimming the common prefix/suffix. Returns None when the differing core
+/// isn't term-sized (avoids sentence-level rewrites). Reuses `accept_distill_term`
+/// so it shares one standard with the rest of the pipeline.
+fn mine_homophone_pair(asr: &str, gold: &str) -> Option<String> {
+    if asr.is_empty() || gold.is_empty() || asr == gold {
+        return None;
+    }
+    let a: Vec<char> = asr.chars().collect();
+    let g: Vec<char> = gold.chars().collect();
+    // Common prefix.
+    let mut p = 0;
+    while p < a.len() && p < g.len() && a[p] == g[p] {
+        p += 1;
+    }
+    // Common suffix (not overlapping prefix).
+    let mut s = 0;
+    while s < a.len() - p && s < g.len() - p && a[a.len() - 1 - s] == g[g.len() - 1 - s] {
+        s += 1;
+    }
+    let wrong: String = a[p..a.len() - s].iter().collect();
+    let right: String = g[p..g.len() - s].iter().collect();
+    let wrong = wrong.trim();
+    let right = right.trim();
+    if wrong.is_empty() || right.is_empty() || wrong == right {
+        return None;
+    }
+    // A homophone/typo fix is short. If the differing core is large on either
+    // side it's a phrase/sentence rewrite, not a glossary term — reject.
+    if wrong.chars().count() > 12 || right.chars().count() > 12 {
+        return None;
+    }
+    let pair = format!("{wrong}={right}");
+    if accept_distill_term(&pair) {
+        Some(pair)
+    } else {
+        None
+    }
 }
 
 /// Keep the newest `keep` entries; drop the rest. `keep=0` clears all.
@@ -944,3 +1058,95 @@ pub(crate) fn transcribe_file(
 }
 
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod mine_pair_tests {
+    use super::mine_homophone_pair;
+
+    #[test]
+    fn extracts_middle_diff() {
+        assert_eq!(
+            mine_homophone_pair("我用配森写代码", "我用Python写代码"),
+            Some("配森=Python".to_string())
+        );
+    }
+
+    #[test]
+    fn extracts_tail_diff() {
+        assert_eq!(
+            mine_homophone_pair("打开麦赛口", "打开MySQL"),
+            Some("麦赛口=MySQL".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_noop() {
+        assert_eq!(mine_homophone_pair("今天开会", "今天开会"), None);
+    }
+
+    #[test]
+    fn rejects_sentence_rewrite() {
+        // Whole-sentence rewrite → core too large → rejected by accept_distill_term.
+        let asr = "今天我们开会讨论了项目的整体进度和存在的风险点";
+        let gold = "今晚他们聚餐聊了聊周末去哪里玩比较合适";
+        assert_eq!(mine_homophone_pair(asr, gold), None);
+    }
+}
+
+#[cfg(test)]
+mod distill_eligibility_tests {
+    use super::{candidate_for_distill, eligible_for_distill};
+    use crate::history::HistoryEntry;
+
+    #[test]
+    fn strict_eligible_requires_user_or_bad() {
+        // LLM changed text but no user edit and no bad rating → not strictly eligible.
+        let mut e = HistoryEntry::test_new("1", "我用配森写代码");
+        e.llm_text = Some("我用Python写代码".into());
+        e.text = "我用Python写代码".into();
+        e.refined = true;
+        assert!(!eligible_for_distill(&e));
+        // But it IS a candidate for the frequency-gated pool.
+        assert!(candidate_for_distill(&e));
+    }
+
+    #[test]
+    fn user_adjust_is_both() {
+        let mut e = HistoryEntry::test_new("2", "打开麦赛口");
+        e.user_text = Some("打开MySQL".into());
+        e.text = "打开MySQL".into();
+        assert!(eligible_for_distill(&e));
+        assert!(candidate_for_distill(&e));
+    }
+
+    #[test]
+    fn bad_rated_refine_is_eligible() {
+        let mut e = HistoryEntry::test_new("3", "配森");
+        e.llm_text = Some("Python".into());
+        e.text = "Python".into();
+        e.refined = true;
+        e.quality_rating = Some("bad".into());
+        assert!(eligible_for_distill(&e));
+    }
+
+    #[test]
+    fn translate_and_applied_excluded() {
+        let mut e = HistoryEntry::test_new("4", "hello");
+        e.user_text = Some("world".into());
+        e.text = "world".into();
+        e.source = "translate".into();
+        assert!(!candidate_for_distill(&e));
+
+        let mut a = HistoryEntry::test_new("5", "配森");
+        a.user_text = Some("Python".into());
+        a.text = "Python".into();
+        a.learn_status = Some("applied".into());
+        assert!(!candidate_for_distill(&a));
+    }
+
+    #[test]
+    fn noop_correction_not_candidate() {
+        let e = HistoryEntry::test_new("6", "今天开会");
+        assert!(!candidate_for_distill(&e)); // gold == asr
+    }
+}

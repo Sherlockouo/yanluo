@@ -27,14 +27,51 @@ fn llm_http_client() -> Result<reqwest::blocking::Client, String> {
         .map_err(|e| format!("LLM HTTP client: {e}"))
 }
 
+/// Single source of truth for the built-in refine prompt.
+/// MUST stay byte-identical to the frontend `DEFAULT_LLM_REFINE_PROMPT`
+/// (src/lib/constants.ts) so the Settings preview matches what actually runs.
+/// Guarded by `refine_prompt_sync_tests`.
+pub(crate) const DEFAULT_REFINE: &str = "\
+任务：修正语音识别(ASR)文本里的明显错误。\n\
+\n\
+规则：\n\
+1. 只改识别错：谐音、同音、英文术语被听成汉字。\n\
+2. 中英混写保持原样；英文术语不要译成中文；正确中文不要改成英文。\n\
+3. 不润色、不扩写、不删正确内容、不总结。\n\
+4. 看不出错误 → 原样输出输入。\n\
+5. 只输出纠错后全文；不要解释、不要引号、不要 <think>。\n\
+\n\
+示例：\n\
+输入：我用配森写了个杰森接口\n\
+输出：我用Python写了个JSON接口\n\
+输入：打开麦赛口数据库\n\
+输出：打开MySQL数据库\n\
+输入：今天开会讨论进度\n\
+输出：今天开会讨论进度";
+
+/// Refine char budget: above this, split on sentence boundaries so a small
+/// local model doesn't drop the tail of a long transcript (see `split_for_refine`).
+const REFINE_CHUNK_LIMIT: usize = 1200;
+
 pub(crate) fn refine_transcript(config: &AppConfig, input: &str) -> Result<String, String> {
+    refine_transcript_with_cases(config, input, &[])
+}
+
+/// Refine entry point with optional few-shot cases (learned corrections).
+/// Validates config, injects few-shot, splits long input, refines each chunk
+/// with retry + drift guard, then rejoins. Any chunk the guard rejects keeps
+/// its original text so a bad model reply never corrupts the transcript.
+pub(crate) fn refine_transcript_with_cases(
+    config: &AppConfig,
+    input: &str,
+    fewshot: &[FewShotCase],
+) -> Result<String, String> {
     if !config.llm_enabled {
         return Err("LLM 纠错未启用（LLM 页打开「启用纠错」并保存）".into());
     }
     if config.llm_api_base_url.trim().is_empty() {
         return Err("未配置 API Base URL".into());
     }
-
     if config.llm_model.trim().is_empty() {
         return Err("未配置 Model".into());
     }
@@ -42,6 +79,42 @@ pub(crate) fn refine_transcript(config: &AppConfig, input: &str) -> Result<Strin
         return Ok(String::new());
     }
 
+    let fewshot_block = build_refine_fewshot(fewshot);
+    let chunks = split_for_refine(input, REFINE_CHUNK_LIMIT);
+    let multi = chunks.len() > 1;
+    if multi {
+        eprintln!("[llm] refine: long input split into {} chunks", chunks.len());
+    }
+    let mut out = String::with_capacity(input.len());
+    for (i, chunk) in chunks.iter().enumerate() {
+        // Blank / whitespace-only chunk: pass through untouched.
+        if chunk.trim().is_empty() {
+            out.push_str(chunk);
+            continue;
+        }
+        let refined = refine_one_chunk(config, chunk, &fewshot_block)?;
+        if multi {
+            eprintln!(
+                "[llm] refine chunk #{}/{} chars={}→{}",
+                i + 1,
+                chunks.len(),
+                chunk.chars().count(),
+                refined.chars().count()
+            );
+        }
+        out.push_str(&refined);
+    }
+    Ok(out)
+}
+
+/// Refine a single chunk: one HTTP call (with one retry on transient failure),
+/// artifact stripping, and the drift guard. Returns the original chunk when the
+/// guard rejects the model reply.
+fn refine_one_chunk(
+    config: &AppConfig,
+    input: &str,
+    fewshot_block: &str,
+) -> Result<String, String> {
     #[derive(Serialize)]
     struct Message<'a> {
         role: &'a str,
@@ -78,30 +151,17 @@ pub(crate) fn refine_transcript(config: &AppConfig, input: &str) -> Result<Strin
             config.vocabulary.join(", ")
         )
     };
-    // Tuned for small local chat models (esp. qwen3:1.7b): short rules + few-shot.
-    const DEFAULT_REFINE: &str = "\
-任务：修正语音识别(ASR)文本里的明显错误。\n\
-\n\
-规则：\n\
-1. 只改识别错：谐音、同音、英文术语被听成汉字。\n\
-2. 中英混写保持原样；英文术语不要译成中文；正确中文不要改成英文。\n\
-3. 不润色、不扩写、不删正确内容、不总结。\n\
-4. 看不出错误 → 原样输出输入。\n\
-5. 只输出纠错后全文；不要解释、不要引号、不要 <think>。\n\
-\n\
-示例：\n\
-输入：我用配森写了个杰森接口\n\
-输出：我用Python写了个JSON接口\n\
-输入：打开麦赛口数据库\n\
-输出：打开MySQL数据库\n\
-输入：今天开会讨论进度\n\
-输出：今天开会讨论进度";
     let base_prompt = if config.llm_refine_prompt.trim().is_empty() {
         DEFAULT_REFINE
     } else {
         config.llm_refine_prompt.trim()
     };
-    let system = format!("{base_prompt}{glossary}");
+    let fewshot = if fewshot_block.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", fewshot_block.trim())
+    };
+    let system = format!("{base_prompt}{glossary}{fewshot}");
     let model_name = config.llm_model.trim();
     let is_qwen3 = model_name.to_ascii_lowercase().contains("qwen3");
     // Qwen3 thinking mode pollutes refine output on 1.7b; force no-think.
@@ -132,28 +192,45 @@ pub(crate) fn refine_transcript(config: &AppConfig, input: &str) -> Result<Strin
         config.llm_model.trim(),
         input.chars().count()
     );
-    let response = {
+    // One retry on transient failure (network blip / cold model / 5xx).
+    let mut response = None;
+    let mut last_err = String::new();
+    for attempt in 0..2 {
         let client = llm_http_client()?;
         let mut req = client.post(&url).json(&request);
         let key = config.llm_api_key.trim();
         if !key.is_empty() {
             req = req.bearer_auth(key);
         }
-        req.send().map_err(|e| {
-            eprintln!("[llm] refine network error: {e}");
-            if e.is_timeout() {
-                "LLM 请求超时（90s）。检查 Ollama 是否在跑、模型是否已拉取。".into()
-            } else {
-                e.to_string()
+        match req.send() {
+            Ok(resp) => {
+                let status = resp.status();
+                if status.is_success() {
+                    response = Some(resp);
+                    break;
+                }
+                let retryable = status.is_server_error();
+                let body = resp.text().unwrap_or_default();
+                eprintln!("[llm] refine HTTP {status}: {body}");
+                last_err = format!("LLM HTTP {status}: {body}");
+                if !retryable {
+                    return Err(last_err);
+                }
             }
-        })?
-    };
-    let status = response.status();
-    if !status.is_success() {
-        let body = response.text().unwrap_or_default();
-        eprintln!("[llm] refine HTTP {status}: {body}");
-        return Err(format!("LLM HTTP {status}: {body}"));
+            Err(e) => {
+                eprintln!("[llm] refine network error (attempt {}): {e}", attempt + 1);
+                last_err = if e.is_timeout() {
+                    "LLM 请求超时（90s）。检查 Ollama 是否在跑、模型是否已拉取。".to_string()
+                } else {
+                    e.to_string()
+                };
+            }
+        }
+        if attempt == 0 {
+            std::thread::sleep(Duration::from_millis(400));
+        }
     }
+    let response = response.ok_or(last_err)?;
     let parsed: Response = response.json().map_err(|e| {
         eprintln!("[llm] refine parse error: {e}");
         e.to_string()
@@ -170,12 +247,261 @@ pub(crate) fn refine_transcript(config: &AppConfig, input: &str) -> Result<Strin
     } else {
         out
     };
+    // Guard against model drift (summary / hallucination / dropped sentences).
+    // On rejection, keep the original ASR text rather than paste garbage.
+    if !guard_refine(input, &out) {
+        eprintln!(
+            "[llm] refine rejected by guard (in_chars={} out_chars={}) — keeping original",
+            input.chars().count(),
+            out.chars().count()
+        );
+        return Ok(input.to_string());
+    }
     eprintln!(
         "[llm] refine ok: out_chars={} changed={}",
         out.chars().count(),
         out != input
     );
     Ok(out)
+}
+
+/// One ASR → gold correction example for few-shot conditioning.
+#[derive(Clone, Debug)]
+pub(crate) struct FewShotCase {
+    pub(crate) asr: String,
+    pub(crate) gold: String,
+}
+
+const FEWSHOT_MAX: usize = 8;
+const FEWSHOT_MAX_SIDE: usize = 80;
+
+/// Build a `输入/输出` few-shot block from confirmed correction cases so the
+/// refine model learns the user's recurring fixes. Mirrors the frontend
+/// `formatFewShotBlock` (learn-cases.ts): cap 8, drop no-ops and oversized.
+pub(crate) fn build_refine_fewshot(cases: &[FewShotCase]) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for c in cases {
+        let asr = c.asr.split_whitespace().collect::<Vec<_>>().join(" ");
+        let gold = c.gold.split_whitespace().collect::<Vec<_>>().join(" ");
+        let asr = asr.trim();
+        let gold = gold.trim();
+        if asr.is_empty() || gold.is_empty() || asr == gold {
+            continue;
+        }
+        if asr.chars().count() > FEWSHOT_MAX_SIDE * 2
+            || gold.chars().count() > FEWSHOT_MAX_SIDE * 2
+        {
+            continue;
+        }
+        lines.push(format!("输入：{asr}"));
+        lines.push(format!("输出：{gold}"));
+        if lines.len() / 2 >= FEWSHOT_MAX {
+            break;
+        }
+    }
+    if lines.is_empty() {
+        return String::new();
+    }
+    format!("学到的纠错习惯（优先按此改回）：\n{}", lines.join("\n"))
+}
+
+/// Split long refine input on sentence terminators so a small model doesn't
+/// drop the tail of a long transcript. Chunks stay under `limit` chars where a
+/// terminator allows; when a single run has no terminator it hard-splits so no
+/// chunk grows unbounded. `chunks.concat()` always reconstructs the input.
+pub(crate) fn split_for_refine(text: &str, limit: usize) -> Vec<String> {
+    let limit = limit.max(1);
+    if text.chars().count() <= limit {
+        return vec![text.to_string()];
+    }
+    let mut chunks: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut cur_len = 0usize;
+    let is_term = |c: char| matches!(c, '。' | '！' | '？' | '.' | '!' | '?' | '\n');
+    for ch in text.chars() {
+        cur.push(ch);
+        cur_len += 1;
+        let at_boundary = is_term(ch) && cur_len >= limit;
+        let hard_split = cur_len >= limit * 2;
+        if at_boundary || hard_split {
+            chunks.push(std::mem::take(&mut cur));
+            cur_len = 0;
+        }
+    }
+    if !cur.is_empty() {
+        chunks.push(cur);
+    }
+    chunks
+}
+
+/// Common English function words that must never be promoted to hotwords even
+/// when they recur. Kept small and lowercase.
+const HOTWORD_STOPWORDS: &[&str] = &[
+    "the", "and", "for", "you", "are", "but", "not", "with", "this", "that",
+    "have", "from", "they", "was", "were", "has", "had", "can", "will",
+    "our", "your", "its", "his", "her", "their", "what", "when", "then",
+    "than", "them", "there", "here", "just", "like", "okay", "yeah", "one",
+    "two", "all", "any", "out", "got", "get", "how", "why", "who", "now",
+];
+
+/// Whether a bare token is a plausible proactive hotword: a proper noun /
+/// product / tech term the user repeats. Rule: Latin/alnum token, 3–24 chars,
+/// contains a letter, not a pure lowercase stopword, not a bare number.
+fn is_hotword_token(tok: &str) -> bool {
+    let t = tok.trim_matches(|c: char| !c.is_alphanumeric());
+    let n = t.chars().count();
+    if n < 3 || n > 24 {
+        return false;
+    }
+    // ASCII-ish tech term: letters/digits and a few joiners.
+    if !t.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '+' | '-' | '/')) {
+        return false;
+    }
+    if !t.chars().any(|c| c.is_ascii_alphabetic()) {
+        return false; // pure number / symbol
+    }
+    let lower = t.to_ascii_lowercase();
+    if HOTWORD_STOPWORDS.contains(&lower.as_str()) {
+        return false;
+    }
+    // All-lowercase single common word is likely not a hotword unless it has a
+    // tech shape (digit, internal caps, or a joiner). Proper nouns/products
+    // usually have a capital or mixed case.
+    let has_upper = t.chars().any(|c| c.is_ascii_uppercase());
+    let has_digit = t.chars().any(|c| c.is_ascii_digit());
+    let has_joiner = t.chars().any(|c| matches!(c, '.' | '_' | '+' | '-' | '/'));
+    has_upper || has_digit || has_joiner
+}
+
+/// Proactively mine the user's frequently-used hotwords (proper nouns, product
+/// and tech terms) from a corpus of transcripts — the "提炼常用词" half of the
+/// glossary. Rule-based token extraction + cross-transcript frequency gate; a
+/// term must appear in ≥ `min_count` transcripts to be promoted. Terms already
+/// in `existing_vocab` (case-insensitive, plain side of a pair too) are skipped.
+/// Returns `(term, transcript_count)` sorted by count desc then term.
+pub(crate) fn mine_frequent_hotwords(
+    texts: &[String],
+    min_count: usize,
+    existing_vocab: &[String],
+) -> Vec<(String, usize)> {
+    use std::collections::HashSet;
+    let existing: HashSet<String> = existing_vocab
+        .iter()
+        .flat_map(|t| {
+            let t = t.trim();
+            // For `wrong=right` pairs, treat the right side as owned too.
+            let right = t
+                .split_once('=')
+                .or_else(|| t.split_once('→'))
+                .or_else(|| t.split_once("->"))
+                .map(|(_, r)| r.trim().to_lowercase());
+            let mut v = vec![t.to_lowercase()];
+            if let Some(r) = right {
+                v.push(r);
+            }
+            v
+        })
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    // Count each hotword once per transcript (transcript frequency, not raw).
+    let mut raw: Vec<String> = Vec::new();
+    for text in texts {
+        let mut seen_in_this: HashSet<String> = HashSet::new();
+        for tok in text.split(|c: char| c.is_whitespace() || matches!(c, ',' | '，' | '。' | ';' | '；' | ':' | '：' | '(' | ')' | '（' | '）' | '"' | '、')) {
+            let cleaned = tok.trim_matches(|c: char| !c.is_alphanumeric());
+            if !is_hotword_token(cleaned) {
+                continue;
+            }
+            let key = cleaned.to_lowercase();
+            if existing.contains(&key) {
+                continue;
+            }
+            if seen_in_this.insert(key) {
+                raw.push(cleaned.to_string());
+            }
+        }
+    }
+    gate_terms_by_frequency(&raw, min_count)
+}
+
+/// Gate distilled term candidates by cross-occurrence frequency: only terms
+/// seen at least `min_count` times (case-insensitive) survive, so a one-off
+/// mishearing never lands in the glossary. Returns `(term, count)` sorted by
+/// count desc then term. Preserves the original casing of the first occurrence.
+pub(crate) fn gate_terms_by_frequency(terms: &[String], min_count: usize) -> Vec<(String, usize)> {
+    use std::collections::HashMap;
+    let min_count = min_count.max(1);
+    let mut counts: HashMap<String, (String, usize)> = HashMap::new();
+    for raw in terms {
+        let t = raw.trim();
+        if t.is_empty() {
+            continue;
+        }
+        let key = t.to_lowercase();
+        let entry = counts.entry(key).or_insert_with(|| (t.to_string(), 0));
+        entry.1 += 1;
+    }
+    let mut kept: Vec<(String, usize)> = counts
+        .into_values()
+        .filter(|(_, n)| *n >= min_count)
+        .collect();
+    kept.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    kept
+}
+
+/// Guard against an LLM "correcting" text into something it isn't: summaries,
+/// hallucinated expansions, dropped sentences, punctuation explosions.
+/// Returns `true` if `refined` is a plausible line-level correction of `input`
+/// (and therefore safe to accept). On `false`, the caller keeps the original.
+///
+/// Pure + deterministic so it can be unit-tested without a live model.
+pub(crate) fn guard_refine(input: &str, refined: &str) -> bool {
+    let a = input.trim();
+    let b = refined.trim();
+    if b.is_empty() {
+        return false;
+    }
+    if a == b {
+        return true; // unchanged is always safe
+    }
+
+    let na = a.chars().count();
+    let nb = b.chars().count();
+    if na == 0 {
+        return false;
+    }
+
+    // Length ratio guard. Short inputs get an absolute slack so a 5-char fix
+    // isn't rejected for a 1-char delta; longer inputs use a ±35% band.
+    let ratio = nb as f64 / na as f64;
+    let short = na <= 8;
+    let ratio_ok = if short {
+        // Allow small absolute growth/shrink on short text.
+        let delta = (nb as i64 - na as i64).abs();
+        delta <= 6 && ratio <= 3.0
+    } else {
+        (0.65..=1.35).contains(&ratio)
+    };
+    if !ratio_ok {
+        return false;
+    }
+
+    // Sentence-terminator count must stay in the same ballpark. Both a big drop
+    // (summary/merge) and a big spike (punctuation explosion) are rejected.
+    let count_term = |s: &str| s.matches(['。', '！', '？', '.', '!', '?']).count() as i64;
+    let ta = count_term(a);
+    let tb = count_term(b);
+    let term_drift = (ta - tb).abs();
+    // Allow ±2 always; beyond that require it scale with input, not explode.
+    if term_drift > 2 && term_drift > (ta.max(1) / 2) {
+        return false;
+    }
+    if tb > ta + 3 {
+        return false;
+    }
+
+    true
 }
 
 /// Drop Qwen3 think blocks / few-shot label leakage from refine output.
@@ -641,6 +967,48 @@ fn collapse_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// Collect confirmed-correction few-shot cases from history for refine
+/// conditioning: user-adjusted entries, or bad-rated refined ones. User
+/// corrections come first (strongest signal). Non-fn/translate entries and
+/// no-op corrections are skipped by `build_refine_fewshot` downstream.
+pub(crate) fn collect_fewshot_from_history(app: &AppHandle) -> Vec<FewShotCase> {
+    let Some(engine) = app.try_state::<AsrEngine>() else {
+        return Vec::new();
+    };
+    let Ok(history) = engine.inner().history.lock() else {
+        return Vec::new();
+    };
+    let mut with_user: Vec<FewShotCase> = Vec::new();
+    let mut fallback: Vec<FewShotCase> = Vec::new();
+    for e in history.iter() {
+        if e.source.as_str() == "translate" {
+            continue;
+        }
+        let asr = e.raw_text.trim().to_string();
+        if asr.is_empty() {
+            continue;
+        }
+        let gold = crate::history::learn_gold_text(e).trim().to_string();
+        if gold.is_empty() || gold == asr {
+            continue;
+        }
+        let has_user = e
+            .user_text
+            .as_deref()
+            .map(|t| !t.trim().is_empty() && t.trim() != asr)
+            .unwrap_or(false);
+        let case = FewShotCase { asr, gold };
+        if has_user {
+            with_user.push(case);
+        } else if e.refined && e.quality_rating.as_deref() == Some("bad") {
+            fallback.push(case);
+        }
+    }
+    with_user.extend(fallback);
+    with_user.truncate(FEWSHOT_MAX);
+    with_user
+}
+
 pub(crate) fn finalize_successful_result(
     app: &AppHandle,
     result: &mut TranscriptionResult,
@@ -692,7 +1060,8 @@ pub(crate) fn finalize_successful_result(
     {
         emit_floating_status(app, true, "refining", &result.text, 0.0);
         let before_llm = result.text.clone();
-        match refine_transcript(&config, &before_llm) {
+        let fewshot = collect_fewshot_from_history(app);
+        match refine_transcript_with_cases(&config, &before_llm, &fewshot) {
             Ok(out) => {
                 if out != before_llm {
                     result.llm_text = Some(out.clone());
@@ -1516,6 +1885,16 @@ pub(crate) fn apply_vocabulary(text: &str, vocabulary: &[String]) -> String {
 
     pairs.sort_by(|a, b| b.0.chars().count().cmp(&a.0.chars().count()));
     for (wrong, right) in pairs {
+        // A single CJK character has no word boundary, so a blind substring
+        // replace corrupts longer words (e.g. `华=划` turns 中华人民共和国 into
+        // 中划…). Such single-char homophones belong in LLM few-shot, not a
+        // deterministic replace — skip them here to avoid over-correction.
+        let wrong_chars = wrong.chars().count();
+        let wrong_is_single_cjk = wrong_chars == 1
+            && wrong.chars().all(is_cjk_char);
+        if wrong_is_single_cjk {
+            continue;
+        }
         out = out.replace(&wrong, &right);
     }
 
@@ -2658,6 +3037,275 @@ mod distill_term_tests {
         assert!(!accept_distill_term(
             "这是一段非常非常非常非常非常非常非常非常非常非常长的识别错误句子=短"
         ));
+    }
+}
+
+#[cfg(test)]
+mod fewshot_tests {
+    use super::{build_refine_fewshot, FewShotCase};
+
+    fn case(asr: &str, gold: &str) -> FewShotCase {
+        FewShotCase {
+            asr: asr.to_string(),
+            gold: gold.to_string(),
+        }
+    }
+
+    #[test]
+    fn empty_when_no_cases() {
+        assert_eq!(build_refine_fewshot(&[]), "");
+    }
+
+    #[test]
+    fn formats_input_output_pairs() {
+        let out = build_refine_fewshot(&[case("我用配森写代码", "我用Python写代码")]);
+        assert!(out.contains("输入：我用配森写代码"));
+        assert!(out.contains("输出：我用Python写代码"));
+    }
+
+    #[test]
+    fn caps_case_count() {
+        let many: Vec<FewShotCase> = (0..40)
+            .map(|i| case(&format!("错{i}"), &format!("对{i}")))
+            .collect();
+        let out = build_refine_fewshot(&many);
+        let n = out.matches("输入：").count();
+        assert!(n <= 8, "few-shot must cap at 8, got {n}");
+    }
+
+    #[test]
+    fn skips_noop_and_oversized() {
+        let cases = vec![
+            case("同样", "同样"), // gold == asr → skip
+            case(&"长".repeat(300), &"短".repeat(300)), // oversized → skip
+        ];
+        assert_eq!(build_refine_fewshot(&cases), "");
+    }
+}
+
+#[cfg(test)]
+mod split_refine_tests {
+    use super::split_for_refine;
+
+    #[test]
+    fn short_text_is_single_chunk() {
+        let chunks = split_for_refine("今天开会讨论进度。", 1200);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], "今天开会讨论进度。");
+    }
+
+    #[test]
+    fn splits_long_text_on_sentence_boundaries() {
+        // Build > limit chars across many sentences.
+        let sentence = "这是一句话。";
+        let text = sentence.repeat(400); // 400 * 5 = 2000 chars
+        let chunks = split_for_refine(&text, 1200);
+        assert!(chunks.len() >= 2, "expected multiple chunks");
+        // No chunk exceeds the limit by more than one sentence.
+        for c in &chunks {
+            assert!(c.chars().count() <= 1200 + sentence.chars().count());
+        }
+        // Rejoined chunks preserve all content.
+        assert_eq!(chunks.concat(), text);
+    }
+
+    #[test]
+    fn splits_when_no_terminators() {
+        let text = "啊".repeat(3000);
+        let chunks = split_for_refine(&text, 1200);
+        assert!(chunks.len() >= 2);
+        assert_eq!(chunks.concat(), text);
+    }
+}
+
+#[cfg(test)]
+mod frequent_hotword_tests {
+    use super::mine_frequent_hotwords;
+
+    #[test]
+    fn mines_recurring_english_terms() {
+        let texts = vec![
+            "我们用 Kubernetes 部署服务".to_string(),
+            "Kubernetes 的配置很复杂".to_string(),
+            "今天聊聊 Kubernetes 和 Docker".to_string(),
+        ];
+        let terms = mine_frequent_hotwords(&texts, 2, &[]);
+        assert!(terms.iter().any(|(t, n)| t == "Kubernetes" && *n >= 2));
+        // Docker appears once → below min=2 → excluded.
+        assert!(!terms.iter().any(|(t, _)| t == "Docker"));
+    }
+
+    #[test]
+    fn skips_terms_already_in_vocab() {
+        let texts = vec![
+            "用 Python 写".to_string(),
+            "Python 很好用".to_string(),
+        ];
+        let existing = vec!["python".to_string()];
+        let terms = mine_frequent_hotwords(&texts, 2, &existing);
+        assert!(!terms.iter().any(|(t, _)| t.eq_ignore_ascii_case("python")));
+    }
+
+    #[test]
+    fn ignores_common_stopwords_and_short_junk() {
+        let texts = vec![
+            "the the the and and to to".to_string(),
+            "the and to is a".to_string(),
+        ];
+        let terms = mine_frequent_hotwords(&texts, 2, &[]);
+        assert!(terms.is_empty(), "stopwords must not become hotwords: {terms:?}");
+    }
+
+    #[test]
+    fn preserves_original_casing_and_dedups() {
+        let texts = vec![
+            "看 PostgreSQL 文档".to_string(),
+            "PostgreSQL 性能好".to_string(),
+        ];
+        let terms = mine_frequent_hotwords(&texts, 2, &[]);
+        assert_eq!(terms.iter().filter(|(t, _)| t == "PostgreSQL").count(), 1);
+    }
+}
+
+#[cfg(test)]
+mod distill_gate_tests {
+    use super::gate_terms_by_frequency;
+
+    #[test]
+    fn keeps_terms_seen_at_least_twice() {
+        let raw = vec![
+            "配森=Python".to_string(),
+            "配森=Python".to_string(),
+            "麦赛口=MySQL".to_string(),
+        ];
+        let kept = gate_terms_by_frequency(&raw, 2);
+        assert!(kept.iter().any(|(t, n)| t == "配森=Python" && *n == 2));
+        // Seen only once → dropped at min=2.
+        assert!(!kept.iter().any(|(t, _)| t == "麦赛口=MySQL"));
+    }
+
+    #[test]
+    fn case_insensitive_and_sorted_by_freq() {
+        let raw = vec![
+            "python".to_string(),
+            "Python".to_string(),
+            "PYTHON".to_string(),
+        ];
+        let kept = gate_terms_by_frequency(&raw, 2);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].1, 3);
+    }
+
+    #[test]
+    fn min_one_keeps_everything() {
+        let raw = vec!["MySQL".to_string()];
+        let kept = gate_terms_by_frequency(&raw, 1);
+        assert_eq!(kept.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod refine_prompt_sync_tests {
+    use super::DEFAULT_REFINE;
+
+    /// The built-in refine prompt must be byte-identical across the Rust backend
+    /// (what actually runs) and the frontend Settings preview
+    /// (src/lib/constants.ts `DEFAULT_LLM_REFINE_PROMPT`). Parse the TS template
+    /// literal and compare so the two can never silently drift.
+    #[test]
+    fn matches_frontend_constant() {
+        let ts = include_str!("../../../src/lib/constants.ts");
+        let marker = "export const DEFAULT_LLM_REFINE_PROMPT = `\\\n";
+        let start = ts
+            .find(marker)
+            .expect("DEFAULT_LLM_REFINE_PROMPT not found in constants.ts")
+            + marker.len();
+        let rest = &ts[start..];
+        let end = rest.find("`;").expect("unterminated template literal");
+        let frontend = &rest[..end];
+        assert_eq!(
+            frontend, DEFAULT_REFINE,
+            "refine prompt drifted between constants.ts and transcription/mod.rs"
+        );
+    }
+}
+
+#[cfg(test)]
+mod guard_refine_tests {
+    use super::guard_refine;
+
+    #[test]
+    fn accepts_typo_fix() {
+        // Same length-ish, one homophone corrected → accept.
+        assert!(guard_refine("我用配森写代码", "我用Python写代码"));
+    }
+
+    #[test]
+    fn accepts_unchanged() {
+        assert!(guard_refine("今天开会讨论进度", "今天开会讨论进度"));
+    }
+
+    #[test]
+    fn rejects_summary_deletion() {
+        // Model summarized a multi-sentence transcript into one short line → reject.
+        let input = "今天我们开会讨论了项目的进度和风险。张三负责后端接口。李四负责前端页面。下周一交付第一版。";
+        let out = "今天开会讨论了进度。";
+        assert!(!guard_refine(input, out));
+    }
+
+    #[test]
+    fn rejects_length_blowup() {
+        // Model expanded / hallucinated far beyond input → reject.
+        let input = "打开数据库";
+        let out = "好的，我来帮你打开数据库。请问你要打开哪一个数据库呢？我们可以打开 MySQL 或者 PostgreSQL 数据库，具体取决于你的需求和配置情况。";
+        assert!(!guard_refine(input, out));
+    }
+
+    #[test]
+    fn rejects_sentence_count_explosion() {
+        let input = "我们去吃饭吧然后回家";
+        let out = "我们。去。吃。饭。吧。然。后。回。家。";
+        assert!(!guard_refine(input, out));
+    }
+
+    #[test]
+    fn accepts_short_english_correction() {
+        // Short inputs must not be over-rejected by the length ratio guard.
+        assert!(guard_refine("打开麦赛口", "打开MySQL"));
+    }
+}
+
+#[cfg(test)]
+mod apply_vocabulary_tests {
+    use super::apply_vocabulary;
+
+    #[test]
+    fn homophone_pair_replaced() {
+        let vocab = vec!["杰森=JSON".to_string()];
+        assert_eq!(apply_vocabulary("返回一个杰森", &vocab), "返回一个JSON");
+    }
+
+    #[test]
+    fn latin_hotword_case_normalized() {
+        let vocab = vec!["Python".to_string()];
+        assert_eq!(apply_vocabulary("我用python写代码", &vocab), "我用Python写代码");
+    }
+
+    #[test]
+    fn cjk_pair_does_not_corrupt_longer_word() {
+        // `华=划` must NOT turn 中华人民共和国 into 中划人民共和国.
+        let vocab = vec!["华=划".to_string()];
+        assert_eq!(
+            apply_vocabulary("中华人民共和国", &vocab),
+            "中华人民共和国"
+        );
+    }
+
+    #[test]
+    fn cjk_pair_replaces_standalone_occurrence() {
+        // Multi-char CJK pairs are safe to replace as a unit.
+        let vocab = vec!["数据裤=数据库".to_string()];
+        assert_eq!(apply_vocabulary("打开数据裤", &vocab), "打开数据库");
     }
 }
 

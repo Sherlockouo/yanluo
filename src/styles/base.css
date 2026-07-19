@@ -6,14 +6,14 @@
   font-size: var(--text-display);
   font-weight: 400;
   letter-spacing: -0.02em;
-  line-height: 1.12;
+  line-height: 1.05;
   color: var(--foreground);
 }
 
 .type-section {
-  font-family: var(--font-display);
+  font-family: var(--font-sans);
   font-size: var(--text-section);
-  font-weight: 400;
+  font-weight: 600;
   letter-spacing: -0.01em;
   line-height: 1.35;
   color: var(--foreground);
@@ -31,7 +31,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-ui);
   font-weight: 500;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   line-height: 1.35;
   color: var(--foreground);
 }
@@ -40,7 +40,7 @@
   font-family: var(--font-sans);
   font-size: var(--text-meta);
   font-weight: 400;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
   line-height: 1.4;
   color: var(--muted);
 }
@@ -54,36 +54,52 @@
   color: var(--muted);
 }
 
-/* Home poster headline — bigger than --text-display, responsive clamp */
+/* Home poster headline — 54px serif per v3, responsive clamp */
 .home-headline {
   font-family: var(--font-display);
-  font-size: clamp(2.25rem, 6vw, 3.25rem);
+  font-size: clamp(2.25rem, 6vw, 3.375rem);
   font-weight: 400;
   letter-spacing: -0.02em;
-  line-height: 1.08;
+  line-height: 1.05;
   color: var(--foreground);
 }
 
 /* Primary CTA press — compositor only */
 .btn-press {
   transition:
-    transform 120ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 120ms ease;
-}
-.btn-press:hover {
-  transform: scale(1.01);
+    transform 100ms ease-out,
+    opacity 100ms ease-out;
 }
 .btn-press:active {
-  transform: scale(0.98);
+  transform: scale(0.97);
   opacity: 0.92;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .btn-press,
-  .btn-press:hover,
   .btn-press:active {
     transform: none;
     transition: none;
+  }
+}
+
+/*
+  HeroUI button press — stock is scale(.93) at 250ms, which reads mushy.
+  Tighten to 0.97 / 100ms ease-out so pointerdown feedback feels immediate.
+  Redeclare the full transition list (transform + color + shadow) so the
+  stock hover fades survive the override.
+*/
+@media (prefers-reduced-motion: no-preference) {
+  .button {
+    transition:
+      transform 100ms ease-out,
+      background-color 100ms ease-out,
+      box-shadow 100ms ease-out;
+  }
+
+  .button:active,
+  .button[data-pressed="true"] {
+    transform: scale(0.97);
   }
 }
 

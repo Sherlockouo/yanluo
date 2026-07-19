@@ -3,13 +3,12 @@ import { createPortal } from "react-dom";
 import { Button, toast } from "@heroui/react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ChevronDown, Clipboard, Trash2 } from "lucide-react";
+import { ChevronDown, Clipboard, RotateCcw, Trash2 } from "lucide-react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import {
   PageHeader,
   PageShell,
   Reveal,
-  SectionCard,
 } from "@/components/shared/page-shell";
 import { TranscriptViewer } from "@/components/ui/transcript-viewer";
 import {
@@ -196,7 +195,7 @@ export function HistoryPage({
           {history.slice(0, visibleCount).map((entry, i) => {
             const open = expandedId === entry.id;
             const row = (
-              <div className="rec">
+              <div className={cn("rec is-clickable", open && "exp")}>
                 <HistoryRow
                   entry={entry}
                   open={open}
@@ -252,7 +251,7 @@ function CleanupItem({
     <Button
       variant="ghost"
       className={cn(
-        "h-auto min-h-0 w-full justify-start rounded-none px-3.5 py-2 text-left text-[13px] font-normal shadow-none data-[pressed=true]:scale-100",
+        "h-auto min-h-0 w-full justify-start rounded-none px-3.5 py-2 text-left text-[13px] font-normal shadow-none",
         danger ? "text-danger" : "text-foreground",
       )}
       onPress={onPress}
@@ -329,6 +328,7 @@ function HistoryRow({
 }
 
 function ExpandedViewer({ entry }: { entry: HistoryEntry }) {
+  const { setHistoryUserText } = useApp();
   const [full, setFull] = useState<HistoryEntry | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -353,9 +353,23 @@ function ExpandedViewer({ entry }: { entry: HistoryEntry }) {
   const showDiff = hasRefineDiff(view.raw_text, view.text);
   const isTranslate = (view.source ?? "fn") === "translate";
   const isFn = (view.source ?? "fn") === "fn";
+  // Revert available when refine changed the text (fn, not translate).
+  const canRevert = isFn && showDiff && Boolean(view.raw_text?.trim());
+
+  const revertToRaw = async () => {
+    const raw = view.raw_text?.trim();
+    if (!raw) return;
+    try {
+      await setHistoryUserText(view.id, raw);
+      setFull((prev) => (prev ? { ...prev, text: raw, user_text: raw } : prev));
+      toast.success("已改回原文");
+    } catch (error) {
+      toast.danger(`回退失败: ${error}`);
+    }
+  };
 
   return (
-    <SectionCard className="panel-compact">
+    <div className="expbody">
       {isTranslate && showDiff ? (
         <div className="mb-4">
           <SemanticPair before={view.raw_text} after={view.text} />
@@ -385,25 +399,37 @@ function ExpandedViewer({ entry }: { entry: HistoryEntry }) {
         {isFn ? (
           <Link
             to="/settings?tab=refine"
-            className="text-[12px] text-muted hover:text-accent hover:underline"
+            className="text-[12px] text-muted hover:text-accent-soft-foreground hover:underline"
           >
             在纠错学习页学习
           </Link>
         ) : (
           <span />
         )}
-        <Button
-          size="sm"
-          variant="secondary"
-          onPress={() => {
-            void navigator.clipboard.writeText(view.text);
-            toast.success("已复制");
-          }}
-        >
-          <Clipboard size={14} />
-          复制
-        </Button>
+        <div className="flex items-center gap-2">
+          {canRevert ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={() => void revertToRaw()}
+            >
+              <RotateCcw size={14} />
+              用原文
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={() => {
+              void navigator.clipboard.writeText(view.text);
+              toast.success("已复制");
+            }}
+          >
+            <Clipboard size={14} />
+            复制
+          </Button>
+        </div>
       </div>
-    </SectionCard>
+    </div>
   );
 }

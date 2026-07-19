@@ -297,29 +297,58 @@ pub(crate) fn save_hud_position(x: f64, y: f64) {
 }
 
 pub(crate) fn floating_hud_logical_position(app: &AppHandle, win_w: f64) -> (f64, f64) {
-    // Monitor position/size are PHYSICAL pixels; WebviewWindowBuilder::position expects LOGICAL.
-    let win_w = win_w.clamp(FLOATING_HUD_MIN_W, FLOATING_HUD_MAX_W);
+    // Follow the cursor's screen — the user is looking there, not necessarily
+    // at the primary monitor. Fall back to primary when cursor is unknown.
+    if let Some(monitor) = cursor_monitor(app) {
+        return hud_default_on_monitor(&monitor, win_w);
+    }
     app.primary_monitor()
         .ok()
         .flatten()
-        .map(|monitor| {
-            let scale = monitor.scale_factor().max(1.0);
-            let position = monitor.position();
-            let size = monitor.size();
-            let logical_x = position.x as f64 / scale;
-            let logical_y = position.y as f64 / scale;
-            let logical_w = size.width as f64 / scale;
-            let logical_h = size.height as f64 / scale;
-            (
-                logical_x + ((logical_w - win_w) / 2.0).max(12.0),
-                logical_y + (logical_h - FLOATING_HUD_H - FLOATING_HUD_BOTTOM_INSET).max(12.0),
-            )
-        })
+        .map(|m| hud_default_on_monitor(&m, win_w))
         .unwrap_or((200.0, 640.0))
 }
 
+/// Monitor rect in LOGICAL pixels (position/size are physical).
+fn monitor_logical_rect(monitor: &tauri::Monitor) -> (f64, f64, f64, f64) {
+    let scale = monitor.scale_factor().max(1.0);
+    let position = monitor.position();
+    let size = monitor.size();
+    (
+        position.x as f64 / scale,
+        position.y as f64 / scale,
+        size.width as f64 / scale,
+        size.height as f64 / scale,
+    )
+}
+
+/// Capsule centered at the bottom of this monitor (logical coords).
+fn hud_default_on_monitor(monitor: &tauri::Monitor, win_w: f64) -> (f64, f64) {
+    let win_w = win_w.clamp(FLOATING_HUD_MIN_W, FLOATING_HUD_MAX_W);
+    let (lx, ly, lw, lh) = monitor_logical_rect(monitor);
+    (
+        lx + ((lw - win_w) / 2.0).max(12.0),
+        ly + (lh - FLOATING_HUD_H - FLOATING_HUD_BOTTOM_INSET).max(12.0),
+    )
+}
+
+/// Monitor containing the mouse cursor (physical point → monitor).
+fn cursor_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
+    let pos = app.cursor_position().ok()?;
+    app.monitor_from_point(pos.x, pos.y).ok().flatten()
+}
+
 pub(crate) fn resolve_hud_logical_position(app: &AppHandle, win_w: f64) -> (f64, f64) {
-    load_hud_position().unwrap_or_else(|| floating_hud_logical_position(app, win_w))
+    // A user-dragged position only counts when it sits on the cursor's
+    // current screen — multi-monitor: HUD must appear where the user looks,
+    // not wherever it was parked last time.
+    if let (Some((sx, sy)), Some(cm)) = (load_hud_position(), cursor_monitor(app)) {
+        let (lx, ly, lw, lh) = monitor_logical_rect(&cm);
+        if sx >= lx && sx < lx + lw && sy >= ly && sy < ly + lh {
+            return (sx, sy);
+        }
+    }
+    floating_hud_logical_position(app, win_w)
 }
 
 pub(crate) fn persist_floating_hud_position(window: &tauri::WebviewWindow) {

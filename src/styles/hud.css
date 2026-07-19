@@ -39,6 +39,12 @@
   height: 100%;
 }
 
+/* FloatingCapsule: capsule-level padding is the only inset (spec 10px 18px 10px 14px) */
+.hud-capsule .hud-inner {
+  gap: 14px;
+  padding: 0;
+}
+
 .hud-capsule-agent textarea {
   field-sizing: content;
   max-height: 40px;
@@ -102,7 +108,7 @@ html.light[data-floating="1"] .hud-agent {
   margin: 0;
   padding: 2px 7px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.14);
   color: inherit;
   font-size: 11px;
@@ -143,7 +149,7 @@ html.light[data-floating="1"] .hud-agent-pill.is-open {
   max-height: 260px;
   overflow-y: auto;
   padding: 4px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: rgba(28, 28, 32, 0.92);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
   -webkit-app-region: no-drag;
@@ -164,7 +170,7 @@ html.light[data-floating="1"] .hud-agent-menu {
   margin: 0;
   padding: 5px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
   color: inherit;
   font-size: 12px;
@@ -212,7 +218,7 @@ html.light[data-floating="1"] .hud-agent-menu-item.is-active {
   height: 100%;
   padding: 4px;
   box-sizing: border-box;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   /* Solid — external window has no vibrancy; must not rely on frost */
   background: rgba(28, 28, 32, 0.98);
   color: rgba(255, 255, 255, 0.94);
@@ -287,7 +293,7 @@ html.light[data-floating="1"] .hud-agent-hint {
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 9px;
+  border-radius: 10px;
   background: transparent;
   color: inherit;
   opacity: 0.72;
@@ -318,7 +324,7 @@ html.light[data-floating="1"] .hud-agent-icon-btn:hover {
   margin: 0 0 0 2px;
   padding: 0;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.22);
   color: #fff;
   cursor: pointer;
@@ -353,6 +359,20 @@ html.light[data-floating="1"] .hud-agent-send:hover:not(:disabled):not([aria-dis
   flex-shrink: 0;
   max-width: 42%;
   overflow-x: auto;
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
@@ -394,7 +414,7 @@ html.light[data-floating="1"] .hud-agent-send:hover:not(:disabled):not([aria-dis
   margin: 0;
   padding: 4px 6px 4px 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.12);
   color: inherit;
   font-size: 11px;
@@ -403,6 +423,28 @@ html.light[data-floating="1"] .hud-agent-send:hover:not(:disabled):not([aria-dis
   cursor: pointer;
   -webkit-app-region: no-drag;
   app-region: no-drag;
+}
+
+/* Press feedback: buttons 0.97 / chip 0.96, 100ms ease-out, reduced-motion guarded */
+@media (prefers-reduced-motion: no-preference) {
+  .hud-agent-pill,
+  .hud-agent-icon-btn,
+  .hud-agent-send,
+  .hud-agent-chip,
+  .hud-agent-chip-x {
+    transition: transform 100ms ease-out;
+  }
+
+  .hud-agent-pill:active,
+  .hud-agent-icon-btn:active,
+  .hud-agent-send:active,
+  .hud-agent-chip-x:active {
+    transform: scale(0.97);
+  }
+
+  .hud-agent-chip:active {
+    transform: scale(0.96);
+  }
 }
 
 html.light[data-floating="1"] .hud-agent-chip {
@@ -438,7 +480,7 @@ html.light[data-floating="1"] .hud-agent-chip-x:hover {
 .hud-agent-preview {
   margin: 0 2px 4px;
   padding: 8px;
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: rgba(0, 0, 0, 0.28);
   max-height: 140px;
   overflow: hidden;
@@ -504,7 +546,7 @@ html.light[data-floating="1"] .hud-agent-preview {
   min-height: 72px;
   padding: 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.72);
   cursor: pointer;
@@ -549,7 +591,7 @@ html.light[data-floating="1"] .hud-agent-preview-fallback:hover {
   /* Transparent — frosted look comes from NSVisualEffectView (same as HUD capsule) */
   background: transparent;
   border: 0;
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   box-shadow: none;
   outline: none;
@@ -586,7 +628,7 @@ html.light[data-floating="1"] .hud-agent-preview-fallback:hover {
   margin: 0;
   padding: 0 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: rgba(255, 255, 255, 0.92);
   font-size: 12px;
@@ -748,20 +790,26 @@ html.light[data-floating="1"] .audio-bars-active .audio-bar {
 /* Brand-preview capsule — CSS-only 5-bar audio visualizer */
 .hud-brand-bars {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 2px;
-  height: 20px;
+  height: 22px;
   padding: 0 2px;
   flex-shrink: 0;
 }
 
 .hud-brand-bar {
   width: 3px;
-  border-radius: 999px;
+  border-radius: 2px;
   background: var(--accent, #c4784a);
   opacity: 0.5;
   transform-origin: bottom;
   animation: hud-bar-pulse 1.1s ease-in-out infinite;
+}
+
+/* Light: bright orange --accent is reserved for CTA / recording light / active
+   tab underline — idle brand bars use the small-text copper. */
+html.light[data-floating="1"] .hud-brand-bar {
+  background: var(--accent-soft-foreground);
 }
 
 .hud-brand-bar:nth-child(1) {
@@ -785,6 +833,7 @@ html.light[data-floating="1"] .audio-bars-active .audio-bar {
   animation-delay: 0.05s;
 }
 
+/* —— keyframes: hud-bar-pulse / hud-target-pulse / hud-switch-fade / hud-spin / hud-dot —— */
 @keyframes hud-bar-pulse {
   0%,
   100% {
@@ -798,30 +847,40 @@ html.light[data-floating="1"] .audio-bars-active .audio-bar {
 }
 
 .hud-capsule {
+  /* Edge-to-edge in the 420×56 window — must match native vibrancy mask.
+     Window width == capsule min-width keeps the 999px radius artifact-free. */
+  position: relative;
+  width: 100%;
+  height: 100%;
   min-width: 420px;
   padding: 10px 18px 10px 14px;
   background: rgba(23, 25, 30, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: none;
   border-radius: 999px;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  /* Hairline only — drop shadows clip to the rectangular webview → square corners */
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  overflow: hidden;
 }
 
 html.light[data-floating="1"] .hud-capsule {
-  background: rgba(244, 242, 238, 0.96);
-  border-color: rgba(28, 26, 23, 0.12);
+  /* Paper face, not pure white */
+  background: rgba(244, 242, 238, 0.88);
+  box-shadow: 0 0 0 0.5px rgba(28, 26, 23, 0.16);
 }
 
 .hud-fn-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 1px 5px;
-  border-radius: 6px;
+  padding: 3px 7px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--line, rgba(255, 255, 255, 0.12));
   font-family: var(--font-mono);
   font-size: 10px;
   font-weight: 500;
+  letter-spacing: 0.01em;
   line-height: 1;
   color: var(--muted);
   flex-shrink: 0;
@@ -830,7 +889,7 @@ html.light[data-floating="1"] .hud-capsule {
 
 html.light[data-floating="1"] .hud-fn-badge {
   border-color: rgba(28, 26, 23, 0.14);
-  color: var(--faint);
+  color: var(--muted);
 }
 
 .hud-colon {
@@ -873,13 +932,20 @@ html.light[data-floating="1"] .hud-target {
   animation: hud-target-pulse 0.9s ease-in-out infinite;
 }
 
-.hud-capsule-switching {
-  animation: hud-switch-glow 1.1s ease-in-out infinite;
+/* Switching glow: opacity-only overlay (motion rule: opacity + transform only) */
+.hud-capsule-switching::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  animation: hud-switch-fade 1.1s ease-in-out infinite;
+  pointer-events: none;
 }
 
 .hud-text-switching .hud-text-scroll {
   color: rgba(255, 255, 255, 0.62);
-  letter-spacing: 0.06em;
 }
 
 html.light[data-floating="1"] .hud-text-switching .hud-text-scroll {
@@ -898,13 +964,13 @@ html.light[data-floating="1"] .hud-text-switching .hud-text-scroll {
   }
 }
 
-@keyframes hud-switch-glow {
+@keyframes hud-switch-fade {
   0%,
   100% {
-    filter: brightness(1);
+    opacity: 0;
   }
   50% {
-    filter: brightness(1.12);
+    opacity: 0.06;
   }
 }
 
@@ -918,8 +984,20 @@ html.light[data-floating="1"] .hud-text-switching .hud-text-scroll {
 }
 
 .hud-text-viewport.hud-text-overflow {
-  mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 100%);
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 100%);
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 12px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
 }
 
 .hud-text-viewport::-webkit-scrollbar {
@@ -931,14 +1009,13 @@ html.light[data-floating="1"] .hud-text-switching .hud-text-scroll {
   white-space: nowrap;
   font-size: 13px;
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   color: rgba(255, 255, 255, 0.92);
   line-height: 1.35;
-  /* PingFang first — SF Pro semibold looks fuzzy/cramped on CJK transcripts. */
+  /* Satoshi token first — CJK glyphs fall through to PingFang automatically. */
   font-family:
-    "PingFang SC", "Hiragino Sans GB", "Helvetica Neue",
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", ui-sans-serif, system-ui,
-    sans-serif;
+    var(--font-sans), "PingFang SC", "Hiragino Sans GB", "Helvetica Neue",
+    -apple-system, sans-serif;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -983,20 +1060,15 @@ html.light[data-floating="1"] .hud-text-refined .hud-text-scroll {
   color: var(--success-soft-foreground);
 }
 
-.hud-capsule-refining .audio-bar {
-  background: rgba(255, 255, 255, 0.8);
+/* justRefined: left slot shows the brand bars — tint them with the success token */
+.hud-capsule-refined .hud-brand-bar {
+  background: var(--success);
+  animation: none;
+  opacity: 0.9;
 }
 
-html.light[data-floating="1"] .hud-capsule-refining .audio-bar {
-  background: rgba(20, 20, 22, 0.55);
-}
-
-.hud-capsule-refined .audio-bar {
-  background: rgba(48, 209, 88, 0.9);
-}
-
-html.light[data-floating="1"] .hud-capsule-refined .audio-bar {
-  background: rgba(36, 138, 61, 0.75);
+html.light[data-floating="1"] .hud-capsule-refined .hud-brand-bar {
+  background: var(--success);
 }
 
 /* Final-round loading: spinner replaces audio bars */
@@ -1071,8 +1143,18 @@ html.light[data-floating="1"] .hud-spinner {
     opacity: 0.7;
   }
 
-  .hud-target-switching,
-  .hud-capsule-switching {
+  .hud-brand-bar {
     animation: none;
+    transform: none;
+    opacity: 0.85;
+  }
+
+  .hud-target-switching {
+    animation: none;
+  }
+
+  .hud-capsule-switching::after {
+    animation: none;
+    opacity: 0;
   }
 }

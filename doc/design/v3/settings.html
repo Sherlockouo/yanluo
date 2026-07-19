@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-Hans" data-theme="light">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>设置 · v3.1 重做</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  [data-theme="light"] {
+    --bg: #F6F5F2; --fg: #1C1A17; --muted: #6B6660; --faint: #8E8983;
+    --border: rgba(30,28,25,0.15); --sep: rgba(30,28,25,0.09);
+    --accent: #D9722E; --accent-soft: rgba(217,114,46,0.10); --accent-fg: #A0561F;
+    --surface: #FFFFFF; --surface2: #FAF9F6; --default: #EDEBE6;
+    --rail: color-mix(in oklab, #F6F5F2 96%, #1C1A17);
+    --card-shadow: 0 1px 0 rgba(255,255,255,0.8) inset, 0 1px 2px rgba(30,28,25,0.04), 0 8px 24px rgba(30,28,25,0.05);
+  }
+  [data-theme="dark"] {
+    --bg: #0E0F12; --fg: #E8E6E3; --muted: #8B8A86; --faint: #7A7978;
+    --border: rgba(232,230,227,0.08); --sep: rgba(232,230,227,0.07);
+    --accent: #C4784A; --accent-soft: rgba(196,120,74,0.18); --accent-fg: #E0A075;
+    --surface: #17191E; --surface2: #1E2128; --default: #23262D;
+    --rail: #0E0F12;
+    --card-shadow: 0 1px 0 rgba(255,255,255,0.06) inset;
+  }
+  body {
+    font-family: "Satoshi", "Noto Sans SC", system-ui, sans-serif;
+    background: var(--bg); color: var(--fg); min-height: 100vh;
+    display: grid; grid-template-columns: 76px 1fr;
+    transition: background 200ms ease, color 200ms ease;
+  }
+  .toggle {
+    position: fixed; top: 16px; right: 20px; z-index: 100;
+    font-family: "IBM Plex Mono", monospace; font-size: 11px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--fg);
+    border-radius: 999px; padding: 6px 14px; cursor: pointer;
+  }
+  .rail {
+    border-right: 1px solid var(--border); background: var(--rail);
+    display: flex; flex-direction: column; align-items: center;
+    padding: 16px 8px; gap: 8px;
+  }
+  .mark { width: 40px; height: 40px; border-radius: 11px; margin-bottom: 10px; display: grid; place-items: center; font-family: "Instrument Serif", serif; font-size: 20px; background: var(--fg); color: var(--bg); }
+  [data-theme="dark"] .mark { background: var(--accent); color: #0E0F12; }
+  .ritem-nav { width: 60px; padding: 8px 4px; border-radius: 11px; border: 1px solid transparent; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--muted); font-size: 11px; cursor: pointer; }
+  .ritem-nav .ico { font-size: 16px; }
+  .ritem-nav.on { color: var(--accent-fg); border-color: color-mix(in oklab, var(--accent) 22%, transparent); background: var(--accent-soft); }
+  .rail .spacer { flex: 1; }
+
+  /* ———— v3.1: detail 填宽，去盒子，hairline rows ———— */
+  .content { padding: 32px 48px 0; max-width: none; display: flex; flex-direction: column; min-height: 100vh; }
+  .big { font-family: "Instrument Serif", serif; font-size: 44px; font-weight: 400; letter-spacing: -0.02em; }
+  .set { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 48px; margin-top: 28px; flex: 1; min-height: 0; align-items: start; }
+
+  .setnav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 32px; padding-top: 4px; }
+  .sn {
+    position: relative; display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-radius: 10px; border: 0; background: transparent;
+    color: var(--muted); font-size: 14.5px; font-weight: 500; text-align: left; cursor: pointer;
+    transition: color 140ms ease, background 140ms ease;
+  }
+  .sn .ico { opacity: 0.75; font-size: 14px; width: 18px; text-align: center; }
+  .sn:hover { color: var(--fg); background: color-mix(in oklab, var(--fg) 4%, transparent); }
+  .sn.on { color: var(--fg); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border), var(--card-shadow); }
+  .sn.on::before {
+    content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+    width: 2.5px; height: 18px; border-radius: 2px; background: var(--fg);
+  }
+  [data-theme="dark"] .sn.on::before { background: var(--accent); }
+  .sn.on .ico { color: var(--accent-fg); opacity: 1; }
+
+  .detail { min-width: 0; padding-bottom: 96px; }
+  .sec-title { font-family: "Instrument Serif", serif; font-size: 30px; font-weight: 400; letter-spacing: -0.01em; }
+  .sec-desc { margin-top: 6px; font-size: 13px; color: var(--muted); }
+
+  /* hairline 行 — 左标签右控件，无盒子 */
+  .rows { margin-top: 26px; border-top: 1px solid var(--sep); }
+  .row {
+    display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px;
+    align-items: center; padding: 18px 4px;
+    border-bottom: 1px solid var(--sep);
+  }
+  .row .lab { font-size: 14.5px; font-weight: 500; }
+  .row .lab small { display: block; margin-top: 3px; font-size: 12px; font-weight: 400; color: var(--faint); }
+  .row .ctl { display: flex; align-items: center; gap: 16px; justify-content: flex-end; }
+
+  /* quiet mono ▾ 选择器 — 无盒 */
+  .qsel {
+    font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--fg);
+    cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  }
+  .qsel .chev { color: var(--muted); font-size: 10px; }
+  .qsel:hover { color: var(--accent-fg); }
+
+  /* quiet 文字开关 — 无盒 */
+  .qswitch { display: inline-flex; align-items: baseline; gap: 14px; font-size: 14px; }
+  .qswitch .o { color: var(--faint); cursor: pointer; transition: color 140ms; }
+  .qswitch .o:hover { color: var(--fg); }
+  .qswitch .o.on { color: var(--fg); font-weight: 600; border-bottom: 2px solid var(--accent); padding-bottom: 2px; }
+  .qswitch .sep { color: var(--border); }
+
+  /* switch toggle */
+  .tgl { width: 40px; height: 24px; border-radius: 999px; background: var(--default); position: relative; cursor: pointer; transition: background 140ms; flex-shrink: 0; }
+  .tgl::after { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 999px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.2); transition: transform 160ms cubic-bezier(0.22,1,0.36,1); }
+  .tgl.on { background: var(--accent); }
+  .tgl.on::after { transform: translateX(16px); }
+
+  /* 分组小标题 */
+  .group { margin-top: 40px; }
+  .group-t { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); font-family: "IBM Plex Mono", monospace; }
+
+  /* provider 行 — 无盒，hairline */
+  .prov { display: flex; align-items: center; gap: 14px; padding: 16px 4px; border-bottom: 1px solid var(--sep); }
+  .prov .name { font-size: 15px; font-weight: 600; }
+  .prov .tag { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--accent-fg); background: var(--accent-soft); border-radius: 6px; padding: 2px 7px; }
+  .prov .meta { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .prov .grow { flex: 1; min-width: 0; }
+  .prov .act { font-size: 13px; color: var(--accent-fg); cursor: pointer; }
+  .prov .ghost { font-size: 13px; color: var(--muted); cursor: pointer; }
+  .prov.current { background: linear-gradient(to right, var(--accent-soft), transparent 60%); }
+
+  /* subtabs — 大气版：更大字号更宽间距 */
+  .subtabs { display: flex; gap: 28px; border-bottom: 1px solid var(--border); margin-top: 8px; }
+  .subtab { position: relative; padding: 0 2px 12px; font-size: 15px; color: var(--muted); cursor: pointer; }
+  .subtab:hover { color: var(--fg); }
+  .subtab.on { color: var(--fg); font-weight: 600; }
+  .subtab.on::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); border-radius: 2px; }
+
+  /* 保存条 — sticky 底部通栏 */
+  .savebar {
+    position: sticky; bottom: 0; z-index: 5;
+    margin: 32px -48px 0; padding: 16px 48px calc(16px + env(safe-area-inset-bottom));
+    background: color-mix(in oklab, var(--bg) 88%, transparent);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid var(--sep);
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  }
+  .savebar .hint { font-size: 12.5px; color: var(--faint); }
+  .savebar .cta {
+    border: 0; border-radius: 10px; background: var(--accent); color: #fff;
+    padding: 10px 28px; font: inherit; font-size: 14.5px; font-weight: 600; cursor: pointer;
+    transition: transform 100ms ease-out, background 140ms;
+  }
+  .savebar .cta:hover { background: color-mix(in oklab, var(--accent) 88%, black); }
+  .savebar .cta:active { transform: scale(0.97); }
+  .savebar .ghost { background: transparent; color: var(--muted); border: 0; font: inherit; font-size: 14px; cursor: pointer; }
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">⇄ 深/浅切换</button>
+
+<aside class="rail">
+  <div class="mark">言</div>
+  <div class="ritem-nav"><span class="ico">ॐ</span>出稿</div>
+  <div class="ritem-nav"><span class="ico">⚡</span>派活</div>
+  <div class="spacer"></div>
+  <div class="ritem-nav on"><span class="ico">⚙</span>设置</div>
+</aside>
+
+<main class="content">
+  <h1 class="big">设置</h1>
+  <div class="set">
+    <nav class="setnav">
+      <button class="sn on"><span class="ico">▤</span>常规</button>
+      <button class="sn"><span class="ico">◉</span>识别</button>
+      <button class="sn"><span class="ico">✦</span>润色</button>
+      <button class="sn"><span class="ico">⚡</span>派活</button>
+      <button class="sn"><span class="ico">⌘</span>系统</button>
+      <button class="sn"><span class="ico">↓</span>更新</button>
+    </nav>
+
+    <div class="detail">
+      <h2 class="sec-title">常规</h2>
+      <p class="sec-desc">语言、录音源与外观。改动即时生效，保存写入磁盘。</p>
+
+      <div class="rows">
+        <div class="row">
+          <div class="lab">识别语言<small>自动检测优先匹配系统语言</small></div>
+          <div class="ctl"><span class="qsel">自动检测（系统语言优先）<span class="chev">▾</span></span></div>
+        </div>
+        <div class="row">
+          <div class="lab">录音源<small>系统声音需要屏幕录制权限</small></div>
+          <div class="ctl">
+            <div class="qswitch">
+              <span class="o on">只录外部</span><span class="sep">·</span>
+              <span class="o">只录系统</span><span class="sep">·</span>
+              <span class="o">两者都录</span>
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="lab">外观<small>跟随系统或手动指定</small></div>
+          <div class="ctl">
+            <div class="qswitch">
+              <span class="o">跟随系统</span><span class="sep">·</span>
+              <span class="o on">深色</span><span class="sep">·</span>
+              <span class="o">浅色</span>
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="lab">开机自启<small>登录后常驻菜单栏</small></div>
+          <div class="ctl"><span class="tgl on"></span></div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-t">润色 · 服务商</div>
+      </div>
+      <div class="subtabs">
+        <span class="subtab on">配置</span>
+        <span class="subtab">纠错学习</span>
+        <span class="subtab">词库</span>
+      </div>
+      <div class="rows" style="border-top:0; margin-top:8px">
+        <div class="prov current">
+          <div class="grow">
+            <div><span class="name">OpenAI</span> <span class="tag">当前</span></div>
+            <div class="meta">gpt-4o-mini · api.openai.com</div>
+          </div>
+          <span class="act">编辑</span>
+        </div>
+        <div class="prov">
+          <div class="grow">
+            <div class="name">DeepSeek</div>
+            <div class="meta">deepseek-chat · api.deepseek.com</div>
+          </div>
+          <span class="ghost">设为当前</span>
+        </div>
+        <div class="prov">
+          <div class="grow">
+            <div class="name" style="color:var(--muted)">自定义服务商…</div>
+          </div>
+          <span class="ghost">＋ 添加</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="savebar">
+    <span class="hint">已修改 2 项 · 保存后生效</span>
+    <div style="display:flex;gap:14px;align-items:center">
+      <button class="ghost">放弃</button>
+      <button class="cta">保存</button>
+    </div>
+  </div>
+</main>
+
+</body>
+</html>

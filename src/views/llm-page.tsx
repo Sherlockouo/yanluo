@@ -160,8 +160,11 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
   };
 
   const runAiDistill = async () => {
-    if (!badOpenEntries.length) {
-      toast("先标差或填写用户修正");
+    // Distill now mines two things: correction pairs (needs bad/user cases) AND
+    // frequent user hotwords (works from plain history). Only block when there's
+    // no history at all.
+    if (!badOpenEntries.length && !history.length) {
+      toast("还没有记录可提炼：先说几段试试");
       return;
     }
     setDistilling(true);
@@ -172,7 +175,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
         .filter((c): c is NonNullable<typeof c> => !!c)
         .filter((c) => !vocabSet.has(c.term.toLocaleLowerCase()));
       if (!cands.length) {
-        toast("AI 未提炼出可用词条");
+        toast("未提炼出新词条（常用词需至少出现 2 次）");
         return;
       }
       const sourceIds = result.source_ids.length
@@ -251,7 +254,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
   const headerAction = (
     <Button
       size="sm"
-      variant={configOpen ? "primary" : "secondary"}
+      variant="secondary"
       onPress={() => setConfigOpen((v) => !v)}
     >
       配置
@@ -261,15 +264,32 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
   const content = (
     <>
       {embedded ? (
-        <div className="-mb-1 flex items-center justify-between gap-3">
-          <div className="min-w-0">{header}</div>
-          <button
-            type="button"
-            className="dlink muted shrink-0"
-            onClick={() => setConfigOpen((v) => !v)}
-          >
-            配置{configOpen ? " ▴" : " ▾"}
-          </button>
+        <div className="set-row-line">
+          <div className="set-row-line-lab">
+            纠错学习
+            <small>自动从你的修正中学习错词</small>
+          </div>
+          <div className="set-row-line-ctl">
+            <Switch
+              aria-label="纠错开关"
+              isSelected={config.llm_enabled}
+              onChange={(value) => updateConfig("llm_enabled", value)}
+            >
+              <Switch.Content className="gap-2">
+                <Switch.Control>
+                  <Switch.Thumb />
+                </Switch.Control>
+              </Switch.Content>
+            </Switch>
+            <LlmProviderSelect triggerCls="qsel-quiet" />
+            <button
+              type="button"
+              className="dlink muted shrink-0"
+              onClick={() => setConfigOpen((v) => !v)}
+            >
+              配置{configOpen ? " ▴" : " ▾"}
+            </button>
+          </div>
         </div>
       ) : (
         <PageHeader title="LLM" status={header} action={headerAction} />
@@ -277,7 +297,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
 
       <SoftCollapse open={configOpen}>
         <div className="surface-card mb-1 flex flex-col gap-5 p-4">
-          <div className="rounded-xl bg-surface-secondary/70 px-3 py-2 ring-1 ring-border/60">
+          <div className="settings-switchrow px-3 py-2">
             <Switch
               isSelected={config.llm_enabled}
               onChange={(value) => updateConfig("llm_enabled", value)}
@@ -346,7 +366,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
             <Button
               className="form-actions-primary btn-press"
               fullWidth
-              variant="primary"
+              variant="secondary"
               onPress={() => void saveConfig()}
             >
               <Save size={16} aria-hidden />
@@ -386,7 +406,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
                 <Button
                   key={c.term}
                   variant="ghost"
-                  className="h-auto min-h-0 p-0 shadow-none data-[pressed=true]:scale-100"
+                  className="h-auto min-h-0 p-0 shadow-none"
                   aria-label={`移除 ${c.kind === "pair" ? `${c.from} → ${c.to}` : c.term}`}
                   onPress={() => void removePendingLearnTerm(c.term)}
                 >
@@ -426,9 +446,8 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
             <div className="flex flex-wrap items-center gap-1.5">
               <Button
                 size="sm"
-                variant="primary"
-                className="btn-press"
-                isDisabled={!badOpenEntries.length || distilling}
+                variant="secondary"
+                isDisabled={(!badOpenEntries.length && !history.length) || distilling}
                 isPending={distilling}
                 onPress={() => void runAiDistill()}
               >
@@ -536,7 +555,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
                         </TextField>
                         <Button
                           size="sm"
-                          variant="primary"
+                          variant="secondary"
                           className="btn-press self-start"
                           onPress={() => void saveUserAdjust(entry)}
                         >
