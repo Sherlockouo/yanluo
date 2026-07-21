@@ -71,7 +71,7 @@
   - **时间线** `events[]`：user / assistant / tool / tool_result / status / error — 全量写入 `agent-jobs.json`。
   - **对话式 UI**：user 右气泡 · assistant 左无框 MD · tool / tool_result 薄边卡片可折叠（运行中默认开，结束后默认收）。Streamdown 全量 MD；tool JSON 解析失败 → 原命令。
   - **session_id**：Claude 首轮 `--session-id`；流里也可捕获。Codex 从 JSON 捕获 `session_id`/`thread_id`。Pi 从 `type:session` 捕 `id`。
-  - **续聊**：底部输入 → `continue_agent_job`；无 session 时底栏可开新任务。发送钮 accent。
+  - **续聊 / 打断**：底部输入始终可用（有 session 时）。空闲 → `continue_agent_job`；运行中发送 = 中断当前 turn 再续聊（steer）。无 session 时底栏可开新任务。发送钮 accent。
   - 底栏 **模型 Select** = CLI 底层模型（`claude --model` / `codex -m` / `pi --model`），**不是**切 Agent 类型。Agent 类型仍由 profile / HUD 选。
   - **模型列表**：磁盘缓存 `agent-models.json`；启动后后台刷新（TTL 6h）；源：Claude 别名静态 · Codex `~/.codex/models_cache.json` · `pi --list-models`。配置页「模型」强制刷新；事件 `agent-models-updated`。
 

@@ -113,6 +113,9 @@
 
 ---
 
+> few-shot 真效果 A/B 评测的方法与已跑结果（各本地/云端模型对比）见 [`refine-eval.md`](./refine-eval.md)。
+> 结论：few-shot 链路有效且收益随模型能力递增（deepseek +8.9% > qwen3:1.7b +3.5% > qwen2.5:1.5b **-7.5%**）；本地首选 qwen3:1.7b。
+
 ## 进度（TDD）——全部完成 ✅
 
 `cd src-tauri && cargo test --lib` 全绿（**66 passed**，default + qwen-local 两 feature 均编译）；`pnpm exec tsc --noEmit` 无错。均 test-first 实现并接入真实流程。

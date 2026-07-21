@@ -16,8 +16,8 @@ import {
   PanelRightClose,
   Paperclip,
   Plus,
+  Pause,
   Send,
-  Square,
   Wrench,
   X,
 } from "lucide-react";
@@ -650,17 +650,21 @@ export function AgentJobPage() {
     await mergeReplyAttach(picked, asDir);
   };
 
-  const canContinue =
-    !!job && !isActive(job.status) && Boolean(job.session_id?.trim());
+  const hasSession = Boolean(job?.session_id?.trim());
+  // Keep composer while running when session exists — send interrupts + steers.
+  const canContinue = !!job && hasSession;
 
   const canDispatchNew =
-    !!job && !isActive(job.status) && !job.session_id?.trim();
+    !!job && !isActive(job.status) && !hasSession;
 
+  const hasPayload =
+    Boolean(reply.trim()) || replyAttach.length > 0;
+  // Running: pause always enabled (replaces header cancel). Idle: need payload.
   const canSend =
     !!job &&
     !sending &&
-    (Boolean(reply.trim()) || replyAttach.length > 0) &&
-    (canContinue || canDispatchNew);
+    (isActive(job.status) ||
+      (hasPayload && (canContinue || canDispatchNew)));
 
   const selectModel = (modelId: string) => {
     const model = modelId === "__default__" ? "" : modelId;
@@ -694,12 +698,30 @@ export function AgentJobPage() {
     if (!job || !canSend) return;
     setSending(true);
     try {
-      if (canContinue) {
+      if (isActive(job.status)) {
+        if (hasPayload && hasSession) {
+          await continueAgentJob(
+            job.id,
+            reply.trim(),
+            replyAttach.map((a) => a.path),
+          );
+          setReply("");
+          setReplyAttach([]);
+          setPreview(null);
+          setAddMenu(false);
+        } else {
+          await cancelAgentJob(job.id);
+        }
+      } else if (canContinue) {
         await continueAgentJob(
           job.id,
           reply.trim(),
           replyAttach.map((a) => a.path),
         );
+        setReply("");
+        setReplyAttach([]);
+        setPreview(null);
+        setAddMenu(false);
       } else {
         await invoke("dispatch_agent", {
           agent: job.agent,
@@ -707,11 +729,11 @@ export function AgentJobPage() {
           cwd: job.cwd,
           attachments: replyAttach.map((a) => a.path),
         });
+        setReply("");
+        setReplyAttach([]);
+        setPreview(null);
+        setAddMenu(false);
       }
-      setReply("");
-      setReplyAttach([]);
-      setPreview(null);
-      setAddMenu(false);
     } catch (e) {
       toast.danger(e instanceof Error ? e.message : String(e));
     } finally {
@@ -831,17 +853,6 @@ export function AgentJobPage() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1 pb-0.5">
-            {active ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-danger"
-                onPress={() => void cancelAgentJob(job.id)}
-              >
-                <Square size={12} fill="currentColor" />
-                取消
-              </Button>
-            ) : null}
             <Button
               isIconOnly
               size="sm"
@@ -925,7 +936,7 @@ export function AgentJobPage() {
               className="agent-chat-composer-wrap shrink-0 px-3 pb-3 pt-1"
               data-continue-composer
             >
-              {canContinue || canDispatchNew ? (
+              {canContinue || canDispatchNew || active ? (
                 <div className="flex flex-col gap-2">
                   {replyAttach.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5">
@@ -1007,7 +1018,13 @@ export function AgentJobPage() {
                   <div className="agent-composer">
                     <TextField
                       fullWidth
-                      aria-label={canContinue ? "继续对话" : "开新任务"}
+                      aria-label={
+                        active
+                          ? "打断并纠正"
+                          : canContinue
+                            ? "继续对话"
+                            : "开新任务"
+                      }
                       value={reply}
                       onChange={setReply}
                       isDisabled={sending}
@@ -1016,7 +1033,11 @@ export function AgentJobPage() {
                       <TextArea
                         rows={2}
                         placeholder={
-                          canContinue ? "继续对话…" : "开新任务…"
+                          active
+                            ? "打断并纠正…"
+                            : canContinue
+                              ? "继续对话…"
+                              : "开新任务…"
                         }
                         className="agent-composer-input"
                         onKeyDown={(e) => {
@@ -1141,18 +1162,29 @@ export function AgentJobPage() {
                       <Button
                         isIconOnly
                         variant="primary"
-                        aria-label="发送 Enter"
-                        className="agent-composer-send h-7 w-7 min-h-7 min-w-7 p-0"
+                        aria-label={
+                          active
+                            ? hasPayload && hasSession
+                              ? "打断并纠正 Enter"
+                              : "暂停"
+                            : "发送 Enter"
+                        }
+                        className={cn(
+                          "agent-composer-send h-7 w-7 min-h-7 min-w-7 p-0",
+                          active && "is-pause",
+                        )}
                         isDisabled={!canSend}
                         onPress={() => void sendContinue()}
                       >
-                        <Send size={13} strokeWidth={2.4} />
+                        {active ? (
+                          <Pause size={13} fill="currentColor" strokeWidth={0} />
+                        ) : (
+                          <Send size={13} strokeWidth={2.4} />
+                        )}
                       </Button>
                     </div>
                   </div>
                 </div>
-              ) : active ? (
-                <p className="type-meta text-accent-soft-foreground">运行中，完成后可续聊</p>
               ) : (
                 <p className="type-meta">
                   无 session id，无法续聊（需 Claude 新任务或 Codex 回报会话）

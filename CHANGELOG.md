@@ -2,6 +2,20 @@
 
 All notable changes to 言落 (Yanluo) are documented in this file.
 
+## [0.10.0] — 2026-07-21
+
+### Added
+- Agent mid-flight steer：运行中发消息先中断再续聊；空发送 = 暂停
+- Close main window → hide to tray；Dock reopen；自定义退出菜单
+- 设置 → 纠错学习：few-shot 示例管理面板（`list_fewshot_cases`）
+
+### Fixed
+- HUD mid-pipeline Fn accept：保留 live 文本，FE 可覆盖 slot（避免空粘贴）
+- Agent 续聊不再因「仍在运行」被拒；旧 turn 不再覆盖新 turn 状态
+
+### Changed
+- 派活 / 出稿 / HUD 样式与交互打磨
+
 ## [0.9.1] — 2026-07-19
 
 ### Fixed

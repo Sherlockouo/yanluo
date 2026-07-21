@@ -735,6 +735,56 @@ fn kill_pid(pid: u32) {
     }
 }
 
+/// True when `mine` is still the registered cancel flag for this job.
+/// After interrupt+continue, a newer turn replaces the flag — stale threads must not
+/// clear handles or overwrite status.
+fn owns_cancel_flag(runtime: &AgentRuntime, job_id: &str, mine: &Arc<AtomicBool>) -> bool {
+    runtime
+        .cancel_flags
+        .lock()
+        .ok()
+        .and_then(|g| g.get(job_id).map(|f| Arc::ptr_eq(f, mine)))
+        .unwrap_or(false)
+}
+
+fn release_run_handles(
+    runtime: &AgentRuntime,
+    job_id: &str,
+    cancel: &Arc<AtomicBool>,
+    pid: Option<u32>,
+) {
+    if let Some(expected) = pid {
+        if let Ok(mut map) = runtime.children.lock() {
+            if map.get(job_id).copied() == Some(expected) {
+                map.remove(job_id);
+            }
+        }
+    }
+    if let Ok(mut map) = runtime.cancel_flags.lock() {
+        if map
+            .get(job_id)
+            .map(|f| Arc::ptr_eq(f, cancel))
+            .unwrap_or(false)
+        {
+            map.remove(job_id);
+        }
+    }
+}
+
+/// Stop in-flight child so a follow-up turn can take over (cancel flag + kill).
+fn interrupt_running_job(runtime: &AgentRuntime, job_id: &str) {
+    if let Ok(flags) = runtime.cancel_flags.lock() {
+        if let Some(f) = flags.get(job_id) {
+            f.store(true, Ordering::SeqCst);
+        }
+    }
+    if let Ok(mut children) = runtime.children.lock() {
+        if let Some(pid) = children.remove(job_id) {
+            kill_pid(pid);
+        }
+    }
+}
+
 fn resolve_agent_bin(configured: &str, fallback_name: &str) -> Result<PathBuf, String> {
     let configured = configured.trim();
     if !configured.is_empty() {
@@ -1139,6 +1189,9 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
 
     let skip_git = matches!(agent, AgentKind::Codex) && !is_inside_git_repo(&cwd);
 
+    if !owns_cancel_flag(&runtime, &job_id, &cancel) {
+        return;
+    }
     update_job(&app, &runtime, &job_id, |j| {
         j.status = JobStatus::Running;
         j.progress = "starting…".into();
@@ -1177,17 +1230,27 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
     ) {
         Ok(c) => c,
         Err(e) => {
-            update_job(&app, &runtime, &job_id, |j| {
-                j.status = JobStatus::Error;
-                j.error = e.clone();
-                push_event(j, "error", "spawn", &e);
-                j.finished_at = Some(now_rfc3339());
-            });
+            if owns_cancel_flag(&runtime, &job_id, &cancel) {
+                update_job(&app, &runtime, &job_id, |j| {
+                    j.status = JobStatus::Error;
+                    j.error = e.clone();
+                    push_event(j, "error", "spawn", &e);
+                    j.finished_at = Some(now_rfc3339());
+                });
+                release_run_handles(&runtime, &job_id, &cancel, None);
+            }
             return;
         }
     };
 
     let pid = child.id();
+    if !owns_cancel_flag(&runtime, &job_id, &cancel) {
+        // Superseded before child registered — kill stray process.
+        kill_pid(pid);
+        let mut child = child;
+        let _ = child.kill();
+        return;
+    }
     if let Ok(mut map) = runtime.children.lock() {
         map.insert(job_id.clone(), pid);
     }
@@ -1207,12 +1270,17 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
         let reader = BufReader::new(stdout);
         let mut result = String::new();
         for line in reader.lines().flatten() {
-            if cancel_out.load(Ordering::Relaxed) {
+            if cancel_out.load(Ordering::Relaxed)
+                || !owns_cancel_flag(&runtime_out, &job_out, &cancel_out)
+            {
                 break;
             }
             extract_result_text(&line, &mut result);
             let progress = extract_progress(&line);
             let parsed = event_from_stream_line(&line);
+            if !owns_cancel_flag(&runtime_out, &job_out, &cancel_out) {
+                break;
+            }
             update_job(&app_out, &runtime_out, &job_out, |j| {
                 if let Some(p) = progress {
                     j.progress = p;
@@ -1271,11 +1339,11 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
         result_acc = stdout_result;
     }
 
-    if let Ok(mut map) = runtime.children.lock() {
-        map.remove(&job_id);
-    }
-    if let Ok(mut map) = runtime.cancel_flags.lock() {
-        map.remove(&job_id);
+    let still_mine = owns_cancel_flag(&runtime, &job_id, &cancel);
+    release_run_handles(&runtime, &job_id, &cancel, Some(pid));
+    if !still_mine {
+        // Newer turn already owns this job (interrupt → continue).
+        return;
     }
 
     if cancel.load(Ordering::SeqCst) {
@@ -1566,7 +1634,8 @@ pub(crate) fn dispatch_agent(
     Ok(job)
 }
 
-/// Continue an existing job conversation (Claude `--resume` / Codex `exec resume`).
+/// Continue an existing job conversation (Claude `--resume` / Codex `exec resume` / Pi `--session`).
+/// If the job is still queued/running, interrupts the current turn first (steer mid-flight).
 #[tauri::command]
 pub(crate) fn continue_agent_job(
     app: AppHandle,
@@ -1587,18 +1656,13 @@ pub(crate) fn continue_agent_job(
         return Err("prompt 为空".into());
     }
 
-    let (cwd, agent, session_id) = {
+    let (cwd, agent, session_id, was_active) = {
         let jobs = runtime.jobs.lock().map_err(|e| e.to_string())?;
         let job = jobs
             .iter()
             .find(|j| j.id == job_id)
             .ok_or_else(|| format!("任务不存在: {job_id}"))?;
-        match job.status {
-            JobStatus::Queued | JobStatus::Running => {
-                return Err("任务仍在运行".into());
-            }
-            _ => {}
-        }
+        let was_active = matches!(job.status, JobStatus::Queued | JobStatus::Running);
         let sid = job
             .session_id
             .as_ref()
@@ -1607,11 +1671,22 @@ pub(crate) fn continue_agent_job(
             .ok_or_else(|| {
                 "无法续聊：缺少 session id（旧任务或 Codex 未回报会话）".to_string()
             })?;
-        (job.cwd.clone(), job.agent.clone(), sid)
+        (job.cwd.clone(), job.agent.clone(), sid, was_active)
     };
+
+    if was_active {
+        interrupt_running_job(runtime.inner(), &job_id);
+    }
 
     if matches!(agent, AgentKind::Codex) {
         ensure_codex_cwd_allowed(&app, engine.inner(), &cwd)?;
+    }
+
+    // Register the new turn's cancel flag BEFORE mutating job status, so a
+    // dying previous thread sees !owns_cancel_flag and does not clobber Queued.
+    let cancel = Arc::new(AtomicBool::new(false));
+    if let Ok(mut map) = runtime.cancel_flags.lock() {
+        map.insert(job_id.clone(), Arc::clone(&cancel));
     }
 
     let snapshot = update_job(&app, runtime.inner(), &job_id, |j| {
@@ -1624,6 +1699,9 @@ pub(crate) fn continue_agent_job(
             }
         }
         j.turn_attachments = attachments.clone();
+        if was_active {
+            push_event(j, "status", "interrupted", "已中断，按新指令继续");
+        }
         push_event(j, "user", "user", &prompt);
         j.status = JobStatus::Queued;
         j.progress = "queued".into();
@@ -1632,11 +1710,6 @@ pub(crate) fn continue_agent_job(
         j.session_id = Some(session_id.clone());
     })
     .ok_or_else(|| format!("任务不存在: {job_id}"))?;
-
-    let cancel = Arc::new(AtomicBool::new(false));
-    if let Ok(mut map) = runtime.cancel_flags.lock() {
-        map.insert(job_id.clone(), Arc::clone(&cancel));
-    }
 
     let runtime_arc = runtime.inner().clone();
     let app_clone = app.clone();

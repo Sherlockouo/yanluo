@@ -24,13 +24,13 @@ pub(crate) use platform::*;
 pub(crate) use state::*;
 
 use std::sync::{Arc, Mutex};
-use tauri::{Listener, Manager};
+use tauri::{Listener, Manager, RunEvent, WindowEvent};
 
 pub fn main() {
     // Info.plist is already embedded by `tauri::generate_context!()` —
     // do not call embed_plist again (duplicate `_EMBED_INFO_PLIST` symbol).
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -85,6 +85,16 @@ pub fn main() {
             Ok(())
         })
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
+        // Close main → hide (keep process + tray). Quit via menu/tray calls exit(0).
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             commands::set_model_dir,
             commands::get_model_dir,
@@ -102,6 +112,7 @@ pub fn main() {
             commands::set_history_user_text,
             commands::mark_history_learn_status,
             commands::mark_history_learn_status_batch,
+            commands::list_fewshot_cases,
             commands::apply_learned_terms,
             commands::prune_history,
             commands::prune_history_older_than,
@@ -156,6 +167,22 @@ pub fn main() {
             update::download_and_install_update,
             update::open_update_download_dir,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| match event {
+        // Last window gone / OS quit attempt without exit code → stay in tray.
+        // Programmatic `app.exit(0)` / restart pass `Some(code)` and do exit.
+        RunEvent::ExitRequested { api, code, .. } => {
+            if code.is_none() {
+                api.prevent_exit();
+            }
+        }
+        // Dock icon click while windows hidden.
+        #[cfg(target_os = "macos")]
+        RunEvent::Reopen { .. } => {
+            show_main_window(app_handle);
+        }
+        _ => {}
+    });
 }

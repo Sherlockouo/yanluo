@@ -505,7 +505,7 @@ export function SettingsPage() {
   const activeLabel = TABS.find((t) => t.id === tab)?.label ?? "设置";
 
   return (
-    <PageShell className="max-w-none! set-page pt-8 -mb-15 gap-7!">
+    <PageShell className="max-w-none! set-page pt-8 -mb-15 gap-7! h-full min-h-0">
       <PageHeader title="设置" />
 
       {/* macOS System-Settings-style two-pane: left source list, right detail. */}

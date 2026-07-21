@@ -601,6 +601,76 @@ button.dropzone:active {
   letter-spacing: 0.01em;
 }
 
+/* 纠错示例 (few-shot) 管理面板 — hairline pairs + remove */
+.fewshot {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--separator);
+}
+.fewshot-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.fewshot-list {
+  display: flex;
+  flex-direction: column;
+}
+.fewshot-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--separator);
+}
+.fewshot-row:last-child {
+  border-bottom: 0;
+}
+.fewshot-pair {
+  min-width: 0;
+  flex: 1;
+}
+.fewshot-asr {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fewshot-gold {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fewshot-gold::first-letter {
+  color: var(--accent-soft-foreground);
+}
+.fewshot-x {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.fewshot-x:hover {
+  color: var(--danger);
+  background: color-mix(in oklab, var(--danger) 10%, transparent);
+}
+
 /* Press feedback off under reduced motion — rows cross-fade color only */
 @media (prefers-reduced-motion: reduce) {
   .rec.is-clickable,

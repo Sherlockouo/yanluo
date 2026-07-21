@@ -1030,6 +1030,10 @@ pub(crate) fn collect_fewshot_from_history(app: &AppHandle) -> Vec<FewShotCase> 
         if e.source.as_str() == "translate" {
             continue;
         }
+        // User removed this case from few-shot management — honor the skip.
+        if e.learn_status.as_deref() == Some("skipped") {
+            continue;
+        }
         let asr = e.raw_text.trim().to_string();
         if asr.is_empty() {
             continue;
@@ -1044,6 +1048,61 @@ pub(crate) fn collect_fewshot_from_history(app: &AppHandle) -> Vec<FewShotCase> 
             .map(|t| !t.trim().is_empty() && t.trim() != asr)
             .unwrap_or(false);
         let case = FewShotCase { asr, gold };
+        if has_user {
+            with_user.push(case);
+        } else if e.refined && e.quality_rating.as_deref() == Some("bad") {
+            fallback.push(case);
+        }
+    }
+    with_user.extend(fallback);
+    with_user.truncate(FEWSHOT_MAX);
+    with_user
+}
+
+/// Few-shot case with its source history id (for the management UI).
+#[derive(Clone, Debug, serde::Serialize)]
+pub(crate) struct FewShotCaseInfo {
+    pub(crate) id: String,
+    pub(crate) asr: String,
+    pub(crate) gold: String,
+}
+
+/// Same filter as `collect_fewshot_from_history`, but keeps history ids so the
+/// 设置 → 纠错学习 panel can list and remove individual cases.
+pub(crate) fn list_fewshot_cases(app: &AppHandle) -> Vec<FewShotCaseInfo> {
+    let Some(engine) = app.try_state::<AsrEngine>() else {
+        return Vec::new();
+    };
+    let Ok(history) = engine.inner().history.lock() else {
+        return Vec::new();
+    };
+    let mut with_user: Vec<FewShotCaseInfo> = Vec::new();
+    let mut fallback: Vec<FewShotCaseInfo> = Vec::new();
+    for e in history.iter() {
+        if e.source.as_str() == "translate" {
+            continue;
+        }
+        if e.learn_status.as_deref() == Some("skipped") {
+            continue;
+        }
+        let asr = e.raw_text.trim().to_string();
+        if asr.is_empty() {
+            continue;
+        }
+        let gold = crate::history::learn_gold_text(e).trim().to_string();
+        if gold.is_empty() || gold == asr {
+            continue;
+        }
+        let has_user = e
+            .user_text
+            .as_deref()
+            .map(|t| !t.trim().is_empty() && t.trim() != asr)
+            .unwrap_or(false);
+        let case = FewShotCaseInfo {
+            id: e.id.clone(),
+            asr,
+            gold,
+        };
         if has_user {
             with_user.push(case);
         } else if e.refined && e.quality_rating.as_deref() == Some("bad") {
@@ -1221,13 +1280,27 @@ pub(crate) fn finalize_successful_result(
     }
 
     // Fn / ⇧Fn: hold editable text on HUD — paste + history on confirm.
-    // Empty ASR → no edit HUD (nothing to confirm/paste).
+    // Empty final ASR but HUD still had live partials → use slot (same words user saw).
     // pending.asr_text = text shown at edit start (post-vocab / LLM), for edit detection.
     // result.raw_text stays true ASR for learn triples.
     if result.text.trim().is_empty() {
-        eprintln!("[asr] hud confirm-wait skipped: empty result mode={source}");
-        AsrEngine::set_pending_hud_confirm(app, None);
-        return Some(false);
+        let fallback = floating_status_slot(app)
+            .lock()
+            .map(|s| s.text.trim().to_string())
+            .unwrap_or_default();
+        if fallback.is_empty() {
+            eprintln!("[asr] hud confirm-wait skipped: empty result mode={source}");
+            AsrEngine::set_pending_hud_confirm(app, None);
+            return Some(false);
+        }
+        eprintln!(
+            "[asr] hud confirm-wait: empty finalize, using live HUD fallback chars={}",
+            fallback.chars().count()
+        );
+        result.text = fallback;
+        if result.raw_text.trim().is_empty() {
+            result.raw_text = result.text.clone();
+        }
     }
     let shown_text = result.text.clone();
     AsrEngine::set_pending_hud_confirm(
@@ -1946,13 +2019,19 @@ fn is_cjk_char(c: char) -> bool {
     )
 }
 
-/// HUD should stay quiet while the first streaming calls are still warming up.
+/// HUD may emit after the first streaming decode.
+///
+/// Older gate waited for `unfixed_chunk_num` (2) or 2.0s — that hid the first
+/// hypothesis for ~1 extra `chunk_sec` and felt like slow 吐字. Filler-only
+/// text is still stripped before emit. Raising `unfixed_chunk_num` still
+/// delays HUD by at most one fewer chunk than before.
 pub(crate) fn streaming_hypothesis_warm(
     chunk_id: usize,
     unfixed_chunk_num: usize,
     segment_secs: f64,
 ) -> bool {
-    chunk_id >= unfixed_chunk_num || segment_secs >= 2.0
+    let min_chunks = unfixed_chunk_num.saturating_sub(1).max(1);
+    chunk_id >= min_chunks || segment_secs >= 1.5
 }
 
 pub(crate) fn language_for_apple(language: &str) -> String {
@@ -2512,8 +2591,18 @@ pub(crate) fn mlx_worker(
                         continue;
                     }
                     let new_in_seg = session_len.saturating_sub(last_partial_abs);
-                    if session_len.saturating_sub(start) < chunk_samples
-                        || new_in_seg < chunk_samples
+                    // First tick in segment: bootstrap at 1.0s (encoder min /
+                    // worker floor) so first char is not stuck behind full
+                    // chunk_sec (default 1.5). Later ticks keep chunk_sec.
+                    const BOOTSTRAP_SAMPLES: usize = 16_000;
+                    let first_tick = last_partial_abs <= start;
+                    let gate_samples = if first_tick {
+                        BOOTSTRAP_SAMPLES.min(chunk_samples)
+                    } else {
+                        chunk_samples
+                    };
+                    if session_len.saturating_sub(start) < gate_samples
+                        || new_in_seg < gate_samples
                     {
                         continue;
                     }
@@ -3577,9 +3666,14 @@ mod streaming_lang_tests {
     }
 
     #[test]
-    fn warm_after_unfixed_or_two_seconds() {
-        assert!(!streaming_hypothesis_warm(0, 2, 1.0));
-        assert!(streaming_hypothesis_warm(2, 2, 1.0));
-        assert!(streaming_hypothesis_warm(0, 2, 2.0));
+    fn warm_after_first_decode_or_one_point_five_seconds() {
+        assert!(!streaming_hypothesis_warm(0, 2, 0.5));
+        assert!(streaming_hypothesis_warm(1, 2, 0.5));
+        assert!(streaming_hypothesis_warm(0, 2, 1.5));
+        assert!(streaming_hypothesis_warm(2, 2, 0.5));
+        // unfixed=3 → need chunk_id>=2 unless time escape
+        assert!(!streaming_hypothesis_warm(1, 3, 1.0));
+        assert!(streaming_hypothesis_warm(2, 3, 0.5));
+        assert!(streaming_hypothesis_warm(1, 3, 1.5));
     }
 }

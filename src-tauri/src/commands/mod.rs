@@ -228,6 +228,12 @@ pub(crate) fn mark_history_learn_status(
     mark_history_learn_status_by_id(&mut history, &id, &status)
 }
 
+/// Few-shot pairs currently injected into refine prompts (设置 → 纠错学习 管理面板).
+#[tauri::command]
+pub(crate) fn list_fewshot_cases(app: AppHandle) -> Vec<crate::transcription::FewShotCaseInfo> {
+    crate::transcription::list_fewshot_cases(&app)
+}
+
 /// Mark learn_status on many history entries.
 #[tauri::command]
 pub(crate) fn mark_history_learn_status_batch(
@@ -829,9 +835,13 @@ pub(crate) fn cancel_floating_transcript(app: AppHandle) -> Result<(), String> {
 
 /// Mid-pipeline skip: refining / processing → paste HUD text now, abort in-flight finalize.
 /// Fn while spinner shows = accept what user already sees (no wait for LLM / late ASR).
+/// `text` = optional FE HUD override (slot may lag after keepLive-only partials).
 #[tauri::command]
-pub(crate) fn accept_floating_preview(app: AppHandle) -> Result<(), String> {
-    let (state, text, intention) = floating_status_slot(&app)
+pub(crate) fn accept_floating_preview(
+    app: AppHandle,
+    text: Option<String>,
+) -> Result<(), String> {
+    let (state, slot_text, intention) = floating_status_slot(&app)
         .lock()
         .map(|s| (s.state.clone(), s.text.clone(), s.intention.clone()))
         .unwrap_or_default();
@@ -846,7 +856,16 @@ pub(crate) fn accept_floating_preview(app: AppHandle) -> Result<(), String> {
     let _ = AsrEngine::bump_finalize_gen(&app);
     let _ = AsrEngine::take_pending_hud_confirm(&app);
 
-    let confirmed = text.trim().to_string();
+    let from_fe = text
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .unwrap_or("");
+    let confirmed = if !from_fe.is_empty() {
+        from_fe.to_string()
+    } else {
+        slot_text.trim().to_string()
+    };
     if confirmed.is_empty() {
         emit_floating_status(&app, false, "idle", "", 0.0);
         let _ = app.emit("recording-cancelled", ());
@@ -924,10 +943,15 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
     engine.inner().recording.store(false, Ordering::Release);
 
     // Fn release = stop record; worker finalizes (vocab + optional LLM refine → HUD edit).
+    // Preserve live HUD text for fn/agent — wiping to "" made mid-pipeline Fn accept
+    // read empty slot while FE still showed keepLive partials (no paste / no clipboard).
     let hud_text = if session == "translate" {
         peek_translate_out(&app)
     } else {
-        String::new()
+        floating_status_slot(&app)
+            .lock()
+            .map(|s| s.text.clone())
+            .unwrap_or_default()
     };
     emit_floating_status(&app, show_hud, "processing", &hud_text, 0.0);
     if session == "agent" {

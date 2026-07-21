@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::config::AppConfig;
-use crate::hud::emit_floating_status;
+use crate::hud::{emit_floating_status, floating_status_slot};
 use crate::state::AsrEngine;
 use super::{translate_transcript, PartialResult};
 
@@ -98,6 +98,13 @@ pub(crate) fn handle_asr_partial_ex(
         // Dual-emit: floating webview may miss broadcast-only events (parity with audio-level).
         let _ = app.emit("partial-result", &payload);
         let _ = app.emit_to("floating", "partial-result", &payload);
+        // Keep Rust slot in sync with HUD — accept_floating_preview / stop_recording
+        // read slot.text; FE keepLive alone is not enough (mid-pipeline Fn was silent-empty).
+        if !text.is_empty() {
+            if let Ok(mut slot) = floating_status_slot(app).lock() {
+                slot.text = text.to_string();
+            }
+        }
         return;
     }
 

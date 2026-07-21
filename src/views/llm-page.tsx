@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Button,
   Chip,
@@ -9,7 +10,7 @@ import {
   toast,
 } from "@heroui/react";
 import { Link } from "react-router-dom";
-import { BookPlus, RotateCcw, Save, Sparkles } from "lucide-react";
+import { BookPlus, RotateCcw, Save, Sparkles, X } from "lucide-react";
 import {
   PageHeader,
   PageShell,
@@ -437,10 +438,10 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
           <div className="flex flex-wrap items-end justify-between gap-3">
             <p className="type-meta">
               未标 {ratingStats.unlabeled} · 差 {ratingStats.bad} · 修正{" "}
-              {userTripleCount} · 词库 {ratingStats.applied}
+              {userTripleCount} · 已入库 {ratingStats.applied}
               {" · "}
               <Link to="/settings?tab=vocabulary" className="text-accent-soft-foreground hover:underline">
-                词库
+                词库 →
               </Link>
             </p>
             <div className="flex flex-wrap items-center gap-1.5">
@@ -468,6 +469,8 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
               </Button>
             </div>
           </div>
+
+          <FewShotPanel history={history} />
 
           <div className="recs">
             {learnEntries.map((entry, i) => {
@@ -576,4 +579,60 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   if (embedded) return content;
   return <PageShell className="max-w-2xl">{content}</PageShell>;
+}
+
+type FewShotCaseInfo = { id: string; asr: string; gold: string };
+
+/**
+ * 纠错示例（few-shot）管理 — 纠错时实际注入 prompt 的 输入→输出 对。
+ * 来自 HUD 改字确认（user_text）与差评润色记录；移除 = learn_status=skipped。
+ */
+function FewShotPanel({ history }: { history: HistoryEntry[] }) {
+  const { markHistoryLearnStatus } = useApp();
+  const [cases, setCases] = useState<FewShotCaseInfo[]>([]);
+
+  useEffect(() => {
+    void invoke<FewShotCaseInfo[]>("list_fewshot_cases")
+      .then(setCases)
+      .catch(() => setCases([]));
+  }, [history]);
+
+  if (!cases.length) return null;
+
+  const remove = async (id: string) => {
+    try {
+      await markHistoryLearnStatus([id], "skipped");
+      setCases((prev) => prev.filter((c) => c.id !== id));
+      toast.success("已从纠错示例移除");
+    } catch (e) {
+      toast.danger(String(e));
+    }
+  };
+
+  return (
+    <div className="fewshot">
+      <div className="fewshot-head">
+        <span className="set-group-t">纠错示例 · few-shot</span>
+        <span className="type-meta">纠错时注入的 {cases.length} 对输入 → 输出</span>
+      </div>
+      <div className="fewshot-list">
+        {cases.map((c) => (
+          <div key={c.id} className="fewshot-row">
+            <div className="fewshot-pair">
+              <div className="fewshot-asr">{c.asr}</div>
+              <div className="fewshot-gold">→ {c.gold}</div>
+            </div>
+            <button
+              type="button"
+              className="fewshot-x"
+              aria-label="从示例移除"
+              onClick={() => void remove(c.id)}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }

@@ -821,6 +821,16 @@
   cursor: pointer;
 }
 
+.agent-composer-send.is-pause {
+  background: var(--danger) !important;
+  color: var(--danger-foreground) !important;
+}
+
+.agent-composer-send.is-pause:hover,
+.agent-composer-send.is-pause[data-hovered="true"] {
+  background: var(--danger-hover) !important;
+}
+
 .agent-composer-send svg {
   width: 13px;
   height: 13px;

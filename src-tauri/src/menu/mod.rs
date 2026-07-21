@@ -34,6 +34,11 @@ pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
     let check_updates = MenuItemBuilder::with_id("app:check-updates", "Check for Updates...")
         .build(app)
         .map_err(|e| e.to_string())?;
+    // Custom quit — PredefinedMenuItem::quit can fight hide-on-close (Cmd+Q stuck).
+    let quit = MenuItemBuilder::with_id("app:quit", "退出言落")
+        .accelerator("CmdOrCtrl+Q")
+        .build(app)
+        .map_err(|e| e.to_string())?;
 
     #[cfg(target_os = "macos")]
     let app_menu = Submenu::with_items(
@@ -53,7 +58,7 @@ pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
             &PredefinedMenuItem::hide_others(app, None).map_err(|e| e.to_string())?,
             &PredefinedMenuItem::show_all(app, None).map_err(|e| e.to_string())?,
             &PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
-            &PredefinedMenuItem::quit(app, None).map_err(|e| e.to_string())?,
+            &quit,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -63,7 +68,7 @@ pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
         .item(&settings)
         .item(&check_updates)
         .separator()
-        .quit()
+        .item(&quit)
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -246,7 +251,7 @@ pub(crate) fn handle_menu_event(app: &AppHandle, id: &str) {
         "app:settings" | "tray:settings" => open_settings_page(app, "settings"),
         "app:check-updates" => open_settings_page(app, "updates"),
         "tray:show" => show_main_window(app),
-        "tray:quit" => app.exit(0),
+        "app:quit" | "tray:quit" => app.exit(0),
         _ => {}
     }
 }

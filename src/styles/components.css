@@ -480,17 +480,18 @@ button.form-actions-primary,
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
   gap: 3rem;
-  align-items: start;
+  align-items: stretch;
+  /* Pinned two-pane: nav + title fixed, detail scrolls independently (v3.2) */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .setnav {
-  position: sticky;
-  top: 2rem;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding-top: 0.25rem;
-  max-height: calc(100vh - 3rem);
+  max-height: 100%;
   overflow-y: auto;
   scrollbar-width: thin;
   /* Soft scroll-edge fade instead of a hard cut */
@@ -601,6 +602,10 @@ button.form-actions-primary,
 
 .setbody {
   min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  scrollbar-width: thin;
   display: flex;
   flex-direction: column;
   gap: 1.625rem;
