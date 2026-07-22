@@ -33,6 +33,7 @@ import {
   harvestFromTriples,
   learnGold,
   mergeFewShotIntoPrompt,
+  modelAllowsFewshot,
   toLearnTriple,
 } from "@/lib/learn-cases";
 
@@ -198,6 +199,10 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
   };
 
   const writeFewShot = async () => {
+    if (!modelAllowsFewshot(config.llm_model)) {
+      toast(`当前模型（${config.llm_model.trim()}）较弱，注入 few-shot 会拖累纠错效果，已跳过`);
+      return;
+    }
     const forShot = collectLearnTriples(history, { requireUser: false, max: 12 });
     const preferred = [
       ...forShot.filter((t) => t.hasUser),

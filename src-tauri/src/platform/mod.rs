@@ -211,10 +211,139 @@ pub(crate) fn raise_floating_hud_level(window: &tauri::WebviewWindow, order_fron
             | NSWindowCollectionBehavior::CanJoinAllApplications
             | NSWindowCollectionBehavior::Transient;
         ns_window.setCollectionBehavior(behavior);
+        // Always opaque for show — cancel any in-flight dismiss fade.
+        ns_window.setAlphaValue(1.0);
         if order_front {
             ns_window.orderFrontRegardless();
         }
     }
+}
+
+/// Match FE HUD exit (`duration.slow` = 220ms). Native alpha tracks capsule.
+pub(crate) const FLOATING_EXIT_SECS: f64 = 0.22;
+
+static FLOATING_FADE_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub(crate) fn bump_floating_fade_gen() -> u64 {
+    FLOATING_FADE_GEN.fetch_add(1, std::sync::atomic::Ordering::AcqRel) + 1
+}
+
+fn floating_fade_gen() -> u64 {
+    FLOATING_FADE_GEN.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// Fade HUD (+ optional lang chip) with content exit, then orderOut.
+/// `gen` from [`bump_floating_fade_gen`] — superseded show/hide no-ops completion.
+#[cfg(target_os = "macos")]
+pub(crate) fn fade_out_floating_hud(app: &AppHandle, gen: u64) {
+    use std::ptr::NonNull;
+    use block2::RcBlock;
+    use objc2_app_kit::{
+        NSAnimatablePropertyContainer, NSAnimationContext, NSWindow,
+    };
+
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        let Some(window) = app.get_webview_window("floating") else {
+            return;
+        };
+        let Ok(ns_ptr) = window.ns_window() else {
+            finish_fade_hide(&app, gen);
+            return;
+        };
+
+        let lang_ns = app
+            .get_webview_window("floating-lang")
+            .and_then(|w| w.ns_window().ok());
+
+        unsafe {
+            let ns_window = &*(ns_ptr as *const NSWindow);
+            ns_window.setAlphaValue(1.0);
+
+            let changes = RcBlock::new(move |ctx: NonNull<NSAnimationContext>| {
+                let ctx = unsafe { ctx.as_ref() };
+                ctx.setDuration(FLOATING_EXIT_SECS);
+                ctx.setAllowsImplicitAnimation(true);
+                let ns_window = &*(ns_ptr as *const NSWindow);
+                ns_window.animator().setAlphaValue(0.0);
+                if let Some(lang_ptr) = lang_ns {
+                    let lang = &*(lang_ptr as *const NSWindow);
+                    lang.animator().setAlphaValue(0.0);
+                }
+            });
+            let app_done = app.clone();
+            let completion = RcBlock::new(move || {
+                finish_fade_hide(&app_done, gen);
+            });
+            NSAnimationContext::runAnimationGroup_completionHandler(
+                &changes,
+                Some(&completion),
+            );
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn finish_fade_hide(app: &AppHandle, gen: u64) {
+    if floating_fade_gen() != gen {
+        return;
+    }
+    if floating_status_slot(app)
+        .lock()
+        .map(|s| s.visible)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    if let Some(window) = app.get_webview_window("floating") {
+        let _ = window.hide();
+        if let Ok(ns_ptr) = window.ns_window() {
+            unsafe {
+                use objc2_app_kit::NSWindow;
+                let ns_window = &*(ns_ptr as *const NSWindow);
+                ns_window.setAlphaValue(1.0);
+            }
+        }
+        eprintln!("[floating] hide()");
+    }
+    if let Some(lang) = app.get_webview_window("floating-lang") {
+        let _ = lang.hide();
+        if let Ok(ns_ptr) = lang.ns_window() {
+            unsafe {
+                use objc2_app_kit::NSWindow;
+                let ns_window = &*(ns_ptr as *const NSWindow);
+                ns_window.setAlphaValue(1.0);
+            }
+        }
+    }
+    restore_previous_frontmost_app(true);
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn fade_out_floating_hud(app: &AppHandle, gen: u64) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(
+            (FLOATING_EXIT_SECS * 1000.0) as u64,
+        ));
+        if floating_fade_gen() != gen {
+            return;
+        }
+        if floating_status_slot(&app)
+            .lock()
+            .map(|s| s.visible)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        let _ = app.clone().run_on_main_thread(move || {
+            if let Some(window) = app.get_webview_window("floating") {
+                let _ = window.hide();
+                eprintln!("[floating] hide()");
+            }
+            sync_floating_lang_chip(&app, false);
+        });
+    });
 }
 
 /// Agent edit mode: temporarily drop NonactivatingPanel so textarea can take keys.
@@ -364,6 +493,24 @@ pub(crate) fn write_clipboard_text(text: &str) -> Result<(), String> {
     }
     eprintln!("[paste] clipboard written ({} chars)", text.chars().count());
     Ok(())
+}
+
+/// Read the current text on the general pasteboard (for paste-undo: snapshot
+/// the clipboard before we overwrite it so undo can restore it).
+#[cfg(target_os = "macos")]
+pub(crate) fn read_clipboard_text() -> Option<String> {
+    use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+
+    let pb = NSPasteboard::generalPasteboard();
+    let s = pb.stringForType(unsafe { NSPasteboardTypeString })?;
+    Some(s.to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn read_clipboard_text() -> Option<String> {
+    // Paste-undo clipboard snapshot is macOS-only for now (auto-paste itself
+    // is macOS-only — see `post_cmd_v` below).
+    None
 }
 
 #[cfg(not(target_os = "macos"))]

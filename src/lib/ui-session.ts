@@ -150,6 +150,26 @@ export function writeScrollTop(y: number): void {
   el.scrollTop = Math.max(0, y);
 }
 
+const DISPATCH_PROMPT_KEY = "yanluo:dispatch-pending-prompt";
+
+/** Hand a prompt to the 派活 composer across a navigation. Call before
+ * `navigate("/dispatch")`; AgentPage consumes (and clears) it on mount. */
+export function writePendingDispatchPrompt(text: string): void {
+  writeJson(DISPATCH_PROMPT_KEY, text);
+}
+
+/** Consume + clear a pending dispatch prompt. Read-once, so a refresh or a
+ * second visit to 派活 doesn't resurrect stale text. */
+export function takePendingDispatchPrompt(): string | null {
+  const value = readJson<string>(DISPATCH_PROMPT_KEY);
+  try {
+    sessionStorage.removeItem(DISPATCH_PROMPT_KEY);
+  } catch {
+    /* quota / private mode */
+  }
+  return typeof value === "string" && value ? value : null;
+}
+
 /** Apply scroll after paint so remounted panel height is ready (no smooth). */
 export function restoreScrollTop(y: number | undefined): void {
   if (y == null || !Number.isFinite(y)) {

@@ -1,6 +1,7 @@
 //! 言落 (Yanluo) backend — Tauri application wiring.
 
 mod agent;
+mod agent_kit;
 mod audio;
 mod commands;
 mod config;
@@ -82,6 +83,9 @@ pub fn main() {
 
             start_fn_event_tap(handle.clone());
             agent::schedule_agent_models_refresh(&handle);
+            if let Err(e) = agent_kit::sync_agent_kit() {
+                eprintln!("[agent-kit] sync failed: {e}");
+            }
             Ok(())
         })
         .on_menu_event(|app, event| handle_menu_event(app, event.id().as_ref()))
@@ -101,6 +105,7 @@ pub fn main() {
             models::get_model_status,
             models::download_qwen_asr_model,
             commands::get_app_config,
+            commands::reload_app_config_from_disk,
             commands::save_app_config,
             commands::begin_hotkey_capture,
             commands::cancel_hotkey_capture,
@@ -121,6 +126,7 @@ pub fn main() {
             commands::load_model,
             hud::get_floating_status,
             hud::recenter_floating_hud,
+            hud::finish_floating_hide,
             hud::set_floating_theme,
             hud::popup_translate_target_menu,
             hud::set_floating_lang_menu_open,
@@ -158,6 +164,7 @@ pub fn main() {
             commands::confirm_floating_transcript,
             commands::cancel_floating_transcript,
             commands::accept_floating_preview,
+            commands::undo_last_paste,
             commands::transcribe_file,
             download::get_ytdlp_status,
             download::download_url_media,

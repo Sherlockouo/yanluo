@@ -7,6 +7,7 @@
 //!
 //! All paths deliver 16 kHz mono f32 into shared buffers.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -15,6 +16,165 @@ use serde::{Deserialize, Serialize};
 
 /// Target sample rate for ASR.
 const TARGET_SR: usize = 16_000;
+/// HUD spectrum bands — keep in sync with `HUD_BAND_COUNT` / FE `SPECTRUM_BAR_COUNT`.
+pub const METER_BAND_COUNT: usize = 6;
+const METER_WINDOW: usize = 1_024; // ~64ms @ 16kHz
+
+/// HUD meter — loudness envelope is lock-free (capture thread);
+/// spectrum is computed on the pump thread without holding `recorder`.
+///
+/// Root invariant: VAD commit / PCM clone must never freeze the meter.
+#[derive(Debug)]
+pub struct LiveMeter {
+    /// Attack/release envelope 0–1 from capture peaks (no locks).
+    envelope_bits: AtomicU32,
+    bands: Mutex<[f32; METER_BAND_COUNT]>,
+    /// Hot PCM buffers for pump-side spectrum (set while recording).
+    sources: Mutex<Option<MeterSources>>,
+}
+
+#[derive(Clone, Debug)]
+struct MeterSources {
+    mic: Arc<Mutex<Vec<f32>>>,
+    system: Arc<Mutex<Vec<f32>>>,
+    mode: AudioCaptureMode,
+}
+
+impl Default for LiveMeter {
+    fn default() -> Self {
+        Self {
+            envelope_bits: AtomicU32::new(0.0_f32.to_bits()),
+            bands: Mutex::new([0.0; METER_BAND_COUNT]),
+            sources: Mutex::new(None),
+        }
+    }
+}
+
+impl LiveMeter {
+    pub fn clear(&self) {
+        self.envelope_bits
+            .store(0.0_f32.to_bits(), Ordering::Release);
+        if let Ok(mut b) = self.bands.lock() {
+            *b = [0.0; METER_BAND_COUNT];
+        }
+        if let Ok(mut s) = self.sources.lock() {
+            *s = None;
+        }
+    }
+
+    pub fn bind_sources(
+        &self,
+        mic: Arc<Mutex<Vec<f32>>>,
+        system: Arc<Mutex<Vec<f32>>>,
+        mode: AudioCaptureMode,
+    ) {
+        if let Ok(mut s) = self.sources.lock() {
+            *s = Some(MeterSources { mic, system, mode });
+        }
+    }
+
+    /// Capture-thread only: update loudness from a chunk peak. No mutex.
+    pub fn observe_peak(&self, peak: f32) {
+        let level = peak_to_level(peak);
+        let old = f32::from_bits(self.envelope_bits.load(Ordering::Acquire));
+        // Fast attack / slower release — follows speech, drops on silence.
+        let next = if level > old {
+            old + (level - old) * 0.65
+        } else {
+            old + (level - old) * 0.18
+        };
+        self.envelope_bits
+            .store(next.clamp(0.0, 1.0).to_bits(), Ordering::Release);
+    }
+
+    fn envelope(&self) -> f32 {
+        f32::from_bits(self.envelope_bits.load(Ordering::Acquire)).clamp(0.0, 1.0)
+    }
+
+    /// Pump-thread: try spectrum from PCM; if buffers locked (ASR commit),
+    /// fall back to envelope so bars keep moving with speech.
+    pub fn refresh_for_pump(&self) -> (f32, Vec<f32>) {
+        let env = self.envelope();
+        let sources = self.sources.lock().ok().and_then(|g| g.clone());
+        if let Some(src) = sources {
+            if let Some(buf) = mix_buffers_tail_try(&src.mic, &src.system, src.mode, METER_WINDOW)
+            {
+                if !buf.is_empty() {
+                    let rms = meter_from_slice(&buf).max(env);
+                    let bands = goertzel_bands(&buf, TARGET_SR as f32, METER_BAND_COUNT);
+                    if let Ok(mut slot) = self.bands.lock() {
+                        for (i, v) in slot.iter_mut().enumerate() {
+                            *v = bands.get(i).copied().unwrap_or(0.0);
+                        }
+                    }
+                    return (rms, bands);
+                }
+            }
+        }
+        // Contended or empty hot buffer — envelope still tracks mic peaks.
+        let bands = envelope_bands(env);
+        (env, bands)
+    }
+}
+
+fn peak_to_level(peak: f32) -> f32 {
+    let raw = peak.max(0.0);
+    if raw < 0.000_8 {
+        return 0.0;
+    }
+    let boosted = (raw * 48.0).clamp(0.0, 2.2);
+    boosted.powf(0.45).clamp(0.0, 1.0)
+}
+
+fn envelope_bands(level: f32) -> Vec<f32> {
+    let n = METER_BAND_COUNT;
+    (0..n)
+        .map(|i| {
+            let t = if n == 1 { 0.5 } else { i as f32 / (n - 1) as f32 };
+            let shape = 0.4 + 0.6 * (std::f32::consts::PI * t).sin();
+            shape * level
+        })
+        .collect()
+}
+
+/// Non-blocking tail copy — returns None if mic/system lock is held by ASR.
+fn mix_buffers_tail_try(
+    mic: &Arc<Mutex<Vec<f32>>>,
+    system: &Arc<Mutex<Vec<f32>>>,
+    mode: AudioCaptureMode,
+    window: usize,
+) -> Option<Vec<f32>> {
+    let window = window.max(1);
+    match mode {
+        AudioCaptureMode::External => tail_copy_try(mic, window),
+        AudioCaptureMode::System => tail_copy_try(system, window),
+        AudioCaptureMode::Both => {
+            let mic = mic.try_lock().ok()?;
+            let sys = system.try_lock().ok()?;
+            let n = mic.len().max(sys.len());
+            if n == 0 {
+                return Some(Vec::new());
+            }
+            let start = n.saturating_sub(window);
+            let mut out = Vec::with_capacity(n - start);
+            for i in start..n {
+                let a = mic.get(i).copied().unwrap_or(0.0);
+                let b = sys.get(i).copied().unwrap_or(0.0);
+                out.push((a + b).clamp(-1.0, 1.0));
+            }
+            Some(out)
+        }
+    }
+}
+
+fn tail_copy_try(buf: &Arc<Mutex<Vec<f32>>>, window: usize) -> Option<Vec<f32>> {
+    let guard = buf.try_lock().ok()?;
+    let n = guard.len().min(window);
+    if n == 0 {
+        return Some(Vec::new());
+    }
+    Some(guard[guard.len() - n..].to_vec())
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -52,7 +212,11 @@ pub struct AudioRecorder {
 }
 
 impl AudioRecorder {
-    pub fn start(mode: AudioCaptureMode) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn start(
+        mode: AudioCaptureMode,
+        live_meter: Arc<LiveMeter>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        live_meter.clear();
         let mic_samples = Arc::new(Mutex::new(Vec::<f32>::new()));
         let system_samples = Arc::new(Mutex::new(Vec::<f32>::new()));
 
@@ -60,13 +224,16 @@ impl AudioRecorder {
         let want_system = matches!(mode, AudioCaptureMode::System | AudioCaptureMode::Both);
 
         let mut mic_stream = if want_mic {
-            Some(start_mic_stream(mic_samples.clone())?)
+            Some(start_mic_stream(mic_samples.clone(), live_meter.clone())?)
         } else {
             None
         };
 
         let (system, effective_mode, fallback_warning) = if want_system {
-            match SystemAudioCapture::start(system_samples.clone()) {
+            match SystemAudioCapture::start(
+                system_samples.clone(),
+                live_meter.clone(),
+            ) {
                 Ok(cap) => (Some(cap), mode, None),
                 Err(err) => {
                     // Screen-recording TCC denied / unavailable: keep going on mic
@@ -76,7 +243,7 @@ impl AudioRecorder {
                     );
                     eprintln!("[audio] {msg}");
                     if mic_stream.is_none() {
-                        match start_mic_stream(mic_samples.clone()) {
+                        match start_mic_stream(mic_samples.clone(), live_meter.clone()) {
                             Ok(stream) => mic_stream = Some(stream),
                             Err(mic_err) => {
                                 return Err(format!(
@@ -101,6 +268,12 @@ impl AudioRecorder {
             "[audio] capture mode={} (effective={})",
             mode.as_str(),
             effective_mode.as_str()
+        );
+
+        live_meter.bind_sources(
+            mic_samples.clone(),
+            system_samples.clone(),
+            effective_mode,
         );
 
         Ok(Self {
@@ -351,6 +524,7 @@ fn mix_aligned(mic: &[f32], sys: &[f32]) -> Vec<f32> {
 
 fn start_mic_stream(
     samples: Arc<Mutex<Vec<f32>>>,
+    live_meter: Arc<LiveMeter>,
 ) -> Result<cpal::Stream, Box<dyn std::error::Error>> {
     let host = cpal::default_host();
     let device = host.default_input_device().ok_or("No input device found")?;
@@ -398,37 +572,60 @@ fn start_mic_stream(
         actual_channels,
     );
 
-    let samples_cb = samples.clone();
     let stream = match sample_format {
-        SampleFormat::F32 => device.build_input_stream(
-            &config.into(),
-            move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                process_chunk(data, actual_sr, actual_channels, &samples_cb);
-            },
-            |err| eprintln!("[audio] mic capture error: {}", err),
-            None,
-        )?,
-        SampleFormat::I16 => device.build_input_stream(
-            &config.into(),
-            move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                let f32_data: Vec<f32> = data.iter().map(|&s| s as f32 / 32768.0).collect();
-                process_chunk(&f32_data, actual_sr, actual_channels, &samples_cb);
-            },
-            |err| eprintln!("[audio] mic capture error: {}", err),
-            None,
-        )?,
-        SampleFormat::U16 => device.build_input_stream(
-            &config.into(),
-            move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                let f32_data: Vec<f32> = data
-                    .iter()
-                    .map(|&s| (s as f32 - 32768.0) / 32768.0)
-                    .collect();
-                process_chunk(&f32_data, actual_sr, actual_channels, &samples_cb);
-            },
-            |err| eprintln!("[audio] mic capture error: {}", err),
-            None,
-        )?,
+        SampleFormat::F32 => {
+            let samples_cb = samples.clone();
+            let meter_cb = live_meter.clone();
+            device.build_input_stream(
+                &config.into(),
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    process_chunk(data, actual_sr, actual_channels, &samples_cb, &meter_cb);
+                },
+                |err| eprintln!("[audio] mic capture error: {}", err),
+                None,
+            )?
+        }
+        SampleFormat::I16 => {
+            let samples_cb = samples.clone();
+            let meter_cb = live_meter.clone();
+            device.build_input_stream(
+                &config.into(),
+                move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                    let f32_data: Vec<f32> = data.iter().map(|&s| s as f32 / 32768.0).collect();
+                    process_chunk(
+                        &f32_data,
+                        actual_sr,
+                        actual_channels,
+                        &samples_cb,
+                        &meter_cb,
+                    );
+                },
+                |err| eprintln!("[audio] mic capture error: {}", err),
+                None,
+            )?
+        }
+        SampleFormat::U16 => {
+            let samples_cb = samples.clone();
+            let meter_cb = live_meter.clone();
+            device.build_input_stream(
+                &config.into(),
+                move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                    let f32_data: Vec<f32> = data
+                        .iter()
+                        .map(|&s| (s as f32 - 32768.0) / 32768.0)
+                        .collect();
+                    process_chunk(
+                        &f32_data,
+                        actual_sr,
+                        actual_channels,
+                        &samples_cb,
+                        &meter_cb,
+                    );
+                },
+                |err| eprintln!("[audio] mic capture error: {}", err),
+                None,
+            )?
+        }
         _ => return Err("Unsupported sample format".into()),
     };
 
@@ -445,18 +642,27 @@ struct SystemAudioCapture {
     ctx: *mut std::ffi::c_void,
 }
 
+/// Shared with ScreenCaptureKit callback — append + peak envelope.
+struct SystemAudioCtx {
+    samples: Arc<Mutex<Vec<f32>>>,
+    live_meter: Arc<LiveMeter>,
+}
+
 unsafe impl Send for SystemAudioCapture {}
 
 impl SystemAudioCapture {
-    fn start(samples: Arc<Mutex<Vec<f32>>>) -> Result<Self, Box<dyn std::error::Error>> {
+    fn start(
+        samples: Arc<Mutex<Vec<f32>>>,
+        live_meter: Arc<LiveMeter>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = samples;
+            let _ = (samples, live_meter);
             Err("system audio capture is macOS-only".into())
         }
         #[cfg(target_os = "macos")]
         {
-            start_system_audio_macos(samples)
+            start_system_audio_macos(samples, live_meter)
         }
     }
 }
@@ -471,7 +677,7 @@ impl Drop for SystemAudioCapture {
             }
             if !self.ctx.is_null() {
                 unsafe {
-                    drop(Box::from_raw(self.ctx as *mut Arc<Mutex<Vec<f32>>>));
+                    drop(Box::from_raw(self.ctx as *mut SystemAudioCtx));
                 }
                 self.ctx = std::ptr::null_mut();
             }
@@ -510,16 +716,19 @@ unsafe extern "C" fn system_audio_callback(
     if samples.is_null() || count == 0 || ctx.is_null() {
         return;
     }
-    let arc = &*(ctx as *const Arc<Mutex<Vec<f32>>>);
+    let ctx = &*(ctx as *const SystemAudioCtx);
     let slice = std::slice::from_raw_parts(samples, count);
-    if let Ok(mut buf) = arc.lock() {
+    let peak = slice.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
+    if let Ok(mut buf) = ctx.samples.lock() {
         buf.extend_from_slice(slice);
     }
+    ctx.live_meter.observe_peak(peak);
 }
 
 #[cfg(target_os = "macos")]
 fn start_system_audio_macos(
     samples: Arc<Mutex<Vec<f32>>>,
+    live_meter: Arc<LiveMeter>,
 ) -> Result<SystemAudioCapture, Box<dyn std::error::Error>> {
     // Avoid TCC abort on `tauri dev` naked binary (no Info.plist merge).
     unsafe extern "C" {
@@ -533,7 +742,10 @@ fn start_system_audio_macos(
         );
     }
 
-    let boxed = Box::new(samples);
+    let boxed = Box::new(SystemAudioCtx {
+        samples,
+        live_meter,
+    });
     let ctx = Box::into_raw(boxed) as *mut std::ffi::c_void;
     let ctx_addr = ctx as usize;
 
@@ -552,7 +764,7 @@ fn start_system_audio_macos(
             };
             if handle.is_null() {
                 unsafe {
-                    drop(Box::from_raw(ctx as *mut Arc<Mutex<Vec<f32>>>));
+                    drop(Box::from_raw(ctx as *mut SystemAudioCtx));
                 }
                 let msg = unsafe { std::ffi::CStr::from_ptr(err.as_ptr()) }
                     .to_string_lossy()
@@ -576,6 +788,7 @@ fn process_chunk(
     source_sr: usize,
     source_channels: usize,
     out: &Arc<Mutex<Vec<f32>>>,
+    meter: &LiveMeter,
 ) {
     let mono: Vec<f32> = if source_channels == 1 {
         data.to_vec()
@@ -591,9 +804,15 @@ fn process_chunk(
         linear_resample(&mono, source_sr, TARGET_SR)
     };
 
+    let peak = resampled
+        .iter()
+        .map(|s| s.abs())
+        .fold(0.0_f32, f32::max);
     if let Ok(mut buf) = out.lock() {
         buf.extend_from_slice(&resampled);
     }
+    // Lock-free envelope — never waits on ASR PCM clones.
+    meter.observe_peak(peak);
 }
 
 fn linear_resample(input: &[f32], from_sr: usize, to_sr: usize) -> Vec<f32> {

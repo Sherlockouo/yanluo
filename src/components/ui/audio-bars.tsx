@@ -19,24 +19,24 @@ type AudioBarsProps = {
 function spectrumFromRms(rms: number, bands: number[] | undefined): number[] {
   const level = Math.max(0, Math.min(1, rms));
   const n = SPECTRUM_BAR_COUNT;
+  if (level <= 0.001) {
+    return Array.from({ length: n }, () => 0);
+  }
 
-  // Relative shape: Goertzel mags often saturate, so normalize then scale by rms.
-  // Amplitude must track loudness — otherwise HUD freezes as a static wedge.
-  let shape: number[];
+  // Loudness is primary. Bands only modulate shape — never peak-norm into a
+  // static wedge that ignores volume after VAD silence commits.
   if (bands && bands.length > 0) {
     const peak = Math.max(...bands.map((v) => Math.max(0, v)), 1e-6);
-    shape = Array.from({ length: n }, (_, i) => {
-      const v = Math.max(0, bands[i] ?? 0);
-      return Math.max(0.15, Math.min(1, v / peak));
-    });
-  } else {
-    shape = Array.from({ length: n }, (_, i) => {
-      const t = (n as number) === 1 ? 0.5 : i / (n - 1);
-      return 0.55 + 0.45 * Math.sin(Math.PI * t);
+    return Array.from({ length: n }, (_, i) => {
+      const rel = Math.max(0, bands[i] ?? 0) / peak;
+      return level * (0.28 + 0.72 * rel);
     });
   }
 
-  return shape.map((s) => s * level);
+  return Array.from({ length: n }, (_, i) => {
+    const t = n === 1 ? 0.5 : i / (n - 1);
+    return level * (0.45 + 0.55 * Math.sin(Math.PI * t));
+  });
 }
 
 /**

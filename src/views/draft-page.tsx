@@ -56,6 +56,11 @@ export function DraftPage() {
   const [visited, setVisited] = useState<Set<DraftMode>>(
     () => new Set([seeded.current.mode]),
   );
+  // Modes that have finished (or skipped) the one-shot panel enter — avoids
+  // re-playing dpanel-in when keep-alive panels toggle hidden → visible.
+  const [enteredModes, setEnteredModes] = useState<Set<DraftMode>>(
+    () => new Set([seeded.current.mode]),
+  );
   // Masthead top-right slot. Each mode's active panel portals its contextual
   // action here (keeps the panel's own state fresh — no node-in-effect churn).
   const [actionEl, setActionEl] = useState<HTMLDivElement | null>(null);
@@ -102,6 +107,17 @@ export function DraftPage() {
     patchDraftUi({ mode });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (enteredModes.has(mode)) return;
+    const t = window.setTimeout(() => {
+      setEnteredModes((prev) => {
+        if (prev.has(mode)) return prev;
+        return new Set(prev).add(mode);
+      });
+    }, 160);
+    return () => window.clearTimeout(t);
+  }, [mode, enteredModes]);
 
   // Leave page: persist current mode scroll.
   useEffect(() => {
@@ -188,7 +204,7 @@ export function DraftPage() {
             })}
           </nav>
         </div>
-        <div className="dmast-sub">
+        {/* <div className="dmast-sub" data-tour="draft-hotkeys">
           <span>
             <b>{config.hotkey_transcribe.label}</b> 出稿
           </span>
@@ -198,14 +214,19 @@ export function DraftPage() {
           </span>
           <span className="dot" />
           <span>{languageLabel}</span>
-        </div>
+        </div> */}
       </div>
 
       {MODES.map((item) =>
         visited.has(item.id) ? (
           <div
             key={item.id}
-            className={mode === item.id ? "dpanel contents" : "hidden"}
+            className={cn(
+              mode === item.id ? "dpanel contents" : "hidden",
+              mode === item.id &&
+                !enteredModes.has(item.id) &&
+                "is-enter",
+            )}
             aria-hidden={mode !== item.id}
           >
             {item.id === "file" ? (

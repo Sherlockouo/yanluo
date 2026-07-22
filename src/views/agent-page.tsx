@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Button,
@@ -24,6 +24,8 @@ import {
 import { PageShell, Reveal } from "@/components/shared/page-shell";
 import { defaultConfig, agentModelsFor } from "@/lib/constants";
 import { cn } from "@/lib/cn";
+import { takePendingDispatchPrompt } from "@/lib/ui-session";
+import { friendlyAgentError } from "@/lib/agent-errors";
 import type { AgentJob, AgentKind, AgentProfile } from "@/types";
 import { useApp } from "@/app-context";
 
@@ -212,6 +214,12 @@ export function AgentPage() {
   const [attachments, setAttachments] = useState<string[]>([]);
   const [sending, setSending] = useState(false);
 
+  // 派这段 bridge: 历史/其它页面 stash text via ui-session, we pick it up once.
+  useEffect(() => {
+    const pending = takePendingDispatchPrompt();
+    if (pending) setPrompt((prev) => prev || pending);
+  }, []);
+
   const profiles = useMemo(
     () => normalizeProfiles(config.agent_profiles),
     [config.agent_profiles],
@@ -280,8 +288,8 @@ export function AgentPage() {
     const text = prompt.trim();
     if ((!text && attachments.length === 0) || sending) return;
     setSending(true);
+    const kind = activeProfile?.kind ?? "claude";
     try {
-      const kind = activeProfile?.kind ?? "claude";
       await invoke("dispatch_agent", {
         agent: kind,
         prompt: text,
@@ -291,7 +299,7 @@ export function AgentPage() {
       setPrompt("");
       setAttachments([]);
     } catch (e) {
-      toast.danger(e instanceof Error ? e.message : String(e));
+      toast.danger(friendlyAgentError(e, kind));
     } finally {
       setSending(false);
     }
@@ -365,7 +373,7 @@ export function AgentPage() {
       </div>
 
       <div className="agent-list-composer shrink-0 pt-1">
-        <div className="agent-composer p-2">
+        <div className="agent-composer">
           {attachments.length > 0 ? (
             <div className="agent-attach-chips">
               {attachments.map((path) => (

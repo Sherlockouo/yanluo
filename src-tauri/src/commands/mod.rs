@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 use crate::audio::*;
 use crate::state::*;
@@ -10,6 +11,7 @@ use crate::history::*;
 use crate::hotkey::*;
 use crate::hud::*;
 use crate::paste::*;
+use crate::platform::write_clipboard_text;
 use crate::transcription::*;
 use crate::permissions;
 
@@ -98,6 +100,27 @@ pub(crate) fn get_app_config(engine: State<'_, AsrEngine>) -> Result<AppConfig, 
         .lock()
         .map(|config| config.clone())
         .map_err(|e| e.to_string())
+}
+
+/// Re-read `config.json` from disk into engine memory (agent kit / external edits).
+#[tauri::command]
+pub(crate) fn reload_app_config_from_disk(
+    app: AppHandle,
+    engine: State<'_, AsrEngine>,
+) -> Result<AppConfig, String> {
+    let mut config = load_config_from_disk();
+    normalize_config_for_platform(&mut config);
+    ensure_agent_profiles(&mut config);
+    {
+        let mut current = engine.inner().config.lock().map_err(|e| e.to_string())?;
+        *current = config.clone();
+    }
+    {
+        let mut model_dir = engine.inner().model_dir.lock().map_err(|e| e.to_string())?;
+        *model_dir = config.asr_model_dir.clone();
+    }
+    let _ = app.emit("config-updated", &config);
+    Ok(config)
 }
 
 #[tauri::command]
@@ -590,6 +613,10 @@ pub(crate) fn start_recording(
     reset_translate_stream(&app);
     let _ = AsrEngine::bump_finalize_gen(&app);
     AsrEngine::set_pending_hud_confirm(&app, None);
+    // New session — a stale undo (from a superseded finalize_gen) must not
+    // linger; the HUD button is already gone, but don't leave the previous
+    // clipboard snapshot armed for a wrong-session `undo_last_paste`.
+    AsrEngine::set_pending_paste_undo(&app, None);
 
     // Show HUD *before* ScreenCaptureKit start — that path can take seconds and
     // used to leave the UI frozen with no capsule until capture finished/failed.
@@ -597,7 +624,10 @@ pub(crate) fn start_recording(
     let show_hud = session == "fn" || session == "translate" || session == "agent";
     emit_floating_status(&app, show_hud, "recording", "", 0.0);
 
-    let rec = match AudioRecorder::start(config.audio_capture_mode) {
+    let rec = match AudioRecorder::start(
+        config.audio_capture_mode,
+        engine.inner().live_meter.clone(),
+    ) {
         Ok(rec) => rec,
         Err(e) => {
             emit_floating_status(&app, false, "idle", "", 0.0);
@@ -705,6 +735,7 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
     engine.recording.store(false, Ordering::Release);
     reset_translate_stream(app);
     AsrEngine::set_pending_hud_confirm(app, None);
+    AsrEngine::set_pending_paste_undo(app, None);
 
     if !was_recording && !has_recorder && !hud_busy {
         emit_floating_status(app, false, "idle", "", 0.0);
@@ -737,6 +768,52 @@ pub(crate) struct LearnFromHudPayload {
     pub(crate) entry_id: String,
     pub(crate) before: String,
     pub(crate) after: String,
+}
+
+const PASTE_UNDO_HINT_MS: u64 = 3200;
+const PASTE_UNDO_DONE_MS: u64 = 1200;
+
+/// Arm clipboard-restore undo: remember pre-paste clipboard, show "pasted", auto-hide.
+fn arm_paste_undo(app: &AppHandle, pasted_text: &str, previous_clipboard: Option<String>) {
+    let gen = AsrEngine::finalize_gen(app);
+    AsrEngine::set_pending_paste_undo(
+        app,
+        Some(PendingPasteUndo {
+            previous_clipboard,
+            gen,
+        }),
+    );
+    emit_floating_status(app, true, "pasted", pasted_text, 0.0);
+    schedule_paste_undo_hide(app, gen, PASTE_UNDO_HINT_MS);
+}
+
+fn schedule_paste_undo_hide(app: &AppHandle, gen: u64, delay_ms: u64) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+        if AsrEngine::finalize_aborted(&app, gen) {
+            return;
+        }
+        AsrEngine::set_pending_paste_undo(&app, None);
+        emit_floating_status(&app, false, "idle", "", 0.0);
+    });
+}
+
+/// Restore clipboard from before last confirm/accept paste (no synthetic ⌘Z).
+#[tauri::command]
+pub(crate) fn undo_last_paste(app: AppHandle) -> Result<(), String> {
+    let pending = AsrEngine::take_pending_paste_undo(&app)
+        .ok_or_else(|| "没有可撤销的粘贴".to_string())?;
+    if let Some(prev) = &pending.previous_clipboard {
+        write_clipboard_text(prev)?;
+    } else {
+        write_clipboard_text("")?;
+    }
+    eprintln!("[paste] undo: clipboard restored");
+    let gen = AsrEngine::bump_finalize_gen(&app);
+    emit_floating_status(&app, true, "pasted-undo", "已恢复剪贴板", 0.0);
+    schedule_paste_undo_hide(&app, gen, PASTE_UNDO_DONE_MS);
+    Ok(())
 }
 
 /// Confirm Fn/⇧Fn HUD edit: paste → history → optional learn → hide.
@@ -777,11 +854,12 @@ pub(crate) fn confirm_floating_transcript(
     result.text = confirmed.clone();
 
     match inject_text_via_paste_on_main(&app, &confirmed) {
-        Ok(()) => {
+        Ok(prev) => {
             eprintln!(
                 "[paste] confirmed {} chars (edited={edited} mode={mode})",
                 confirmed.chars().count()
             );
+            arm_paste_undo(&app, &confirmed, prev);
         }
         Err(e) => {
             eprintln!("[paste] injection failed: {e}");
@@ -789,6 +867,7 @@ pub(crate) fn confirm_floating_transcript(
                 "partial-error",
                 format!("已写入剪切板，但粘贴失败（请检查辅助功能权限）: {e}"),
             );
+            emit_floating_status(&app, false, "idle", "", 0.0);
         }
     }
 
@@ -817,7 +896,6 @@ pub(crate) fn confirm_floating_transcript(
         }
     }
 
-    emit_floating_status(&app, false, "idle", "", 0.0);
     let _ = app.emit("transcription-result", &result);
     Ok(())
 }
@@ -827,6 +905,7 @@ pub(crate) fn confirm_floating_transcript(
 pub(crate) fn cancel_floating_transcript(app: AppHandle) -> Result<(), String> {
     let _ = AsrEngine::take_pending_hud_confirm(&app);
     let _ = AsrEngine::bump_finalize_gen(&app);
+    AsrEngine::set_pending_paste_undo(&app, None);
     emit_floating_status(&app, false, "idle", "", 0.0);
     let _ = app.emit("recording-cancelled", ());
     eprintln!("[asr] hud confirm cancelled");
@@ -883,11 +962,12 @@ pub(crate) fn accept_floating_preview(
     };
 
     match inject_text_via_paste_on_main(&app, &confirmed) {
-        Ok(()) => {
+        Ok(prev) => {
             eprintln!(
                 "[paste] accept preview {} chars (skipped mid-pipeline mode={mode})",
                 confirmed.chars().count()
             );
+            arm_paste_undo(&app, &confirmed, prev);
         }
         Err(e) => {
             eprintln!("[paste] accept preview failed: {e}");
@@ -895,6 +975,7 @@ pub(crate) fn accept_floating_preview(
                 "partial-error",
                 format!("已写入剪切板，但粘贴失败（请检查辅助功能权限）: {e}"),
             );
+            emit_floating_status(&app, false, "idle", "", 0.0);
         }
     }
 

@@ -27,6 +27,71 @@ fn llm_http_client() -> Result<reqwest::blocking::Client, String> {
         .map_err(|e| format!("LLM HTTP client: {e}"))
 }
 
+/// Async POST that drops the in-flight request when `should_abort` flips true
+/// (Esc / cancel mid-refine). Saves local Ollama / remote GPU once the TCP
+/// stream is closed.
+fn llm_post_json_abortable(
+    url: String,
+    body: serde_json::Value,
+    api_key: String,
+    mut should_abort: impl FnMut() -> bool,
+) -> Result<(reqwest::StatusCode, String), String> {
+    if should_abort() {
+        return Err("aborted".into());
+    }
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("LLM runtime: {e}"))?;
+    rt.block_on(async move {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(90))
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|e| format!("LLM HTTP client: {e}"))?;
+        let mut req = client.post(&url).json(&body);
+        if !api_key.is_empty() {
+            req = req.bearer_auth(api_key);
+        }
+        let send_fut = req.send();
+        tokio::pin!(send_fut);
+        let resp = loop {
+            tokio::select! {
+                biased;
+                r = &mut send_fut => break r.map_err(|e| {
+                    if e.is_timeout() {
+                        "LLM 请求超时（90s）。检查 Ollama 是否在跑、模型是否已拉取。".to_string()
+                    } else {
+                        e.to_string()
+                    }
+                })?,
+                _ = tokio::time::sleep(Duration::from_millis(40)) => {
+                    if should_abort() {
+                        eprintln!("[llm] HTTP aborted (send)");
+                        return Err("aborted".into());
+                    }
+                }
+            }
+        };
+        let status = resp.status();
+        let text_fut = resp.text();
+        tokio::pin!(text_fut);
+        let text = loop {
+            tokio::select! {
+                biased;
+                t = &mut text_fut => break t.map_err(|e| e.to_string())?,
+                _ = tokio::time::sleep(Duration::from_millis(40)) => {
+                    if should_abort() {
+                        eprintln!("[llm] HTTP aborted (body)");
+                        return Err("aborted".into());
+                    }
+                }
+            }
+        };
+        Ok((status, text))
+    })
+}
+
 /// Single source of truth for the built-in refine prompt.
 /// MUST stay byte-identical to the frontend `DEFAULT_LLM_REFINE_PROMPT`
 /// (src/lib/constants.ts) so the Settings preview matches what actually runs.
@@ -66,6 +131,17 @@ pub(crate) fn refine_transcript_with_cases(
     input: &str,
     fewshot: &[FewShotCase],
 ) -> Result<String, String> {
+    refine_transcript_with_cases_abortable(config, input, fewshot, || false)
+}
+
+/// Like [`refine_transcript_with_cases`], but `should_abort` can cancel in-flight
+/// HTTP (Esc / cancel_recording mid-refine) so local models stop burning cycles.
+pub(crate) fn refine_transcript_with_cases_abortable(
+    config: &AppConfig,
+    input: &str,
+    fewshot: &[FewShotCase],
+    mut should_abort: impl FnMut() -> bool,
+) -> Result<String, String> {
     if !config.llm_enabled {
         return Err("LLM 纠错未启用（LLM 页打开「启用纠错」并保存）".into());
     }
@@ -78,8 +154,16 @@ pub(crate) fn refine_transcript_with_cases(
     if input.trim().is_empty() {
         return Ok(String::new());
     }
+    if should_abort() {
+        return Err("aborted".into());
+    }
 
-    let fewshot_block = build_refine_fewshot(fewshot);
+    let fewshot_block = if model_allows_fewshot(&config.llm_model) {
+        build_refine_fewshot(fewshot)
+    } else {
+        eprintln!("[llm] fewshot skipped: weak model {}", config.llm_model.trim());
+        String::new()
+    };
     let chunks = split_for_refine(input, REFINE_CHUNK_LIMIT);
     let multi = chunks.len() > 1;
     if multi {
@@ -87,12 +171,15 @@ pub(crate) fn refine_transcript_with_cases(
     }
     let mut out = String::with_capacity(input.len());
     for (i, chunk) in chunks.iter().enumerate() {
+        if should_abort() {
+            return Err("aborted".into());
+        }
         // Blank / whitespace-only chunk: pass through untouched.
         if chunk.trim().is_empty() {
             out.push_str(chunk);
             continue;
         }
-        let refined = refine_one_chunk(config, chunk, &fewshot_block)?;
+        let refined = refine_one_chunk(config, chunk, &fewshot_block, &mut should_abort)?;
         if multi {
             eprintln!(
                 "[llm] refine chunk #{}/{} chars={}→{}",
@@ -114,6 +201,7 @@ fn refine_one_chunk(
     config: &AppConfig,
     input: &str,
     fewshot_block: &str,
+    should_abort: &mut impl FnMut() -> bool,
 ) -> Result<String, String> {
     #[derive(Serialize)]
     struct Message<'a> {
@@ -192,46 +280,44 @@ fn refine_one_chunk(
         config.llm_model.trim(),
         input.chars().count()
     );
+    let body = serde_json::to_value(&request).map_err(|e| e.to_string())?;
+    let api_key = config.llm_api_key.trim().to_string();
     // One retry on transient failure (network blip / cold model / 5xx).
-    let mut response = None;
+    let mut response_body = None;
     let mut last_err = String::new();
     for attempt in 0..2 {
-        let client = llm_http_client()?;
-        let mut req = client.post(&url).json(&request);
-        let key = config.llm_api_key.trim();
-        if !key.is_empty() {
-            req = req.bearer_auth(key);
+        if should_abort() {
+            return Err("aborted".into());
         }
-        match req.send() {
-            Ok(resp) => {
-                let status = resp.status();
+        match llm_post_json_abortable(url.clone(), body.clone(), api_key.clone(), &mut *should_abort)
+        {
+            Ok((status, text)) => {
                 if status.is_success() {
-                    response = Some(resp);
+                    response_body = Some(text);
                     break;
                 }
                 let retryable = status.is_server_error();
-                let body = resp.text().unwrap_or_default();
-                eprintln!("[llm] refine HTTP {status}: {body}");
-                last_err = format!("LLM HTTP {status}: {body}");
+                eprintln!("[llm] refine HTTP {status}: {text}");
+                last_err = format!("LLM HTTP {status}: {text}");
                 if !retryable {
                     return Err(last_err);
                 }
             }
+            Err(e) if e == "aborted" => return Err("aborted".into()),
             Err(e) => {
                 eprintln!("[llm] refine network error (attempt {}): {e}", attempt + 1);
-                last_err = if e.is_timeout() {
-                    "LLM 请求超时（90s）。检查 Ollama 是否在跑、模型是否已拉取。".to_string()
-                } else {
-                    e.to_string()
-                };
+                last_err = e;
             }
         }
         if attempt == 0 {
+            if should_abort() {
+                return Err("aborted".into());
+            }
             std::thread::sleep(Duration::from_millis(400));
         }
     }
-    let response = response.ok_or(last_err)?;
-    let parsed: Response = response.json().map_err(|e| {
+    let response_body = response_body.ok_or(last_err)?;
+    let parsed: Response = serde_json::from_str(&response_body).map_err(|e| {
         eprintln!("[llm] refine parse error: {e}");
         e.to_string()
     })?;
@@ -274,6 +360,28 @@ pub(crate) struct FewShotCase {
 
 const FEWSHOT_MAX: usize = 8;
 const FEWSHOT_MAX_SIDE: usize = 80;
+
+/// Weak-model few-shot gate (see `doc/plan/refine-eval.md`). The eval found
+/// few-shot value scales with model strength: deepseek-chat +8.9%, qwen3:1.7b
+/// / gemma:12b +3.5% — but `qwen2.5:1.5b` **regressed -7.5%** (and produced an
+/// over-edit) because the tiny model gets confused rather than guided by the
+/// injected examples. Mirror in TS: `modelAllowsFewshot` (src/lib/learn-cases.ts).
+///
+/// Denies only the confirmed-weak list rather than guessing at every small
+/// model name, since an unknown model defaulting to "no few-shot" would silently
+/// regress the (larger, more common) strong-model case the eval showed gains for.
+pub(crate) fn model_allows_fewshot(model: &str) -> bool {
+    let m = model.trim().to_ascii_lowercase();
+    if m.is_empty() {
+        return false;
+    }
+    // qwen2.5:1.5b / qwen2.5-1.5b / qwen2.5:0.5b variants: the only model in
+    // the eval that got worse with few-shot injected.
+    if m.contains("qwen2.5") && (m.contains("1.5b") || m.contains("0.5b")) {
+        return false;
+    }
+    true
+}
 
 /// Build a `输入/输出` few-shot block from confirmed correction cases so the
 /// refine model learns the user's recurring fixes. Mirrors the frontend
@@ -1166,7 +1274,9 @@ pub(crate) fn finalize_successful_result(
         emit_floating_status(app, true, "refining", &result.text, 0.0);
         let before_llm = result.text.clone();
         let fewshot = collect_fewshot_from_history(app);
-        match refine_transcript_with_cases(&config, &before_llm, &fewshot) {
+        match refine_transcript_with_cases_abortable(&config, &before_llm, &fewshot, || {
+            AsrEngine::finalize_aborted(app, gen)
+        }) {
             Ok(out) => {
                 if out != before_llm {
                     result.llm_text = Some(out.clone());
@@ -1182,6 +1292,10 @@ pub(crate) fn finalize_successful_result(
                 } else {
                     eprintln!("[llm] fn refine unchanged");
                 }
+            }
+            Err(e) if e == "aborted" => {
+                eprintln!("[llm] fn refine aborted (gen={gen})");
+                return None;
             }
             Err(e) => {
                 eprintln!("[llm] fn refine skipped: {e}");
@@ -2428,7 +2542,9 @@ pub(crate) fn mlx_worker(
 
                 // --- Self-paced segmented streaming loop ---
                 loop {
-                    if !recording.load(Ordering::Acquire) {
+                    if !recording.load(Ordering::Acquire)
+                        || cancel_requested.load(Ordering::Acquire)
+                    {
                         break;
                     }
 
@@ -2479,6 +2595,11 @@ pub(crate) fn mlx_worker(
                                 | SegmentEvent::HardCut { end_sample } => {
                                     let is_hard = matches!(ev, SegmentEvent::HardCut { .. });
                                     let reason = if is_hard { "hard-cap" } else { "vad-silence" };
+                                    if cancel_requested.load(Ordering::Acquire)
+                                        || !recording.load(Ordering::Acquire)
+                                    {
+                                        break 'vad;
+                                    }
                                     let mut stream_ok = true;
                                     if let Some(start) = seg_start {
                                         // Ensure commit window is covered (may need wider copy).
@@ -2513,24 +2634,46 @@ pub(crate) fn mlx_worker(
                                                 segment_index,
                                             );
                                             notify_asr_committed(&app, &committed_text);
-
-                                            match open_stream(
+                                        } else {
+                                            eprintln!(
+                                                "[mlx-worker] commit audio missing — still reopen stream"
+                                            );
+                                        }
+                                    }
+                                    // Silence commit ≈ utterance boundary → no cross-seg
+                                    // prefix (prefix on incomplete clause → EOS / empty active).
+                                    // Hard-cap mid-utterance keeps prefix for continuity.
+                                    let reopen_ctx = if is_hard {
+                                        committed_text.as_str()
+                                    } else {
+                                        ""
+                                    };
+                                    match open_stream(
+                                        inf,
+                                        reopen_ctx,
+                                        sticky_qwen_lang.as_deref(),
+                                    ) {
+                                        Some(s) => {
+                                            stream_state = s;
+                                            segment_index += 1;
+                                        }
+                                        None => {
+                                            stream_ok = false;
+                                            // Last-resort: reopen with zero context.
+                                            if let Some(s) = open_stream(
                                                 inf,
-                                                &committed_text,
+                                                "",
                                                 sticky_qwen_lang.as_deref(),
                                             ) {
-                                                Some(s) => {
-                                                    stream_state = s;
-                                                    segment_index += 1;
-                                                }
-                                                None => {
-                                                    stream_ok = false;
-                                                    seg_start = None;
-                                                }
+                                                stream_state = s;
+                                                segment_index += 1;
+                                                stream_ok = true;
+                                                eprintln!(
+                                                    "[mlx-worker] reopen fallback without context"
+                                                );
+                                            } else {
+                                                seg_start = None;
                                             }
-                                        } else {
-                                            stream_ok = false;
-                                            seg_start = None;
                                         }
                                     }
                                     let next = clock.next_start_after_cut(end_sample);
@@ -2556,15 +2699,22 @@ pub(crate) fn mlx_worker(
                                         }
                                     }
                                     let reopen_at = if drained_ok { 0 } else { next };
-                                    if is_hard && stream_ok {
+                                    // HardCut: continuous speech — force next segment open.
+                                    // Silence Commit: also force_open so overlap/post-silence
+                                    // speech is not stuck waiting for a VAD Open that never
+                                    // arrives after drain/rebase edge cases.
+                                    if stream_ok {
                                         clock.force_open(reopen_at);
                                         seg_start = Some(reopen_at);
                                         last_partial_abs = reopen_at;
                                         active_text.clear();
+                                        empty_active_streak = 0;
+                                        context_rescue_used = false;
                                         eprintln!(
-                                            "[mlx-worker] segment #{} reopen @ {:.1}s (overlap kept)",
+                                            "[mlx-worker] segment #{} reopen @ {:.1}s ({})",
                                             segment_index,
-                                            reopen_at as f64 / 16000.0
+                                            reopen_at as f64 / 16000.0,
+                                            if is_hard { "hard-cap" } else { "vad-silence" }
                                         );
                                     } else {
                                         seg_start = None;
@@ -2605,6 +2755,12 @@ pub(crate) fn mlx_worker(
                         || new_in_seg < gate_samples
                     {
                         continue;
+                    }
+
+                    if cancel_requested.load(Ordering::Acquire)
+                        || !recording.load(Ordering::Acquire)
+                    {
+                        break;
                     }
 
                     let rel_start = start.saturating_sub(base);
@@ -2710,10 +2866,12 @@ pub(crate) fn mlx_worker(
 
                                 // Context-poison rescue: warm empties with growing audio →
                                 // re-init without cross-seg prefix and re-decode once.
+                                // Thresholds kept tight — post-commit empty-active otherwise
+                                // looks like a dead HUD for seconds.
                                 if warm
                                     && !context_rescue_used
-                                    && empty_active_streak >= 3
-                                    && seg_secs >= 3.0
+                                    && empty_active_streak >= 2
+                                    && seg_secs >= 1.5
                                     && active_text.trim().is_empty()
                                 {
                                     context_rescue_used = true;
@@ -3374,7 +3532,7 @@ mod refine_eval {
 
 #[cfg(test)]
 mod fewshot_tests {
-    use super::{build_refine_fewshot, FewShotCase};
+    use super::{build_refine_fewshot, model_allows_fewshot, FewShotCase};
 
     fn case(asr: &str, gold: &str) -> FewShotCase {
         FewShotCase {
@@ -3412,6 +3570,37 @@ mod fewshot_tests {
             case(&"长".repeat(300), &"短".repeat(300)), // oversized → skip
         ];
         assert_eq!(build_refine_fewshot(&cases), "");
+    }
+
+    #[test]
+    fn weak_qwen25_small_denied() {
+        assert!(!model_allows_fewshot("qwen2.5:1.5b"));
+        assert!(!model_allows_fewshot("qwen2.5-1.5b"));
+        assert!(!model_allows_fewshot("qwen2.5:0.5b"));
+        assert!(!model_allows_fewshot("  QWEN2.5:1.5B  "));
+    }
+
+    #[test]
+    fn strong_models_allowed() {
+        assert!(model_allows_fewshot("qwen3:1.7b"));
+        assert!(model_allows_fewshot("deepseek-chat"));
+        assert!(model_allows_fewshot("gpt-4o"));
+        assert!(model_allows_fewshot("claude-3-5-sonnet"));
+        assert!(model_allows_fewshot("gemini-1.5-pro"));
+        assert!(model_allows_fewshot("gemma4:12b"));
+    }
+
+    #[test]
+    fn empty_model_denied() {
+        assert!(!model_allows_fewshot(""));
+        assert!(!model_allows_fewshot("   "));
+    }
+
+    #[test]
+    fn other_qwen25_sizes_allowed() {
+        // Only the confirmed-weak 1.5b/0.5b sizes are denied; larger qwen2.5
+        // variants default to allowed per the eval's "deny known-weak only" call.
+        assert!(model_allows_fewshot("qwen2.5:7b"));
     }
 }
 

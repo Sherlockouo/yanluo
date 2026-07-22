@@ -418,7 +418,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Confirm-wait: Fn is handled in floating via hud-confirm-request (hotkey tap).
         if (stateRef.current === "editing") return;
 
-        // Mid-pipeline spinner: Fn = accept HUD text now (skip LLM / late finalize).
+        // Mid-pipeline spinner: Fn = accept HUD text now + abort in-flight LLM/ASR.
         if (
           stateRef.current === "refining" ||
           stateRef.current === "processing"

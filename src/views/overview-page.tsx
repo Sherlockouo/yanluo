@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Button, toast } from "@heroui/react";
 import { NavLink } from "react-router-dom";
 import { Download } from "lucide-react";
@@ -6,8 +6,26 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { motion, useReducedMotion } from "framer-motion";
 import { PageShell, SectionCard } from "@/components/shared/page-shell";
+import { WordCloud } from "@/components/home/word-cloud";
 import { duration, easeOut, springUI } from "@/lib/motion";
+import {
+  aggregateWordFreq,
+  CLOUD_SOURCES,
+  type CloudSource,
+} from "@/lib/word-freq";
 import { useApp } from "@/app-context";
+
+const CLOUD_SOURCE_KEY = "yanluo:home-cloud-source";
+
+function readCloudSource(): CloudSource {
+  try {
+    const v = sessionStorage.getItem(CLOUD_SOURCE_KEY);
+    if (v === "fn" || v === "translate" || v === "transcribe") return v;
+  } catch {
+    /* ignore */
+  }
+  return "fn";
+}
 
 type ModelStatus = {
   model_id: string;
@@ -28,11 +46,27 @@ type ModelDownloadProgress = {
 };
 
 export function OverviewPage() {
-  const { config, modelLoaded, updateConfig, loadModel, agentJobs } = useApp();
+  const { config, modelLoaded, updateConfig, loadModel, agentJobs, history } =
+    useApp();
   const [status, setStatus] = useState<ModelStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
+  const [cloudSource, setCloudSource] = useState<CloudSource>(readCloudSource);
   const reduceMotion = useReducedMotion();
+
+  const cloudWords = useMemo(
+    () => aggregateWordFreq(history, cloudSource, 40),
+    [history, cloudSource],
+  );
+
+  const setSource = (id: CloudSource) => {
+    setCloudSource(id);
+    try {
+      sessionStorage.setItem(CLOUD_SOURCE_KEY, id);
+    } catch {
+      /* ignore */
+    }
+  };
 
   const refreshStatus = useCallback(async () => {
     if (config.asr_provider !== "qwen") {
@@ -103,29 +137,22 @@ export function OverviewPage() {
       ? `${activeAgents} 运行中`
       : agentJobs.length > 0
         ? `${agentJobs.length} 任务`
-        : "说完派给 Claude / Codex";
+        : "Claude / Codex 都行";
 
   const draftKey = config.hotkey_transcribe.label;
   const translateKey = config.hotkey_translate.label;
   const agentKey = config.hotkey_agent?.label ?? "Fn+Space";
 
   return (
-    <PageShell className="page-fill mx-0 max-w-[860px] gap-0 pb-0">
-      <span className="home-eyebrow">Local · Mac</span>
-      <h1 className="home-headline mt-3.5">
-        今天开口
-        <br />
-        要什么结果？
-      </h1>
+    <PageShell className="page-fill mx-0 max-w-[1080px] gap-0 pb-0">
+      <span className="home-eyebrow">声音留在本机 · Mac</span>
+      <h1 className="home-headline mt-3.5">开口有结果</h1>
 
       {needsInstall ? (
-        <SectionCard className="panel-static mt-8 flex flex-col gap-4 border-accent/30">
+        <SectionCard className="panel-static mt-8 flex flex-col gap-4">
           <div>
-            <div className="type-section">下载本机识别（约 2GB）</div>
-            <p className="mt-1 type-meta">
-              型号 {config.asr_model_id || "Qwen3-ASR-0.6B"} ·
-              装好即可开口出稿
-            </p>
+            <div className="type-section">先下载才能开口（约 2GB）</div>
+            <p className="mt-1 type-meta">只需下载一次 · 装好后即可出稿</p>
           </div>
           {downloading && progress ? (
             <div className="type-meta">
@@ -143,7 +170,7 @@ export function OverviewPage() {
             onPress={() => void startDownload()}
           >
             <Download size={14} />
-            {downloading ? "下载中…" : "下载本机识别"}
+            {downloading ? "下载中…" : "开始下载"}
           </Button>
         </SectionCard>
       ) : null}
@@ -158,9 +185,9 @@ export function OverviewPage() {
             <div>
               <div className="dest-label dest-label-primary">出稿</div>
               <div className="dest-hint">
-                开会 · 口述 · 文件转写
+                开会 · 口述 · 拖文件
                 <br />
-                说完有一版能发的稿
+                说完有稿
               </div>
             </div>
             <div className="dest-foot">
@@ -180,7 +207,7 @@ export function OverviewPage() {
               <div className="dest-hint">
                 {dispatchHint}
                 <br />
-                任务自己跑
+                开口派活
               </div>
             </div>
             <div className="dest-foot">
@@ -188,6 +215,33 @@ export function OverviewPage() {
             </div>
           </NavLink>
         </motion.div>
+      </div>
+
+      <div className="home-cloud">
+        <div className="home-cloud-head">
+          <span className="home-cloud-label">词云</span>
+          <div className="tswitch" role="tablist" aria-label="词云来源">
+            {CLOUD_SOURCES.map((s, i) => (
+              <Fragment key={s.id}>
+                {i > 0 ? (
+                  <span className="sep" aria-hidden>
+                    ·
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={cloudSource === s.id}
+                  className={`o${cloudSource === s.id ? " is-active" : ""}`}
+                  onClick={() => setSource(s.id)}
+                >
+                  {s.label}
+                </button>
+              </Fragment>
+            ))}
+          </div>
+        </div>
+        <WordCloud words={cloudWords} />
       </div>
 
       <motion.div
@@ -209,6 +263,7 @@ export function OverviewPage() {
         <span>
           <b>{agentKey}</b> 派活
         </span>
+        <span>声音留在本机</span>
       </motion.div>
     </PageShell>
   );

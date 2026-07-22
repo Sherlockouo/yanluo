@@ -75,6 +75,27 @@
   - 底栏 **模型 Select** = CLI 底层模型（`claude --model` / `codex -m` / `pi --model`），**不是**切 Agent 类型。Agent 类型仍由 profile / HUD 选。
   - **模型列表**：磁盘缓存 `agent-models.json`；启动后后台刷新（TTL 6h）；源：Claude 别名静态 · Codex `~/.codex/models_cache.json` · `pi --list-models`。配置页「模型」强制刷新；事件 `agent-models-updated`。
 
+## Agent kit（本机自描述）
+
+默认工作目录 `{app_data}/agent/` 在启动时同步工具包（版本戳 `.yanluo-kit-version`）：
+
+| 文件 | 用途 |
+|------|------|
+| `AGENTS.md` | 产品边界、config 路径、改设置流程 |
+| `skills/yanluo-settings.md` | 白名单字段说明 |
+| `bin/yanluo-config` | `path` / `get` / `set`（仅白名单；禁密钥） |
+
+派发时：
+
+- `compose_prompt` = 用户可见原文（voice + attachments）；写入 job / 时间线。
+- `with_kit_preamble` = 仅在 spawn CLI 时前置 kit 指针（用户气泡不展示）。
+- Claude：**始终** `--add-dir` kit（即使用户 cwd 是别的项目）。
+- Codex / Pi：靠 CLI prompt 里的绝对路径读 kit。
+
+外部改 `config.json` 后：主窗 `focus` 或派活任务 `done`/`error`/`cancelled` → `reload_app_config_from_disk` 读盘进引擎；`asr_model_dir` / `asr_model_id` 变更则尝试 `load_model`。录音中途改 VAD/chunk 只影响下一段会话。
+
+白名单：`asr_model_dir`, `asr_model_id`, `align_model_dir`, `align_enabled`, `vad_backend`, `vad_aggression`, `chunk_size_sec`, `language`, `translate_target_language`, `llm_enabled`, `llm_provider`, `llm_model`, `llm_api_base_url`。
+
 ## 非目标
 
 - 不接 OpenAI refine LLM。

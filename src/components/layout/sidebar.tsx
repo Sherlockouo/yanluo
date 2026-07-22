@@ -48,6 +48,7 @@ export function Sidebar() {
               key={item.id}
               to={PATHS[item.id]}
               aria-label={item.label}
+              data-tour={item.id === "draft" ? "rail-draft" : "rail-dispatch"}
               className={({ isActive }) =>
                 cn("rail-item", isActive && "rail-item-active")
               }
@@ -79,6 +80,7 @@ export function Sidebar() {
         <NavLink
           to="/settings"
           aria-label="设置"
+          data-tour="rail-settings"
           className={({ isActive }) =>
             cn("rail-item", isActive && "rail-item-active")
           }

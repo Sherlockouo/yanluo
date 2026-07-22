@@ -14,14 +14,9 @@
   align-items: center;
   gap: 0.5rem;
   padding: 1rem 0.5rem;
-  border-right: 1px solid var(--border);
+  border: 0;
+  /* Same paper as stage — no tint edge that reads as a hairline. */
   background: var(--background);
-}
-
-.light .app-rail,
-[data-theme="light"] .app-rail {
-  /* Whisper of warm tint so the rail reads as its own strip on the paper. */
-  background: color-mix(in oklab, var(--background) 96%, var(--foreground));
 }
 
 .app-rail-mark {
@@ -85,13 +80,12 @@
   justify-content: center;
   gap: 3px;
   width: 3.75rem;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: 11px;
   padding: 8px 4px;
   color: var(--muted);
   background: transparent;
   transition:
-    border-color 160ms ease,
     color 160ms ease,
     transform 100ms ease-out;
   cursor: pointer;
@@ -114,7 +108,6 @@
 
 .rail-item-active {
   color: var(--accent-soft-foreground);
-  border-color: color-mix(in oklab, var(--accent) 22%, transparent);
 }
 
 .rail-item-indicator {
@@ -128,27 +121,20 @@
 }
 
 /*
-  Static form/config container — hairline border + 1px inset highlight only.
+  Static form/config container — borderless; depth from surface + ambient light.
   Hover lift / press scale belong to .panel-action (clickable cards), never to
   containers that hold inputs: pressing a field must not scale the whole card.
 */
 .panel {
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-lg);
   background: var(--surface);
-  box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 5%, transparent) inset;
   padding: 1.25rem;
-  transition: border-color 160ms ease;
-}
-
-/* Static panel — alias kept for existing markup; base .panel is already static */
-.panel-static:hover {
-  border-color: var(--border);
 }
 
 .light .panel,
 [data-theme="light"] .panel {
-  /* Crisp card on clean paper — thin cool-neutral ambient, no muddy glow. */
+  /* Crisp card on clean paper — cool-neutral ambient, no hairline frame. */
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.8) inset,
     0 1px 2px rgba(30, 28, 25, 0.04),
@@ -160,18 +146,15 @@
   box-shadow: 0 1px 0 color-mix(in oklab, #fff 8%, transparent) inset;
 }
 
-/* List / case cards — flat hairline containers (no lift/press on base) */
+/* List / case cards — borderless surface (no lift/press on base) */
 .surface-card {
-  border: 1px solid color-mix(in oklab, var(--border) 85%, transparent);
+  border: 0;
   border-radius: var(--radius-lg);
   background: var(--surface);
-  box-shadow: 0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent) inset;
-  transition: border-color 160ms ease;
 }
 
 .light .surface-card,
 [data-theme="light"] .surface-card {
-  border-color: var(--border);
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.8) inset,
     0 1px 2px rgba(30, 28, 25, 0.03),
@@ -184,21 +167,18 @@
 }
 
 /*
-  Clickable card variant — hover lift + accent border + press scale are the
-  affordance that the whole card is the hit target (Wayfinding). Compose with
-  .panel / .surface-card; never put this feedback on form containers.
+  Clickable card variant — hover lift + press scale (Wayfinding).
+  Compose with .panel / .surface-card; never put this on form containers.
 */
 .panel-action {
   cursor: pointer;
   transition:
-    border-color 160ms ease,
     box-shadow 160ms ease,
     transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .panel-action:hover {
   transform: translateY(-1px);
-  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
 }
 
 .panel-action:active {
@@ -220,9 +200,7 @@
   }
 
   .rail-item {
-    transition:
-      border-color 160ms ease,
-      color 160ms ease;
+    transition: color 160ms ease;
   }
 }
 
@@ -235,8 +213,6 @@
   .app-rail {
     flex-direction: row;
     width: 100%;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
     padding: 0.5rem 0.75rem;
   }
 

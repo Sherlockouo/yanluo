@@ -117,8 +117,10 @@ export function AsrPage({
           <span className="dropzone-ic">
             <Mic size={22} aria-hidden />
           </span>
-          <span className="dropzone-t">还没有识别记录</span>
-          <span className="dropzone-fmt">按住 Fn 开始</span>
+          <span className="dropzone-t">还没有稿</span>
+          <span className="dropzone-fmt">
+            {config.hotkey_transcribe.label} 开口出稿
+          </span>
         </div>
       ) : (
         <div className="recs">

@@ -86,6 +86,23 @@ export function formatFewShotBlock(triples: LearnTriple[]): string {
   return `${FEW_SHOT_MARK_START}\n${lines.join("\n")}\n${FEW_SHOT_MARK_END}`;
 }
 
+/**
+ * Weak-model few-shot gate (see `doc/plan/refine-eval.md`; mirrors Rust
+ * `model_allows_fewshot` in `src-tauri/src/transcription/mod.rs`). The eval
+ * found few-shot value scales with model strength: deepseek-chat +8.9%,
+ * qwen3:1.7b / gemma:12b +3.5% — but `qwen2.5:1.5b` **regressed -7.5%** (plus
+ * an over-edit), so few-shot is denied only for that confirmed-weak list;
+ * unknown models default to allowed.
+ */
+export function modelAllowsFewshot(model: string): boolean {
+  const m = model.trim().toLowerCase();
+  if (!m) return false;
+  if (m.includes("qwen2.5") && (m.includes("1.5b") || m.includes("0.5b"))) {
+    return false;
+  }
+  return true;
+}
+
 /** Merge/replace few-shot section in refine prompt. */
 export function mergeFewShotIntoPrompt(basePrompt: string, triples: LearnTriple[]): string {
   const block = formatFewShotBlock(triples);

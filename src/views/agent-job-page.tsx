@@ -36,6 +36,7 @@ import {
 import { defaultConfig, agentModelsFor } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import { springUI } from "@/lib/motion";
+import { friendlyAgentError } from "@/lib/agent-errors";
 import type {
   AgentJob,
   AgentJobEvent,
@@ -735,7 +736,7 @@ export function AgentJobPage() {
         setAddMenu(false);
       }
     } catch (e) {
-      toast.danger(e instanceof Error ? e.message : String(e));
+      toast.danger(friendlyAgentError(e, job?.agent));
     } finally {
       setSending(false);
     }
@@ -899,8 +900,11 @@ export function AgentJobPage() {
                       active && "is-active",
                     )}
                   />
-                  <p className="type-meta">
-                    {active ? "运行中，输出会实时出现在这里" : "无输出"}
+                  <p className="agent-chat-empty-title">开口派活</p>
+                  <p className="agent-chat-empty-hint">
+                    {active
+                      ? "说一声或打字，回复会出现在这里"
+                      : "这次还没有对话"}
                   </p>
                 </div>
               ) : (

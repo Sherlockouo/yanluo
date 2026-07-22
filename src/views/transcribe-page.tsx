@@ -761,9 +761,9 @@ function UploadPhase({
     <div className="flex w-full flex-col">
       <ModeSwitch modeKey={source}>
         {source === "file" ? (
-          <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-5 pt-12">
             {modelBlocked ? (
-              <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 type-meta text-warning">
+              <div className="rounded-xl bg-warning/10 px-3 py-2 type-meta text-warning">
                 模型未就绪
               </div>
             ) : null}
@@ -1054,10 +1054,10 @@ function ResultPhase({
           <span className="dropzone-ic">
             <FileAudio size={22} aria-hidden />
           </span>
-          <span className="dropzone-t">还没有转写结果</span>
+          <span className="dropzone-t">还没有稿</span>
           <Button variant="primary" onPress={onNew}>
             <Plus size={16} aria-hidden />
-            开始转写
+            开始出稿
           </Button>
         </div>
       ) : (

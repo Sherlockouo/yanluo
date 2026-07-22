@@ -20,7 +20,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 20px;
+  min-height: 32px;
   margin-bottom: 10px;
 }
 .dmast-kicker {
@@ -60,7 +60,6 @@
   align-items: flex-end;
   justify-content: space-between;
   gap: 24px;
-  border-bottom: 1px solid var(--border);
   padding-bottom: 12px;
 }
 .dmast-title {
@@ -142,9 +141,14 @@
 .dmode.is-active::after {
   transform: scaleX(1);
 }
-/* mode panel enter — wrapper is display:contents (no box), so animate children */
-.dpanel > * {
+/* mode panel enter — once per mode, first show only (.is-enter toggled in draft-page) */
+.dpanel.is-enter > * {
   animation: dpanel-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* sticky masthead never replays enter motion on tab switch */
+.dmast,
+.dmast * {
+  animation: none;
 }
 /* —— keyframes: dpanel-in (enter-only, translateY + opacity) —— */
 @keyframes dpanel-in {
@@ -278,14 +282,47 @@
   overflow: hidden;
 }
 
+/* quiet search above the manuscript index (历史) — no boxed toolbar, just a
+   hairline field; icon sits inside via absolute position, no legend/label. */
+.history-search {
+  position: relative;
+  margin: 4px 0 16px;
+  padding-top: 32px;
+  display: flex;
+  align-items: flex-end;
+}
+.history-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(70%);
+  color: var(--faint);
+  pointer-events: none;
+}
+.history-search-input {
+  padding-left: 32px !important;
+  font-size: 13px;
+}
+
 /* record list (live / translate / history) */
 .recs {
   display: flex;
   flex-direction: column;
 }
+/* day-group header — mono, muted, sits above the first .rec of each local
+   calendar day; matches manuscript-index hairline language, no boxed pill. */
+.rec-day {
+  padding: 18px 4px 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.rec-day:first-child {
+  padding-top: 0;
+}
 .rec {
   padding: 22px 4px;
-  border-bottom: 1px solid var(--separator);
   transition:
     background-color 120ms ease,
     transform 100ms ease-out;
@@ -319,19 +356,17 @@
   margin-top: 9px;
 }
 
-/* expanded history row — contract frame F: the whole row (header included)
-   upgrades to one card; the inline viewer is separated by a top hairline,
-   no nested panel. */
+/* expanded history row — whole row upgrades to one card; inline viewer
+   separated by spacing, no nested panel / hairline. */
 .rec.exp {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-lg);
   padding: 18px 20px;
 }
 .rec.exp .expbody {
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid var(--border);
 }
 
 /* quiet inline link (＋新转写 / ← 转写记录 / 模型 ▾) */
@@ -370,7 +405,6 @@
 .set-subtabs {
   display: flex;
   gap: 22px;
-  border-bottom: 1px solid var(--border);
   margin-bottom: 2px;
 }
 .set-subtab {
@@ -410,7 +444,7 @@
 
 /* settings — switch row inside a card */
 .settings-switchrow {
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-md);
   background: var(--surface-secondary);
 }
@@ -426,32 +460,28 @@
   align-items: center;
   gap: 10px;
   padding: 11px 12px;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: 14px;
   background: var(--surface);
   transition:
-    border-color 0.14s,
     background-color 0.14s,
     transform 100ms ease-out;
 }
 .set-row:hover {
-  border-color: color-mix(in oklab, var(--foreground) 18%, transparent);
   background: color-mix(in oklab, var(--foreground) 2.5%, transparent);
 }
 .set-row:active {
   transform: scale(0.99);
 }
 .set-row.is-active {
-  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
   background: var(--accent-soft);
 }
 .set-row.is-active:hover {
-  border-color: color-mix(in oklab, var(--accent) 60%, transparent);
   background: var(--accent-soft);
 }
 /* expandable provider row: row + inline editor read as one card when open */
 .set-row-wrap.is-open {
-  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  border: 0;
   border-radius: 14px;
   background: var(--surface);
 }
@@ -494,9 +524,9 @@
 /* editorial dropzone */
 .dropzone {
   min-height: 200px;
-  border: 1.5px dashed var(--border);
+  border: 0;
   border-radius: 18px;
-  background: var(--surface-secondary);
+  background: var(--default);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -507,7 +537,6 @@
   padding: 32px;
   transition:
     transform 100ms ease-out,
-    border-color 140ms ease,
     background-color 140ms ease;
 }
 /* card press feedback — only when the dropzone IS the button (upload pick) */
@@ -515,7 +544,6 @@ button.dropzone:active {
   transform: scale(0.985);
 }
 .dropzone.is-drag {
-  border-color: var(--accent);
   background: var(--accent-soft);
 }
 .dropzone-ic {
@@ -525,7 +553,7 @@ button.dropzone:active {
   display: grid;
   place-items: center;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 0;
   color: var(--accent-soft-foreground);
 }
 .dropzone-t {
@@ -555,14 +583,14 @@ button.dropzone:active {
   display: grid;
   place-items: center;
   background: var(--accent-soft);
-  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  border: 0;
   color: var(--accent-soft-foreground);
 }
 .proc-prog {
   width: min(340px, 100%);
   height: 5px;
   border-radius: 9999px;
-  background: var(--field-border);
+  background: var(--default);
   overflow: hidden;
 }
 .proc-prog > div {
@@ -582,16 +610,14 @@ button.dropzone:active {
 }
 .learn-embed .rec {
   padding: 16px 18px;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius-lg);
   background: var(--surface);
   transition:
-    border-color 140ms ease,
     background-color 140ms ease,
     transform 100ms ease-out;
 }
 .learn-embed .rec:hover {
-  border-color: color-mix(in oklab, var(--foreground) 16%, transparent);
   background: color-mix(in oklab, var(--foreground) 1.5%, var(--surface));
 }
 /* stats line above the case list → mono statbar (contract .statbar) */
@@ -601,11 +627,10 @@ button.dropzone:active {
   letter-spacing: 0.01em;
 }
 
-/* 纠错示例 (few-shot) 管理面板 — hairline pairs + remove */
+/* 纠错示例 (few-shot) 管理面板 — spacing pairs + remove */
 .fewshot {
   margin-top: 20px;
   padding-top: 16px;
-  border-top: 1px solid var(--separator);
 }
 .fewshot-head {
   display: flex;
@@ -623,10 +648,6 @@ button.dropzone:active {
   align-items: flex-start;
   gap: 10px;
   padding: 10px 4px;
-  border-bottom: 1px solid var(--separator);
-}
-.fewshot-row:last-child {
-  border-bottom: 0;
 }
 .fewshot-pair {
   min-width: 0;
@@ -692,9 +713,7 @@ button.dropzone:active {
   }
 
   .set-row {
-    transition:
-      border-color 0.14s,
-      background-color 0.14s;
+    transition: background-color 0.14s;
   }
 
   .setnav-item {
@@ -704,19 +723,15 @@ button.dropzone:active {
   }
 
   .dropzone {
-    transition:
-      border-color 140ms ease,
-      background-color 140ms ease;
+    transition: background-color 140ms ease;
   }
 
   .learn-embed .rec {
-    transition:
-      border-color 140ms ease,
-      background-color 140ms ease;
+    transition: background-color 140ms ease;
   }
 
   /* no slide/transform — panel content appears instantly, underline snaps on */
-  .dpanel > * {
+  .dpanel.is-enter > * {
     animation: none;
   }
 

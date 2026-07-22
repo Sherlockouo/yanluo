@@ -30,6 +30,7 @@ pub(crate) fn spawn_audio_level_pump(app: AppHandle, recording: Arc<AtomicBool>)
             }
             std::thread::sleep(Duration::from_millis(16));
         }
+        app.state::<AsrEngine>().inner().live_meter.clear();
         if let Ok(mut slot) = floating_status_slot(&app).lock() {
             slot.rms = 0.0;
         }
@@ -82,6 +83,40 @@ pub(crate) fn floating_status_slot(app: &AppHandle) -> Arc<Mutex<FloatingStatus>
     app.state::<Arc<Mutex<FloatingStatus>>>().inner().clone()
 }
 
+/// Called from HUD after exit — usually a no-op; native fade owns hide timing.
+#[tauri::command]
+pub(crate) fn finish_floating_hide(app: AppHandle) {
+    finish_floating_hide_inner(&app);
+}
+
+fn finish_floating_hide_inner(app: &AppHandle) {
+    if floating_status_slot(app)
+        .lock()
+        .map(|s| s.visible)
+        .unwrap_or(false)
+    {
+        return;
+    }
+    // Cancel in-flight fade completion (already dismissing).
+    let _ = crate::platform::bump_floating_fade_gen();
+    let app = app.clone();
+    let _ = app.clone().run_on_main_thread(move || {
+        if floating_status_slot(&app)
+            .lock()
+            .map(|s| s.visible)
+            .unwrap_or(false)
+        {
+            return;
+        }
+        if let Some(window) = app.get_webview_window("floating") {
+            let _ = window.hide();
+            eprintln!("[floating] hide()");
+        }
+        sync_floating_lang_chip(&app, false);
+        restore_previous_frontmost_app(true);
+    });
+}
+
 /// Remember the app that had focus before HUD / paste, so we can hand it back
 /// and so Cmd+V lands in the right place.
 pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
@@ -95,6 +130,8 @@ pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
     let _ = app.clone().run_on_main_thread(move || {
         if let Some(window) = app.get_webview_window("floating") {
             if visible {
+                // Invalidate any dismiss fade so re-summon isn't stuck at alpha 0.
+                let _ = crate::platform::bump_floating_fade_gen();
                 // Do NOT toggle Accessory/Regular here — that steals focus and
                 // makes Fn/cancel "jump back" to 言落. HUD was created
                 // under Accessory once at launch so FullScreenAuxiliary sticks.
@@ -128,25 +165,10 @@ pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
                 sync_floating_lang_chip(&app, show_lang);
             } else {
                 persist_floating_hud_position(&window);
-                sync_floating_lang_chip(&app, false);
-                let app_hide = app.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(Duration::from_millis(240));
-                    let _ = app_hide.clone().run_on_main_thread(move || {
-                        if let Some(window) = app_hide.get_webview_window("floating") {
-                            if let Ok(slot) = floating_status_slot(&app_hide).lock() {
-                                if slot.visible {
-                                    return;
-                                }
-                            }
-                            let _ = window.hide();
-                            eprintln!("[floating] hide()");
-                            sync_floating_lang_chip(&app_hide, false);
-                            // Hand focus back if we somehow became active.
-                            restore_previous_frontmost_app(true);
-                        }
-                    });
-                });
+                // Fade native window alpha in lockstep with FE exit (220ms),
+                // then orderOut — do not wait for FE onExitComplete IPC lag.
+                let gen = crate::platform::bump_floating_fade_gen();
+                crate::platform::fade_out_floating_hud(&app, gen);
             }
         } else {
             eprintln!("[floating] window missing when toggling visible={visible}");

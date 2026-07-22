@@ -17,11 +17,11 @@ import type { LlmProvider } from "@/types";
 const CUSTOM = "__custom__";
 
 const boxedTriggerCls = cn(
-  "h-7 gap-1 rounded-lg border border-border/80 bg-surface px-2.5",
+  "h-7 gap-1 rounded-lg bg-surface px-2.5",
   "shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)_inset]",
   "text-[12px] font-medium text-foreground items-center",
-  "transition-[border-color,background-color] duration-150",
-  "hover:border-foreground/20 hover:bg-surface-secondary/60",
+  "transition-[background-color] duration-150",
+  "hover:bg-surface-secondary/60",
 );
 
 /*

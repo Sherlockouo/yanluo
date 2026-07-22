@@ -248,13 +248,12 @@
   );
 }
 
-/* Job list — manuscript-index language: mono-meta rows on hairlines */
+/* Job list — manuscript-index language: mono-meta rows, spacing not hairlines */
 .agent-job-row {
   display: flex;
   align-items: flex-start;
   gap: 12px;
   padding: 14px 10px;
-  border-bottom: 1px solid var(--separator);
   transition:
     background 140ms ease,
     transform 100ms ease-out;
@@ -361,7 +360,6 @@
 
 .agent-chat {
   border-radius: var(--radius-lg);
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 55%, transparent);
 }
 
 .agent-chat-composer-wrap {
@@ -415,7 +413,7 @@
   padding: 0.65rem 0.95rem;
   border-radius: var(--radius-lg);
   border-bottom-right-radius: 6px;
-  background: var(--surface-secondary);
+  background: color-mix(in oklab, var(--foreground) 5%, var(--surface));
   color: var(--foreground);
 }
 
@@ -441,8 +439,8 @@
   max-width: 100%;
   padding: 0.7rem 0.85rem;
   border-radius: var(--radius-lg);
-  border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
-  background: var(--surface-secondary);
+  border: 0;
+  background: color-mix(in oklab, var(--foreground) 4%, var(--surface));
   transition: transform 100ms ease-out;
 }
 
@@ -495,7 +493,7 @@
 .agent-tool-card-name {
   font-size: 0.8125rem;
   font-weight: 600;
-  color: color-mix(in oklab, var(--foreground) 82%, transparent);
+  color: var(--foreground);
 }
 
 .agent-tool-card-body {
@@ -514,7 +512,7 @@
 .agent-tool-result {
   min-width: 0;
   font-size: 0.8125rem !important;
-  opacity: 0.88;
+  color: var(--foreground);
 }
 
 /* ——— Markdown: bright, airy, uncluttered ——— */
@@ -523,7 +521,7 @@
   overflow-x: auto;
   font-size: 0.9375rem;
   line-height: 1.65;
-  color: color-mix(in oklab, var(--foreground) 92%, transparent);
+  color: var(--foreground);
 }
 
 .agent-md :where(p, ul, ol) {
@@ -575,13 +573,14 @@
 
 .agent-md :where(a) {
   color: var(--link, var(--accent));
-  text-decoration: none;
-  border-bottom: 1px solid color-mix(in oklab, var(--link, var(--accent)) 35%, transparent);
-  transition: border-color 120ms ease;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--link, var(--accent)) 35%, transparent);
+  text-underline-offset: 2px;
+  transition: text-decoration-color 120ms ease;
 }
 
 .agent-md :where(a:hover) {
-  border-bottom-color: var(--link, var(--accent));
+  text-decoration-color: var(--link, var(--accent));
 }
 
 /* Inline code — soft pill, no heavy chrome */
@@ -620,7 +619,6 @@
 }
 
 .agent-md :where(th, td) {
-  border-bottom: 1px solid color-mix(in oklab, var(--separator, var(--border)) 90%, transparent);
   padding: 0.45em 0.55em;
   text-align: left;
   vertical-align: top;
@@ -629,25 +627,27 @@
 .agent-md :where(th) {
   font-weight: 600;
   color: var(--muted);
-  border-bottom-color: color-mix(in oklab, var(--border) 100%, transparent);
 }
 
 .agent-md :where(blockquote) {
   margin: 0.65em 0;
-  padding: 0.15em 0 0.15em 0.85em;
-  border-left: 2px solid color-mix(in oklab, var(--muted) 35%, transparent);
-  color: var(--muted);
+  padding: 0.45em 0.85em;
+  border-left: 0;
+  border-radius: var(--radius-sm);
+  background: var(--default);
+  color: color-mix(in oklab, var(--foreground) 78%, var(--muted));
 }
 
 .agent-md :where(hr) {
   margin: 1em 0;
   border: 0;
-  border-top: 1px solid color-mix(in oklab, var(--separator, var(--border)) 80%, transparent);
+  height: 1px;
+  background: color-mix(in oklab, var(--muted) 28%, transparent);
 }
 
 .agent-md :where(em) {
   font-style: italic;
-  color: color-mix(in oklab, var(--foreground) 72%, transparent);
+  color: color-mix(in oklab, var(--foreground) 88%, var(--muted));
 }
 
 .agent-attach-preview .agent-md {
@@ -665,29 +665,74 @@
 .agent-attach-preview-card {
   padding: 0.7rem 0.85rem;
   border-radius: var(--radius-lg);
-  border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
-  background: var(--surface);
+  border: 0;
+  background: color-mix(in oklab, var(--foreground) 4%, var(--surface));
 }
 
-/* Continue composer (Cursor-like) — hairline border, no drop shadow */
+/* Unified composer well — one surface, controls live inside (no tray / divider). */
 .agent-composer {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 0;
-  border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
+  border: 0;
   border-radius: var(--radius-lg);
-  background: var(--surface);
-  transition: border-color 140ms ease;
+  background: var(--surface-secondary);
+  box-shadow: none;
+  padding: 4px 4px 6px;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
 }
 
 .agent-composer:focus-within {
-  border-color: var(--field-border-focus);
+  background: var(--surface);
+  box-shadow: none;
 }
 
 .agent-composer-field {
   width: 100%;
   gap: 0;
+}
+
+.agent-composer-field .textarea,
+.agent-composer-input {
+  width: 100%;
+  min-height: 2.75rem;
+  margin: 0;
+  padding: 10px 12px 4px;
+  border: 0 !important;
+  border-width: 0 !important;
+  border-radius: 10px;
+  resize: none;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  outline: none !important;
+  color: var(--foreground);
+}
+
+.agent-composer-field .textarea:hover,
+.agent-composer-field .textarea:focus,
+.agent-composer-field .textarea[data-hovered="true"],
+.agent-composer-field .textarea[data-focused="true"],
+.agent-composer-field .textarea[data-focus-visible="true"],
+.agent-composer-input:hover,
+.agent-composer-input:focus,
+.agent-composer-input[data-hovered="true"],
+.agent-composer-input[data-focused="true"],
+.agent-composer-input[data-focus-visible="true"] {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.agent-composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 4px;
+  border: 0;
+  background: transparent;
 }
 
 /* Attachment chips — quiet mono tokens, not boxed pills */
@@ -737,39 +782,6 @@
 .agent-attach-chip-x:hover {
   background: color-mix(in oklab, var(--foreground) 8%, transparent);
   color: var(--foreground);
-}
-
-.agent-composer-input {
-  width: 100%;
-  min-height: 2.75rem;
-  margin: 0;
-  padding: 14px 12px 8px;
-  border: 0;
-  resize: none;
-  background: transparent;
-  box-shadow: none;
-  font-size: 0.875rem;
-  line-height: 1.4;
-  outline: none;
-  color: var(--foreground);
-  border-radius: 0;
-}
-
-.agent-composer-input:hover,
-.agent-composer-input:focus,
-.agent-composer-input[data-hovered="true"],
-.agent-composer-input[data-focused="true"],
-.agent-composer-input[data-focus-visible="true"] {
-  border: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.agent-composer-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px 8px;
 }
 
 .agent-composer-icon {
@@ -881,7 +893,6 @@
   letter-spacing: 0.01em;
   line-height: 1.3;
   color: var(--muted);
-  opacity: 0.75;
 }
 
 .agent-chat-row > .agent-chat-ts {
@@ -907,9 +918,23 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.6rem;
+  gap: 0.75rem;
   padding: 3rem 1rem;
   text-align: center;
+}
+
+.agent-chat-empty-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: var(--foreground);
+}
+
+.agent-chat-empty-hint {
+  max-width: 18rem;
+  font-size: var(--text-ui);
+  line-height: 1.5;
+  color: var(--muted);
 }
 
 /* Sidebar scroll — same scroll-edge fade as .agent-chat-timeline */

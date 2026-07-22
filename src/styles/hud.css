@@ -890,6 +890,44 @@ html.light[data-floating="1"] .hud-fn-badge {
   color: var(--muted);
 }
 
+/* Post-paste undo affordance — clipboard-restore, not a real editor undo
+   (see PendingPasteUndo in state/mod.rs). Opacity-only entrance/exit. */
+.hud-undo-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 0 0 0 6px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.94);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.hud-undo-btn:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.hud-undo-btn:active {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+html.light[data-floating="1"] .hud-undo-btn {
+  background: rgba(0, 0, 0, 0.08);
+  color: rgba(16, 16, 18, 0.92);
+}
+
+html.light[data-floating="1"] .hud-undo-btn:hover {
+  background: rgba(0, 0, 0, 0.14);
+}
+
 .hud-colon {
   flex-shrink: 0;
   color: rgba(255, 255, 255, 0.92);

@@ -108,6 +108,23 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
 
 const BUILTIN_PROVIDER_IDS = new Set(LLM_PROVIDER_PRESETS.map((p) => p.id));
 
+/**
+ * Curated refine-model recommendations (see `doc/plan/refine-eval.md`):
+ * deepseek-chat scored best overall (+8.9%), qwen3:1.7b is the best small
+ * local model that still clears the few-shot quality bar (`modelAllowsFewshot`
+ * in `learn-cases.ts`). Sourced from the preset lists above, not hardcoded.
+ */
+export const RECOMMENDED_REFINE_MODELS: { scope: "本地" | "云端"; model: string }[] = [
+  {
+    scope: "本地",
+    model: LLM_PROVIDER_PRESETS.find((p) => p.id === "ollama")?.models[0] ?? "qwen3:1.7b",
+  },
+  {
+    scope: "云端",
+    model: LLM_PROVIDER_PRESETS.find((p) => p.id === "deepseek")?.models[0] ?? "deepseek-chat",
+  },
+];
+
 /** A provider id that isn't a built-in preset = user-added custom provider. */
 export function isCustomProvider(provider: LlmProvider): boolean {
   return !BUILTIN_PROVIDER_IDS.has(provider);
@@ -571,6 +588,7 @@ export function stateLabel(state: RecState) {
   if (state === "processing") return "转写中";
   if (state === "refining") return "处理中";
   if (state === "editing") return "编辑中";
+  if (state === "pasted" || state === "pasted-undo") return "已粘贴";
   return "就绪";
 }
 

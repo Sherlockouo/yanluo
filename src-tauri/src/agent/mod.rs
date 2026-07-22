@@ -45,6 +45,25 @@ impl AgentKind {
             _ => Self::Claude,
         }
     }
+
+    /// Human-facing display name for error copy ("Claude" / "Codex" / "Pi").
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Claude => "Claude",
+            Self::Codex => "Codex",
+            Self::Pi => "Pi",
+        }
+    }
+}
+
+/// Display name for a lowercase CLI bin name ("claude" / "codex" / "pi").
+/// Used where only the resolved-bin string (not `AgentKind`) is in scope.
+fn agent_bin_label(bin_name: &str) -> &'static str {
+    match bin_name {
+        "codex" => "Codex",
+        "pi" => "Pi",
+        _ => "Claude",
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -786,16 +805,20 @@ fn interrupt_running_job(runtime: &AgentRuntime, job_id: &str) {
 }
 
 fn resolve_agent_bin(configured: &str, fallback_name: &str) -> Result<PathBuf, String> {
+    let label = agent_bin_label(fallback_name);
     let configured = configured.trim();
     if !configured.is_empty() {
         let p = PathBuf::from(configured);
         if p.is_file() || p.exists() {
             return Ok(p);
         }
-        return Err(format!("路径不存在: {configured}"));
+        return Err(format!(
+            "{label} CLI 路径不存在：{configured}。请在设置 → 派活 里确认路径。"
+        ));
     }
-    resolve_bin(fallback_name)
-        .ok_or_else(|| format!("找不到 {fallback_name} CLI（which / Homebrew）"))
+    resolve_bin(fallback_name).ok_or_else(|| {
+        format!("未找到 {label} CLI。安装后在设置 → 派活 里确认路径。")
+    })
 }
 
 /// Walk up from `path` looking for a `.git` dir/file (worktrees included).
@@ -959,10 +982,16 @@ fn spawn_agent_process(
         }
     };
 
-    // Claude: grant tool access to cwd + attached dirs / file parents.
+    // Claude: grant tool access to cwd + kit + attached dirs / file parents.
     // `--add-dir` is variadic — without `--` it swallows the prompt as another dir.
     if matches!(agent, AgentKind::Claude) {
         let mut dirs: Vec<String> = vec![cwd.to_string_lossy().to_string()];
+        if let Ok(kit) = crate::agent_kit::sync_agent_kit() {
+            let s = kit.to_string_lossy().to_string();
+            if !s.is_empty() && !dirs.iter().any(|d| d == &s) {
+                dirs.push(s);
+            }
+        }
         for p in attachments {
             let path = Path::new(p);
             let dir = if path.is_dir() {
@@ -1062,8 +1091,12 @@ fn spawn_agent_process(
         }
     }
 
-    cmd.spawn()
-        .map_err(|e| format!("启动 {} 失败: {e}", bin.display()))
+    cmd.spawn().map_err(|e| {
+        format!(
+            "启动 {} CLI 失败（{e}）。请在设置 → 派活 里确认路径与执行权限。",
+            agent.label()
+        )
+    })
 }
 
 fn compose_prompt(voice: &str, attachments: &[String]) -> String {
@@ -1084,18 +1117,27 @@ fn compose_prompt(voice: &str, attachments: &[String]) -> String {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
         if path.is_dir() {
-            // Pi `@` CLI cannot ingest dirs (EISDIR). Point the model at the path
-            // for tool-based exploration instead of file-inline.
             out.push_str(&format!(
                 "- directory: {p}  (list/read files under this path; do not open as a single file)\n"
             ));
         } else if path.is_file() && is_image_ext(&ext) {
-            // Claude: Read tool; Codex also gets -i flags in spawn.
             out.push_str(&format!("- image: {p}\n"));
         } else {
             out.push_str(&format!("- {p}\n"));
         }
     }
+    out
+}
+
+/// Kit self-knowledge for the CLI only — never stored in job.prompt / user timeline.
+fn with_kit_preamble(user_prompt: &str, kit_path: &Path) -> String {
+    let kit = kit_path.to_string_lossy();
+    let mut out = String::new();
+    out.push_str("[言落] 改本机设置前先读 AGENTS.md 与 skills/yanluo-settings.md；");
+    out.push_str("用 bin/yanluo-config set …（白名单）。kit 目录: ");
+    out.push_str(&kit);
+    out.push_str("\n---\n");
+    out.push_str(user_prompt.trim());
     out
 }
 
@@ -1217,9 +1259,13 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
         .unwrap_or(prompt)
     };
 
+    let kit = crate::agent_kit::sync_agent_kit()
+        .unwrap_or_else(|_| crate::agent_kit::agent_kit_dir());
+    let cli_prompt = with_kit_preamble(&run_prompt, &kit);
+
     let mut child = match spawn_agent_process(
         &agent,
-        &run_prompt,
+        &cli_prompt,
         &cwd,
         &attachments,
         &configured_bin,
@@ -1545,10 +1591,10 @@ pub(crate) fn dispatch_agent(
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty())
         .collect();
-    let prompt = compose_prompt(&prompt, &attachments);
-    if prompt.trim().is_empty() {
+    if prompt.trim().is_empty() && attachments.is_empty() {
         return Err("prompt 为空".into());
     }
+    let prompt = compose_prompt(&prompt, &attachments);
     let mut cwd = cwd.trim().to_string();
     {
         let mut cfg = engine
@@ -1651,10 +1697,10 @@ pub(crate) fn continue_agent_job(
         .map(|p| p.trim().to_string())
         .filter(|p| !p.is_empty())
         .collect();
-    let prompt = compose_prompt(&prompt, &attachments);
-    if prompt.trim().is_empty() {
+    if prompt.trim().is_empty() && attachments.is_empty() {
         return Err("prompt 为空".into());
     }
+    let prompt = compose_prompt(&prompt, &attachments);
 
     let (cwd, agent, session_id, was_active) = {
         let jobs = runtime.jobs.lock().map_err(|e| e.to_string())?;

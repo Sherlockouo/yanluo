@@ -58,6 +58,7 @@ import {
 } from "@/components/shared/page-shell";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/app-context";
+import { requestStartTour } from "@/components/spotlight-tour";
 import {
   activateLlmProviderPatch,
   agentModelsFor,
@@ -71,6 +72,7 @@ import {
   asrLanguageOptions,
   addableLanguageCatalog,
   QWEN_ASR_MODELS,
+  RECOMMENDED_REFINE_MODELS,
   resolveLlmCreds,
   seedLlmCredentials,
 } from "@/lib/constants";
@@ -519,6 +521,13 @@ export function SettingsPage() {
                 key={item.id}
                 type="button"
                 aria-current={active ? "true" : undefined}
+                data-tour={
+                  item.id === "asr"
+                    ? "settings-asr"
+                    : item.id === "system"
+                      ? "settings-hotkeys"
+                      : undefined
+                }
                 className={cn("setnav-item", active && "setnav-item-active")}
                 onClick={() => selectTab(item.id)}
               >
@@ -1090,6 +1099,22 @@ function AsrProviderPanel() {
   );
 }
 
+/** 场景 id — maps to a 灵敏度 value; "custom" = current value doesn't match any preset. */
+type VadScene = "dictate" | "meeting" | "interview" | "custom";
+
+const VAD_SCENE_AGGRESSION: Record<Exclude<VadScene, "custom">, number> = {
+  dictate: 1,
+  meeting: 2,
+  interview: 3,
+};
+
+function vadSceneFor(aggression: number): VadScene {
+  if (aggression <= 1) return "dictate";
+  if (aggression === 2) return "meeting";
+  if (aggression >= 3) return "interview";
+  return "custom";
+}
+
 function VadAdvancedFields({
   config,
   updateConfig,
@@ -1097,8 +1122,31 @@ function VadAdvancedFields({
   config: ReturnType<typeof useApp>["config"];
   updateConfig: ReturnType<typeof useApp>["updateConfig"];
 }) {
+  const aggression = config.vad_aggression ?? 2;
+  const scene = vadSceneFor(aggression);
+
   return (
     <div className="flex flex-col gap-3 pt-1">
+      <div className="flex flex-col gap-1.5">
+        <span className="type-meta">场景</span>
+        <QSwitch
+          ariaLabel="VAD 场景预设"
+          value={scene}
+          onChange={(id) => {
+            if (id === "custom") return;
+            updateConfig("vad_aggression", VAD_SCENE_AGGRESSION[id]);
+          }}
+          options={[
+            { id: "dictate" as const, label: "口述" },
+            { id: "meeting" as const, label: "会议" },
+            { id: "interview" as const, label: "采访" },
+          ]}
+        />
+        {aggression >= 3 ? (
+          <p className="type-meta">切得太碎可调低灵敏度</p>
+        ) : null}
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <TextField
           fullWidth
@@ -1692,7 +1740,7 @@ function ProviderEditor({
             <button
               key={m}
               type="button"
-              className="rounded-md border border-border bg-surface-secondary px-2 py-1 font-mono text-[11px] text-muted transition-[color,border-color,background-color,transform] duration-100 ease-out hover:border-foreground/20 hover:text-foreground active:scale-[0.96] motion-reduce:active:transform-none"
+              className="rounded-md bg-surface-secondary px-2 py-1 font-mono text-[11px] text-muted transition-[color,background-color,transform] duration-100 ease-out hover:text-foreground active:scale-[0.96] motion-reduce:active:transform-none"
               onClick={() => onPatch({ model: m })}
             >
               {m}
@@ -1700,6 +1748,23 @@ function ProviderEditor({
           ))}
         </div>
       ) : null}
+
+      <div className="-mt-1 flex flex-col gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="type-meta">推荐</span>
+          {RECOMMENDED_REFINE_MODELS.map((rec) => (
+            <button
+              key={rec.model}
+              type="button"
+              className="rounded-md bg-surface-secondary px-2 py-1 font-mono text-[11px] text-muted transition-[color,background-color,transform] duration-100 ease-out hover:text-foreground active:scale-[0.96] motion-reduce:active:transform-none"
+              onClick={() => onPatch({ model: rec.model })}
+            >
+              {rec.scope} {rec.model}
+            </button>
+          ))}
+        </div>
+        <p className="type-meta">小模型勿开 few-shot（已自动）</p>
+      </div>
 
       <div className="form-actions">
         <div className="form-actions-secondary flex gap-2">
@@ -1814,7 +1879,7 @@ function GeneralPanel() {
               {config.extra_languages.map((e) => (
                 <span
                   key={e.id}
-                  className="inline-flex items-center gap-1 rounded-md border border-border bg-default/40 px-2 py-0.5 font-mono text-[11px] text-foreground"
+                  className="inline-flex items-center gap-1 rounded-md bg-default/40 px-2 py-0.5 font-mono text-[11px] text-foreground"
                 >
                   {e.label}
                   <button
@@ -1906,6 +1971,18 @@ function GeneralPanel() {
               { id: "light" as const, label: "浅色" },
             ]}
           />
+        </div>
+      </div>
+
+      <div className="set-row-line">
+        <div className="set-row-line-lab">
+          产品引导
+          <small>再走一遍出稿 / 派活 / 设置要点</small>
+        </div>
+        <div className="set-row-line-ctl">
+          <Button size="sm" variant="secondary" onPress={() => requestStartTour()}>
+            再看一遍引导
+          </Button>
         </div>
       </div>
     </div>
@@ -2037,7 +2114,7 @@ function HotkeysPanel() {
                   <Button
                     size="sm"
                     variant="secondary"
-                    className="inline-flex h-auto min-h-0 items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-foreground shadow-none transition hover:border-foreground/25 hover:bg-default data-[hovered=true]:border-foreground/25 data-[hovered=true]:bg-default"
+                    className="inline-flex h-auto min-h-0 items-center gap-1.5 rounded-lg bg-surface px-2.5 py-1.5 text-foreground shadow-none transition hover:bg-default data-[hovered=true]:bg-default"
                     aria-label={`修改快捷键：${row.title}`}
                     onPress={() => void startCapture(row.slot)}
                   >
@@ -2144,10 +2221,10 @@ function PermissionsPanel() {
               <div key={item.kind} className="perm-row">
                 <div
                   className={cn(
-                    "grid h-10 w-10 shrink-0 place-items-center rounded-xl border",
+                    "grid h-10 w-10 shrink-0 place-items-center rounded-xl",
                     granted
-                      ? "border-foreground/10 bg-foreground/[0.06] text-foreground"
-                      : "border-border bg-default/40 text-muted",
+                      ? "bg-foreground/[0.06] text-foreground"
+                      : "bg-default/40 text-muted",
                   )}
                 >
                   <Icon size={16} />
@@ -2191,7 +2268,7 @@ function PermissionsPanel() {
         ) : null}
       </SectionCard>
 
-      <div className="rounded-2xl border border-border bg-surface px-3 py-1">
+      <div className="rounded-2xl bg-surface px-3 py-1">
         <CollapseTrigger
           open={helpOpen}
           onToggle={() => setHelpOpen((v) => !v)}
@@ -2199,13 +2276,13 @@ function PermissionsPanel() {
           说明
         </CollapseTrigger>
         <SoftCollapse open={helpOpen}>
-          <div className="border-t border-border px-1 pb-3 pt-2">
+          <div className="px-1 pb-3 pt-2">
             <ul className="flex flex-col gap-2 type-meta">
               <li>· 签名安装包权限随 Bundle ID 保留</li>
               <li>· 辅助功能 / 输入监视按可执行路径</li>
             </ul>
             {exePath ? (
-              <p className="mt-3 break-all rounded-xl border border-border bg-default/40 px-3 py-2 font-mono type-micro !normal-case !tracking-normal text-foreground">
+              <p className="mt-3 break-all rounded-xl bg-default/40 px-3 py-2 font-mono type-micro !normal-case !tracking-normal text-foreground">
                 {exePath}
               </p>
             ) : null}

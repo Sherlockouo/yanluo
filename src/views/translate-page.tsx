@@ -127,8 +127,10 @@ export function TranslatePage({
           <span className="dropzone-ic">
             <Languages size={22} aria-hidden />
           </span>
-          <span className="dropzone-t">还没有翻译</span>
-          <span className="dropzone-fmt">{config.hotkey_translate.label} 开始</span>
+          <span className="dropzone-t">还没有翻译稿</span>
+          <span className="dropzone-fmt">
+            {config.hotkey_translate.label} 开口翻译
+          </span>
         </div>
       ) : (
         <div className="recs">

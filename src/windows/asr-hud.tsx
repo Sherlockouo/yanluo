@@ -32,10 +32,11 @@ import type {
   TranscriptionResult,
 } from "@/types";
 import { defaultConfig } from "@/lib/constants";
+import { friendlyAgentError } from "@/lib/agent-errors";
 import { useSmoothedRms } from "@/hooks/useAudioBars";
 import { AudioBars } from "@/components/ui/audio-bars";
 import { cn } from "@/lib/cn";
-import { duration, easeOut, springBounce, springUI } from "@/lib/motion";
+import { duration, easeOut, springBounce } from "@/lib/motion";
 
 const CAPSULE_W = 420;
 const CAPSULE_H = 56;
@@ -79,6 +80,11 @@ export function AsrHud() {
     visible: false,
     state: "idle",
     text: "",
+    rms: 0,
+    bands: [],
+  });
+  /** Meter isolated from floating-status/keepMeter — VAD commit must not freeze bars. */
+  const [meter, setMeter] = useState<{ rms: number; bands: number[] }>({
     rms: 0,
     bands: [],
   });
@@ -209,6 +215,21 @@ export function AsrHud() {
     setError(null);
   }, []);
 
+  // Best-effort, like cancelTranscript — the affordance is already gone if
+  // this errors (undo window expired / superseded by a new recording).
+  const undoingPasteRef = useRef(false);
+  const undoLastPaste = useCallback(async () => {
+    if (undoingPasteRef.current) return;
+    undoingPasteRef.current = true;
+    try {
+      await invoke("undo_last_paste");
+    } catch {
+      /* ignore */
+    } finally {
+      undoingPasteRef.current = false;
+    }
+  }, []);
+
   useEffect(() => {
     if (!isAgent) setPickerMode("");
   }, [isAgent]);
@@ -294,7 +315,7 @@ export function AsrHud() {
       setAttachments([]);
       setPickerMode("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyAgentError(e, agentRef.current));
     } finally {
       setBusy(false);
       dispatchingRef.current = false;
@@ -455,6 +476,7 @@ export function AsrHud() {
         if (event.payload.cwd != null) setCwd(event.payload.cwd || "");
         if (!event.payload.visible || event.payload.state === "idle") {
           resetAgentSessionUi();
+          setMeter({ rms: 0, bands: [] });
           void invoke("set_agent_picker", { mode: "", itemCount: 1 }).catch(
             () => {},
           );
@@ -471,10 +493,8 @@ export function AsrHud() {
         const raw = event.payload;
         if (typeof raw === "number") {
           if (!Number.isFinite(raw)) return;
-          setPayload((prev) => ({
-            ...prev,
-            rms: Math.max(0, Math.min(1, raw)),
-          }));
+          const rms = Math.max(0, Math.min(1, raw));
+          setMeter((prev) => ({ ...prev, rms }));
           return;
         }
         const rms = Number(raw?.rms);
@@ -482,11 +502,10 @@ export function AsrHud() {
         const bands = Array.isArray(raw.bands)
           ? raw.bands.map((v) => Math.max(0, Math.min(1, Number(v) || 0)))
           : [];
-        setPayload((prev) => ({
-          ...prev,
+        setMeter({
           rms: Math.max(0, Math.min(1, rms)),
           bands,
-        }));
+        });
       }),
     );
     add(
@@ -742,7 +761,9 @@ export function AsrHud() {
     (payload.state === "recording" ||
       payload.state === "processing" ||
       payload.state === "refining" ||
-      payload.state === "editing");
+      payload.state === "editing" ||
+      payload.state === "pasted" ||
+      payload.state === "pasted-undo");
 
   return (
     <div
@@ -762,13 +783,27 @@ export function AsrHud() {
               isAgent && "px-0",
             )}
             initial={{ opacity: 0, scale: 0.35 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.96, y: 6 }}
-            transition={springBounce}
+            animate={{
+              opacity: 1,
+              scale: 1,
+              transition: springBounce,
+            }}
+            exit={{
+              // Scale-only — native NSWindow alpha fades opacity in lockstep
+              // (Rust fade_out_floating_hud @ duration.slow). Avoid double-fade.
+              opacity: 1,
+              scale: 0.35,
+              transition: {
+                type: "tween",
+                duration: duration.slow,
+                ease: easeOut,
+              },
+            }}
           >
           {isAgent ? (
             <AgentCapsule
               payload={payload}
+              meter={meter}
               agentLabel={agentLabel}
               cwd={cwd}
               pickerMode={pickerMode}
@@ -794,6 +829,7 @@ export function AsrHud() {
           ) : (
             <FloatingCapsule
               payload={payload}
+              meter={meter}
               editText={editText}
               editing={confirmEditing}
               busy={busy}
@@ -802,6 +838,7 @@ export function AsrHud() {
               fnLabel={fnLabel}
               onEditChange={setEditText}
               onEditKey={onEditKey}
+              onUndoPaste={() => void undoLastPaste()}
             />
           )}
           </motion.div>
@@ -813,6 +850,7 @@ export function AsrHud() {
 
 function AgentCapsule({
   payload,
+  meter,
   agentLabel,
   cwd,
   pickerMode,
@@ -834,6 +872,7 @@ function AgentCapsule({
   onRemoveAttach,
 }: {
   payload: FloatingPayload;
+  meter: { rms: number; bands: number[] };
   agentLabel: string;
   cwd: string;
   pickerMode: "" | "agent" | "cwd";
@@ -856,7 +895,7 @@ function AgentCapsule({
 }) {
   const recording = payload.state === "recording";
   const processing = payload.state === "processing";
-  const smoothed = useSmoothedRms(payload.rms, recording);
+  const smoothed = useSmoothedRms(meter.rms, recording);
 
   const committed = (payload.committed ?? "").trim();
   const active = (payload.active ?? "").trim();
@@ -917,13 +956,7 @@ function AgentCapsule({
         {processing ? (
           <span className="hud-spinner" aria-label="处理中" />
         ) : recording ? (
-          <motion.div
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ ...springUI, delay: 0.12 }}
-          >
-            <AudioBars rms={smoothed} bands={payload.bands} active />
-          </motion.div>
+          <AudioBars rms={smoothed} bands={meter.bands} active />
         ) : null}
 
         {attachments.length > 0 ? (
@@ -1055,6 +1088,7 @@ function AgentCapsule({
 
 function FloatingCapsule({
   payload,
+  meter,
   editText,
   editing,
   busy,
@@ -1063,8 +1097,10 @@ function FloatingCapsule({
   fnLabel,
   onEditChange,
   onEditKey,
+  onUndoPaste,
 }: {
   payload: FloatingPayload;
+  meter: { rms: number; bands: number[] };
   editText: string;
   editing: boolean;
   busy: boolean;
@@ -1073,13 +1109,15 @@ function FloatingCapsule({
   fnLabel?: string;
   onEditChange: (v: string) => void;
   onEditKey: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  onUndoPaste?: () => void;
 }) {
   const refining = payload.state === "refining";
   const processing = payload.state === "processing";
   const recording = payload.state === "recording";
+  const justPasted = payload.state === "pasted";
   const switching = Boolean(payload.switching);
   const translating = payload.intention === "translate";
-  const smoothed = useSmoothedRms(payload.rms, recording);
+  const smoothed = useSmoothedRms(meter.rms, recording);
   const lastTextRef = useRef("");
   const textViewportRef = useRef<HTMLDivElement>(null);
   const sizedRef = useRef(false);
@@ -1144,18 +1182,12 @@ function FloatingCapsule({
         ) : busy ? (
           <span className="hud-spinner" aria-label="确认中" />
         ) : recording ? (
-          <motion.div
-            initial={{ opacity: 0, x: -8 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ ...springUI, delay: 0.12 }}
-          >
             <AudioBars
               rms={smoothed}
-              bands={payload.bands}
+              bands={meter.bands}
               active
-              className="hud-brand-bars"
+              className="hud-live-bars"
             />
-          </motion.div>
         ) : (
           <div className="hud-brand-bars" aria-hidden>
             <div className="hud-brand-bar" />
@@ -1232,6 +1264,23 @@ function FloatingCapsule({
         {editing && fnLabel ? (
           <span className="hud-fn-badge">{fnLabel}</span>
         ) : null}
+        <AnimatePresence>
+          {justPasted ? (
+            <motion.button
+              type="button"
+              key="undo-paste"
+              className="hud-undo-btn"
+              data-no-drag
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: duration.fast, ease: easeOut }}
+              onClick={onUndoPaste}
+            >
+              撤销
+            </motion.button>
+          ) : null}
+        </AnimatePresence>
       </div>
     </div>
   );
