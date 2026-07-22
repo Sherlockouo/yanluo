@@ -6,6 +6,10 @@ import { duration, easeOut } from "@/lib/motion";
 
 const W = 960;
 const H = 300;
+/** Gravity influence radius (svg units). Beyond → almost no pull. */
+const GRAVITY_R = 360;
+/** At distance 0: fraction of the vector toward pointer applied. */
+const GRAVITY_NEAR = 0.55;
 
 type Placed = {
   word: string;
@@ -57,7 +61,7 @@ export function packWordCloud(
 
   words.forEach((item, rank) => {
     const t = (item.weight - minW) / span;
-    const fontSize = 16 + t * 30; // 16–46 — roomier / more presence
+    const fontSize = 16 + t * 30; // 16–46
     const bw = approxWidth(item.word, fontSize);
     const bh = fontSize * 1.2;
 
@@ -105,6 +109,105 @@ function fillForRank(rank: number, total: number, hot: boolean): string {
   return "var(--faint)";
 }
 
+/** Inverse-square-ish falloff: near → strong pull, far → tiny. */
+function gravityPull(
+  birthX: number,
+  birthY: number,
+  ptr: { x: number; y: number },
+): { x: number; y: number; near: number } {
+  const dx = ptr.x - birthX;
+  const dy = ptr.y - birthY;
+  const dist = Math.hypot(dx, dy);
+  const t = Math.max(0, 1 - dist / GRAVITY_R);
+  const factor = GRAVITY_NEAR * t * t;
+  return { x: dx * factor, y: dy * factor, near: t };
+}
+
+const MIN_GAP = 8;
+
+type LivePos = {
+  key: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  near: number;
+  scale: number;
+};
+
+/**
+ * After gravity, push overlapping boxes apart so hover cluster stays clickable.
+ * Mutual separation along least-penetration axis; clamp to canvas.
+ */
+function resolveLayout(
+  placed: Placed[],
+  ptr: { x: number; y: number } | null,
+  hoverKey: string | null,
+  active: boolean,
+): LivePos[] {
+  const items: LivePos[] = placed.map((p) => {
+    const key = `${p.word}-${p.rank}`;
+    const pull =
+      active && ptr ? gravityPull(p.x, p.y, ptr) : { x: 0, y: 0, near: 0 };
+    const hot = hoverKey === key;
+    const scale = hot ? 1.12 : 1 + pull.near * 0.04;
+    const w = approxWidth(p.word, p.fontSize) * scale;
+    const h = p.fontSize * 1.2 * scale;
+    return {
+      key,
+      x: p.x + pull.x,
+      y: p.y + pull.y,
+      w,
+      h,
+      near: pull.near,
+      scale,
+    };
+  });
+
+  if (!active) return items;
+
+  // More iters when cluster is dense near pointer.
+  const iters = 12;
+  for (let n = 0; n < iters; n++) {
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i]!;
+        const b = items[j]!;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const minDx = (a.w + b.w) / 2 + MIN_GAP;
+        const minDy = (a.h + b.h) / 2 + MIN_GAP;
+        const ox = minDx - Math.abs(dx);
+        const oy = minDy - Math.abs(dy);
+        if (ox <= 0 || oy <= 0) continue;
+
+        // Prefer pushing the less-near (weaker gravity) word farther —
+        // keeps cursor-cluster readable without yanking the hovered one away.
+        const wa = 0.35 + a.near * 0.4;
+        const wb = 0.35 + b.near * 0.4;
+        const sum = wa + wb;
+        if (ox < oy) {
+          const sx = dx === 0 ? 1 : Math.sign(dx);
+          const push = ox;
+          a.x -= (push * wb) / sum * sx;
+          b.x += (push * wa) / sum * sx;
+        } else {
+          const sy = dy === 0 ? 1 : Math.sign(dy);
+          const push = oy;
+          a.y -= (push * wb) / sum * sy;
+          b.y += (push * wa) / sum * sy;
+        }
+      }
+    }
+  }
+
+  for (const it of items) {
+    it.x = Math.min(W - it.w / 2 - 4, Math.max(it.w / 2 + 4, it.x));
+    it.y = Math.min(H - it.h / 2 - 4, Math.max(it.h / 2 + 4, it.y));
+  }
+  return items;
+}
+
 type Props = {
   words: WordWeight[];
   emptyHint?: string;
@@ -117,12 +220,27 @@ export function WordCloud({
   const reduce = useReducedMotion();
   const navigate = useNavigate();
   const svgRef = useRef<SVGSVGElement>(null);
-  /** Magnetic only while pointer is inside the cloud surface. */
   const insideRef = useRef(false);
   const [inside, setInside] = useState(false);
   const [ptr, setPtr] = useState<{ x: number; y: number } | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const placed = useMemo(() => packWordCloud(words), [words]);
+
+  const layout = useMemo(
+    () =>
+      resolveLayout(
+        placed,
+        ptr,
+        hoverKey,
+        !reduce && inside && ptr != null,
+      ),
+    [placed, ptr, hoverKey, reduce, inside],
+  );
+  const byKey = useMemo(() => {
+    const m = new Map<string, LivePos>();
+    for (const L of layout) m.set(L.key, L);
+    return m;
+  }, [layout]);
 
   const toSvg = (clientX: number, clientY: number) => {
     const el = svgRef.current;
@@ -188,28 +306,19 @@ export function WordCloud({
         {placed.map((p) => {
           const key = `${p.word}-${p.rank}`;
           const hot = inside && hoverKey === key;
-          // Enter cloud → every word magnetically follows the pointer.
-          // Idle outside = frozen. Hover only bumps scale/color.
-          let pullX = 0;
-          let pullY = 0;
-          if (!reduce && inside && ptr) {
-            const strength = hot ? 0.72 : 0.55;
-            pullX = (ptr.x - p.x) * strength;
-            pullY = (ptr.y - p.y) * strength;
-          }
+          const live = byKey.get(key);
+          const x = live?.x ?? p.x;
+          const y = live?.y ?? p.y;
+          const scale = live?.scale ?? 1;
           return (
             <motion.g
               key={key}
               initial={false}
-              animate={{
-                x: p.x + pullX,
-                y: p.y + pullY,
-                scale: hot ? 1.22 : 1,
-              }}
+              animate={{ x, y, scale }}
               transition={{
                 type: "spring",
-                stiffness: hot ? 360 : 280,
-                damping: hot ? 22 : 28,
+                stiffness: 340,
+                damping: 30,
                 mass: 0.32,
               }}
               style={{ cursor: "pointer" }}

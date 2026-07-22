@@ -3,11 +3,7 @@ export type RecState =
   | "recording"
   | "processing"
   | "refining"
-  | "editing"
-  /** Fn/⇧Fn confirm/accept just pasted — brief 「撤销」 affordance on HUD. */
-  | "pasted"
-  /** 撤销 tapped — brief "已恢复剪贴板" grace period before auto-hide. */
-  | "pasted-undo";
+  | "editing";
 
 export type AsrProvider = "qwen" | "apple" | "elevenlabs";
 

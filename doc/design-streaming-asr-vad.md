@@ -45,7 +45,7 @@
 | 跨段 text prefix（capped） | ✅ S2 | `init_streaming_with_context` |
 | RoPE 表（段内） | ✅ S0 | 固定 **8192** + `ensure_rope_span`；靠切段重置，不靠无限加长 |
 
-**关键事实**：`todo-streaming-asr.md` 里「全量重转 O(n²)」已过时。当前产品路径是 **段内 O(S) 增量 KV + 段间 reset**。历史崩溃点是「整场当作一段」导致 RoPE/KV/prefix 失控（partial #623 / 241s broadcast）；S0–S1 已堵住。
+**关键事实**：勿再把「全场全量重转 O(T²)」当产品路径。当前是 **段内 O(S) 增量 KV + 段间 reset**。历史崩溃点是「整场当作一段」导致 RoPE/KV/prefix 失控（partial #623 / 241s broadcast）；S0–S1 已堵住。
 
 ---
 
@@ -416,15 +416,14 @@ cross_segment_prefix_tokens = 64
 
 ---
 
-## 15. 与旧文档关系
+## 15. 文档关系
 
 | 文档 | 关系 |
 |------|------|
-| `README.md` | **入口索引**：现状 + 读哪篇 |
-| `ROADMAP-streaming-asr-vad.md` | **阶段权威** |
-| `incremental-kv-cache-investigation.md` | **基线证据**：段内方案已验证 |
-| `todo-vad-segmentation.md` | **归档**：问题直觉正确；细节由 design/ROADMAP 取代 |
-| `todo-streaming-asr.md` | **归档**：方案 A 过时；C≈S1+S2；D≈段内已做 |
+| [`README.md`](./README.md) | **入口索引** |
+| [`ROADMAP-streaming-asr-vad.md`](./ROADMAP-streaming-asr-vad.md) | **阶段权威**（S0–S4 已齐） |
+
+历史 `todo-*.md` / `incremental-kv-cache-investigation.md` 已删；内容以本篇 + ROADMAP 为准。勿再「全量重转 O(T²)」当产品路径。
 
 ---
 

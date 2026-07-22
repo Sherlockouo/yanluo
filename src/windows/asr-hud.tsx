@@ -215,21 +215,6 @@ export function AsrHud() {
     setError(null);
   }, []);
 
-  // Best-effort, like cancelTranscript — the affordance is already gone if
-  // this errors (undo window expired / superseded by a new recording).
-  const undoingPasteRef = useRef(false);
-  const undoLastPaste = useCallback(async () => {
-    if (undoingPasteRef.current) return;
-    undoingPasteRef.current = true;
-    try {
-      await invoke("undo_last_paste");
-    } catch {
-      /* ignore */
-    } finally {
-      undoingPasteRef.current = false;
-    }
-  }, []);
-
   useEffect(() => {
     if (!isAgent) setPickerMode("");
   }, [isAgent]);
@@ -761,9 +746,7 @@ export function AsrHud() {
     (payload.state === "recording" ||
       payload.state === "processing" ||
       payload.state === "refining" ||
-      payload.state === "editing" ||
-      payload.state === "pasted" ||
-      payload.state === "pasted-undo");
+      payload.state === "editing");
 
   return (
     <div
@@ -838,7 +821,6 @@ export function AsrHud() {
               fnLabel={fnLabel}
               onEditChange={setEditText}
               onEditKey={onEditKey}
-              onUndoPaste={() => void undoLastPaste()}
             />
           )}
           </motion.div>
@@ -1097,7 +1079,6 @@ function FloatingCapsule({
   fnLabel,
   onEditChange,
   onEditKey,
-  onUndoPaste,
 }: {
   payload: FloatingPayload;
   meter: { rms: number; bands: number[] };
@@ -1109,12 +1090,10 @@ function FloatingCapsule({
   fnLabel?: string;
   onEditChange: (v: string) => void;
   onEditKey: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
-  onUndoPaste?: () => void;
 }) {
   const refining = payload.state === "refining";
   const processing = payload.state === "processing";
   const recording = payload.state === "recording";
-  const justPasted = payload.state === "pasted";
   const switching = Boolean(payload.switching);
   const translating = payload.intention === "translate";
   const smoothed = useSmoothedRms(meter.rms, recording);
@@ -1264,23 +1243,6 @@ function FloatingCapsule({
         {editing && fnLabel ? (
           <span className="hud-fn-badge">{fnLabel}</span>
         ) : null}
-        <AnimatePresence>
-          {justPasted ? (
-            <motion.button
-              type="button"
-              key="undo-paste"
-              className="hud-undo-btn"
-              data-no-drag
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: duration.fast, ease: easeOut }}
-              onClick={onUndoPaste}
-            >
-              撤销
-            </motion.button>
-          ) : null}
-        </AnimatePresence>
       </div>
     </div>
   );

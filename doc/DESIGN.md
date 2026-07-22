@@ -1,7 +1,7 @@
 # Design System — 言落 (Yanluo)
 
-> Authority for brand, visual, and IA. Companion rules:
-> [`architecture-local-first.md`](./architecture-local-first.md) · [`Sell-it.md`](./Sell-it.md).
+> Authority for brand, visual, and IA. Companion:
+> [`architecture-local-first.md`](./architecture-local-first.md).
 >
 > **Jobs 原则**（原 design-jobs.md 已并入本文）: 一屏一个主任务；配置收敛到页头/设置，不垫底；减法优先；布局即说明。
 >
@@ -99,7 +99,7 @@
 - **Radius:** sm 8 · md 12 · lg 16 · xl 20 · capsule 999 (HUD/pills) — rounded, friendly; tokens `--radius-sm/md/lg/xl/pill`.
 - **Jobs hierarchy:** One primary job per screen; config via header secondary; never config cemetery under scroll.
 
-### 出稿 — editorial masthead (contract: `design/v2/draft-a.html`)
+### 出稿 — editorial masthead (contract: `design/v3/draft.html`)
 
 - **Masthead** = mono kicker (engine · 状态) → large serif `出稿` → **quiet mode switch** on the baseline (`文件 实时 翻译 历史`; active = ink + 2px copper underline) → mono subline (`Fn 出稿 · ⇧Fn 翻译 · 语言`). **Sticky** to top of `.app-content`, opaque paper bg (no blur/gradient), content scrolls under.
 - **No fat tab strip / segmented pill** for modes. Secondary switches (本地文件/网络链接, 音频/视频) reuse the same understated slash-typography (`.tswitch`).
@@ -213,10 +213,9 @@ Ship in order. Each step should still pass Jobs 3-second test.
 - [ ] 派活 conversational surface: bright enough to read, few borders (keep agent.css intent)
 - [x] Settings: one accent CTA; no equal-weight tab circus (two-pane + quiet underline subtabs)
 
-### P3 — Copy / sell alignment
+### P3 — Copy alignment
 
-- [ ] Overview / empty states use Sell-it language (有稿 / 派活 / 本地), not engine jargon
-- [ ] Update `doc/Sell-it.md` product name to 言落
+- [ ] Overview / empty states use product language (有稿 / 派活 / 本地), not engine jargon
 - [ ] README product blurb (keep stack facts for devs; marketing voice separate)
 
 ### Verify

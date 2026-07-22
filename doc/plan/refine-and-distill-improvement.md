@@ -1,7 +1,7 @@
 # Refine 纠错 + 主动提炼优化方案
 
 > 目标：把「LLM 纠错（refine）」和「主动提炼词库（distill / learn）」从现在「勉强能用」提升到「可信、稳、贴用户」。
-> 权威文档：[`../design-hud-confirm-learn.md`](../design-hud-confirm-learn.md)（确认再贴+改字即学）、[`../Sell-it.md`](../Sell-it.md)（少乱改、术语别丢）、根 `DESIGN.md`（本地优先、结果优先）。
+> 权威文档：[`../design-hud-confirm-learn.md`](../design-hud-confirm-learn.md)（确认再贴+改字即学）、根 `DESIGN.md`（本地优先、结果优先；少乱改、术语别丢）。
 >
 > 相关代码：
 > - `src-tauri/src/transcription/mod.rs`：`refine_transcript` / `distill_learn_from_cases` / `apply_vocabulary` / `strip_refine_artifacts` / `accept_distill_term` / `finalize_successful_result`
@@ -27,7 +27,7 @@
 
 ### Distill（主动提炼词库）
 
-8. **eligible 条件太苛刻，学不到东西。** `eligible_for_distill` 要求：非 translate + 有 raw + gold≠asr +（用户改过 或 (refined 且被打 bad 评分)）。也就是说**用户不主动改字、也不主动打差评，就永远不提炼**。Sell-it 想要的是「越用越懂你」，但现在几乎不触发。
+8. **eligible 条件太苛刻，学不到东西。** `eligible_for_distill` 要求：非 translate + 有 raw + gold≠asr +（用户改过 或 (refined 且被打 bad 评分)）。也就是说**用户不主动改字、也不主动打差评，就永远不提炼**。产品想要「越用越懂你」，但现在几乎不触发。
 9. **提炼只在「纠错学习页手动点」触发。** `distill_learn_from_ratings` 是命令式，要用户进设置页手动点「AI 提炼」。没有任何被动/批量/定时的主动提炼。
 10. **前端 heuristic 抽词（`extractLearnCandidates`）和后端 LLM distill 两套逻辑并存，标准不统一。** 前端 `isTermSized`（≤24、latin≤4词、cjk≤8）和后端 `accept_distill_term`（≤24、terminators<2）阈值不同，产出会互相打架。
 11. **谐音 pair 的方向/泛化没保证。** 抽出来的是「这一次这句里的 wrong=right」，没有验证这个 pair 泛化到别的句子安不安全（见问题 3 的误伤）。也没有出现频次统计——偶发一次的错也可能进词库。

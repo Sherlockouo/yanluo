@@ -588,7 +588,6 @@ export function stateLabel(state: RecState) {
   if (state === "processing") return "转写中";
   if (state === "refining") return "处理中";
   if (state === "editing") return "编辑中";
-  if (state === "pasted" || state === "pasted-undo") return "已粘贴";
   return "就绪";
 }
 

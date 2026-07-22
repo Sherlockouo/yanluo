@@ -3,13 +3,9 @@ use std::time::Duration;
 use tauri::AppHandle;
 use crate::platform::*;
 
-/// Paste `text` via clipboard + synthetic ⌘V. Returns the clipboard content
-/// that was on the pasteboard *before* we overwrote it (if any) — callers use
-/// this to offer a safe "undo" (restore old clipboard) without touching the
-/// target app's document.
-pub(crate) fn inject_text_via_paste(text: &str) -> Result<Option<String>, String> {
+pub(crate) fn inject_text_via_paste(text: &str) -> Result<(), String> {
     if text.trim().is_empty() {
-        return Ok(None);
+        return Ok(());
     }
     // HIToolbox input-source APIs assert they run on the main dispatch queue.
     // Callers must invoke this via `inject_text_via_paste_on_main`.
@@ -23,19 +19,15 @@ pub(crate) fn inject_text_via_paste(text: &str) -> Result<Option<String>, String
         std::thread::sleep(Duration::from_millis(40));
     }
 
-    let previous_clipboard = read_clipboard_text();
     write_clipboard_text(text)?;
     post_cmd_v()?;
     // Leave transcript on the clipboard (user expectation: "写入剪切板").
-    Ok(previous_clipboard)
+    Ok(())
 }
 
-pub(crate) fn inject_text_via_paste_on_main(
-    app: &AppHandle,
-    text: &str,
-) -> Result<Option<String>, String> {
+pub(crate) fn inject_text_via_paste_on_main(app: &AppHandle, text: &str) -> Result<(), String> {
     if text.trim().is_empty() {
-        return Ok(None);
+        return Ok(());
     }
     let text = text.to_string();
     let (tx, rx) = mpsc::channel();

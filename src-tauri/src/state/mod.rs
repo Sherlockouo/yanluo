@@ -71,19 +71,6 @@ pub(crate) struct PendingHudConfirm {
     pub(crate) media_kind: String,
 }
 
-/// After confirm/accept paste: clipboard snapshot to restore on "撤销" — see
-/// `undo_last_paste`. We deliberately do NOT synthesize ⌘Z: the focused app
-/// (or focus itself) may have changed since paste, and blind undo could hit
-/// an unrelated edit in an unrelated app. Clipboard-restore is always safe.
-#[derive(Clone)]
-pub(crate) struct PendingPasteUndo {
-    /// Clipboard content immediately before this paste overwrote it.
-    pub(crate) previous_clipboard: Option<String>,
-    /// Captured `finalize_gen` at paste time — a delayed auto-hide checks this
-    /// so a newer recording/paste doesn't get yanked away underneath it.
-    pub(crate) gen: u64,
-}
-
 pub struct AsrEngine {
     pub(crate) model_dir: Mutex<String>,
     pub(crate) recorder: Mutex<Option<SendWrapper<AudioRecorder>>>,
@@ -104,9 +91,6 @@ pub struct AsrEngine {
     pub(crate) translate_stream: Mutex<TranslateStreamState>,
     /// Fn/translate confirm-then-paste slot.
     pub(crate) pending_hud_confirm: Mutex<Option<PendingHudConfirm>>,
-    /// Clipboard-restore undo slot, set right after a successful confirm/accept
-    /// paste; cleared by `undo_last_paste` or the delayed auto-hide.
-    pub(crate) pending_paste_undo: Mutex<Option<PendingPasteUndo>>,
     /// HUD meter — updated from capture callbacks, read by pump (no recorder lock).
     pub(crate) live_meter: Arc<LiveMeter>,
 }
@@ -162,7 +146,6 @@ impl AsrEngine {
             session_mode: Mutex::new("fn".into()),
             translate_stream: Mutex::new(TranslateStreamState::default()),
             pending_hud_confirm: Mutex::new(None),
-            pending_paste_undo: Mutex::new(None),
             live_meter: Arc::new(LiveMeter::default()),
         }
     }
@@ -225,21 +208,6 @@ impl AsrEngine {
             .lock()
             .map(|s| s.is_some())
             .unwrap_or(false)
-    }
-
-    pub(crate) fn set_pending_paste_undo(app: &AppHandle, pending: Option<PendingPasteUndo>) {
-        if let Ok(mut slot) = app.state::<AsrEngine>().inner().pending_paste_undo.lock() {
-            *slot = pending;
-        }
-    }
-
-    pub(crate) fn take_pending_paste_undo(app: &AppHandle) -> Option<PendingPasteUndo> {
-        app.state::<AsrEngine>()
-            .inner()
-            .pending_paste_undo
-            .lock()
-            .ok()?
-            .take()
     }
 
     pub(crate) fn send_worker(&self, cmd: WorkerCommand) -> Result<(), String> {
