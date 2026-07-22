@@ -1,5 +1,8 @@
 # 言落 (Yanluo)
 
+[![CI](https://github.com/Sherlockouo/yanluo/actions/workflows/ci.yml/badge.svg)](https://github.com/Sherlockouo/yanluo/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Sherlockouo/yanluo)](https://github.com/Sherlockouo/yanluo/releases/latest)
+
 **你的声音留在本机。开口出稿，开口派活。**
 
 macOS 桌面应用：开会 / 口述 / 文件转写成稿，或把活派给 Claude / Codex / Pi。声音和文字默认不离开这台电脑。
@@ -65,21 +68,11 @@ xcode-select --install
 brew install cmake
 
 pnpm install
-pnpm tauri dev           # 不带本地 Qwen/MLX
 pnpm tauri:dev:local     # 带本地 Qwen/MLX（首次编译 5–10 分钟）
+pnpm tauri dev           # 不带本地 Qwen（仅系统识别 / 云端）
 ```
 
-模型需 `tokenizer.json`（仓库只有 vocab/merges 时生成一次）：
-
-```bash
-huggingface-cli download Qwen/Qwen3-ASR-0.6B --local-dir ./Qwen3-ASR-0.6B
-pip install transformers
-python3 -c "
-from transformers import AutoTokenizer
-tok = AutoTokenizer.from_pretrained('./Qwen3-ASR-0.6B', trust_remote_code=True)
-tok.backend_tokenizer.save('./Qwen3-ASR-0.6B/tokenizer.json')
-"
-```
+应用内点「下载模型」会一次拉齐权重 + `tokenizer.json`，下完自动写入目录并加载。发布包（macOS ARM）已带 `qwen-local`。
 
 更新 ASR 引擎依赖：
 

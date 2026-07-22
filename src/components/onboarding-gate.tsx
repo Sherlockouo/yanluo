@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Link } from "react-router-dom";
-import { Button } from "@heroui/react";
+import { Button, toast } from "@heroui/react";
 import { invoke } from "@tauri-apps/api/core";
-import { CheckCircle2, CircleAlert, Keyboard, Mic, Shield } from "lucide-react";
+import { listen } from "@tauri-apps/api/event";
+import { CheckCircle2, CircleAlert, Download, Keyboard, Mic, Shield } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { duration, easeOut, springBounce } from "@/lib/motion";
 import { useApp } from "@/app-context";
 import { ONBOARD_STORAGE_KEY } from "@/lib/first-run";
 import { readTourDone, requestStartTour } from "@/components/spotlight-tour";
+import {
+  type ModelDownloadProgress,
+  type ModelStatus,
+  progressLabel,
+} from "@/lib/model-download";
 
 export { ONBOARD_STORAGE_KEY };
 
@@ -32,15 +38,22 @@ function markOnboarded() {
 type MiniPerms = { microphone: boolean; accessibility: boolean };
 type PermKind = "microphone" | "accessibility";
 type PermRequestResult = { granted: boolean; open_settings: boolean };
+type OnboardStep = "perms" | "engine";
 
 /**
- * Quiet one-job first-run sheet — mic + 辅助功能 + 热键, then spotlight tour.
+ * Quiet first-run: mic + 辅助功能 + 热键, then engine (Apple now / Qwen download).
+ * Tokenizer ships with model download — no manual HF step.
  */
 export function OnboardingGate() {
-  const { config } = useApp();
+  const { config, updateConfig, loadModel, saveConfig } = useApp();
   const [open, setOpen] = useState(false);
+  const [step, setStep] = useState<OnboardStep>("perms");
   const [perms, setPerms] = useState<MiniPerms | null>(null);
   const [busy, setBusy] = useState<PermKind | null>(null);
+  const [qwenLocal, setQwenLocal] = useState(false);
+  const [modelReady, setModelReady] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
 
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
@@ -48,6 +61,38 @@ export function OnboardingGate() {
     });
     return () => window.cancelAnimationFrame(id);
   }, []);
+
+  useEffect(() => {
+    void invoke<{ qwen_local_available?: boolean }>("get_app_info")
+      .then((info) => setQwenLocal(Boolean(info.qwen_local_available)))
+      .catch(() => setQwenLocal(false));
+  }, []);
+
+  const refreshModel = useCallback(async () => {
+    try {
+      const status = await invoke<ModelStatus>("get_model_status", {
+        modelId: config.asr_model_id || "Qwen3-ASR-0.6B",
+      });
+      setModelReady(status.installed && status.has_tokenizer && !status.needs_download);
+    } catch {
+      setModelReady(false);
+    }
+  }, [config.asr_model_id]);
+
+  useEffect(() => {
+    if (open && step === "engine") void refreshModel();
+  }, [open, step, refreshModel]);
+
+  useEffect(() => {
+    if (!open || step !== "engine") return;
+    let unlisten: (() => void) | undefined;
+    void listen<ModelDownloadProgress>("model-download-progress", (event) => {
+      setProgress(event.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, [open, step]);
 
   const refreshPerms = useCallback(async () => {
     try {
@@ -59,8 +104,8 @@ export function OnboardingGate() {
   }, []);
 
   useEffect(() => {
-    if (open) void refreshPerms();
-  }, [open, refreshPerms]);
+    if (open && step === "perms") void refreshPerms();
+  }, [open, step, refreshPerms]);
 
   const requestPerm = async (kind: PermKind) => {
     if (busy) return;
@@ -86,6 +131,58 @@ export function OnboardingGate() {
     }
   };
 
+  const goEngineOrFinish = () => {
+    if (qwenLocal) {
+      setStep("engine");
+      return;
+    }
+    finish();
+  };
+
+  const useApple = () => {
+    updateConfig("asr_provider", "apple");
+    void saveConfig({ ...config, asr_provider: "apple" }, { silent: true });
+    finish();
+  };
+
+  const downloadQwen = async () => {
+    const modelId = config.asr_model_id || "Qwen3-ASR-0.6B";
+    setDownloading(true);
+    setProgress(null);
+    try {
+      const path = await invoke<string>("download_qwen_asr_model", {
+        modelId,
+        downloadAligner: false,
+      });
+      updateConfig("asr_provider", "qwen");
+      updateConfig("asr_model_dir", path);
+      updateConfig("asr_model_id", modelId);
+      toast.success("模型已就绪");
+      await loadModel(path);
+      await refreshModel();
+      finish();
+    } catch (error) {
+      toast.danger(
+        `下载失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const useExistingQwen = async () => {
+    const next = {
+      ...config,
+      asr_provider: "qwen" as const,
+    };
+    updateConfig("asr_provider", "qwen");
+    await saveConfig(next, { silent: true });
+    if (config.asr_model_dir?.trim()) {
+      await loadModel(config.asr_model_dir);
+    }
+    finish();
+  };
+
   return createPortal(
     <AnimatePresence>
       {open ? (
@@ -98,72 +195,158 @@ export function OnboardingGate() {
           transition={{ duration: duration.normal, ease: easeOut }}
         >
           <motion.div
-            key="onboard-panel"
+            key={`onboard-panel-${step}`}
             role="dialog"
             aria-modal="true"
-            aria-label="开始之前"
+            aria-label={step === "perms" ? "开始之前" : "选择识别"}
             className="flex w-full max-w-md flex-col overflow-hidden rounded-2xl bg-surface p-6 shadow-2xl"
             initial={{ opacity: 0, scale: 0.95, y: 16 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
             transition={springBounce}
           >
-            <h2 className="type-section">开始之前</h2>
-            <p className="mt-1 type-meta">三步授权，说完就有稿</p>
+            {step === "perms" ? (
+              <>
+                <h2 className="type-section">开始之前</h2>
+                <p className="mt-1 type-meta">授权后开口出稿</p>
 
-            <div className="mt-4">
-              <PermRow
-                icon={Mic}
-                title="麦克风权限"
-                desc="录制你的声音"
-                granted={perms?.microphone ?? false}
-                busy={busy === "microphone"}
-                onAuthorize={() => void requestPerm("microphone")}
-              />
-              <PermRow
-                icon={Shield}
-                title="辅助功能"
-                desc="粘贴识别结果需要"
-                granted={perms?.accessibility ?? false}
-                busy={busy === "accessibility"}
-                onAuthorize={() => void requestPerm("accessibility")}
-              />
-              <div className="perm-row">
-                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-default/40 text-muted">
-                  <Keyboard size={16} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="type-ui">确认热键</div>
-                  <div className="mt-0.5 type-meta">
-                    <b className="text-foreground">{config.hotkey_transcribe.label}</b> 出稿
-                    {" · "}
-                    <b className="text-foreground">{config.hotkey_translate.label}</b> 翻译
-                    {" · "}
-                    <b className="text-foreground">{config.hotkey_agent?.label ?? "Fn+Space"}</b> 派活
+                <div className="mt-4">
+                  <PermRow
+                    icon={Mic}
+                    title="麦克风权限"
+                    desc="录制你的声音"
+                    granted={perms?.microphone ?? false}
+                    busy={busy === "microphone"}
+                    onAuthorize={() => void requestPerm("microphone")}
+                  />
+                  <PermRow
+                    icon={Shield}
+                    title="辅助功能"
+                    desc="粘贴识别结果需要"
+                    granted={perms?.accessibility ?? false}
+                    busy={busy === "accessibility"}
+                    onAuthorize={() => void requestPerm("accessibility")}
+                  />
+                  <div className="perm-row">
+                    <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-default/40 text-muted">
+                      <Keyboard size={16} />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="type-ui">确认热键</div>
+                      <div className="mt-0.5 type-meta">
+                        <b className="text-foreground">{config.hotkey_transcribe.label}</b> 出稿
+                        {" · "}
+                        <b className="text-foreground">{config.hotkey_translate.label}</b> 翻译
+                        {" · "}
+                        <b className="text-foreground">{config.hotkey_agent?.label ?? "Fn+Space"}</b> 派活
+                      </div>
+                    </div>
+                    <Link
+                      to="/settings?tab=system&sub=hotkeys"
+                      className="shrink-0 font-medium text-[13px] text-muted transition-colors hover:text-foreground"
+                      onClick={finish}
+                    >
+                      修改
+                    </Link>
                   </div>
                 </div>
-                <Link
-                  to="/settings?tab=system&sub=hotkeys"
-                  className="shrink-0 font-medium text-[13px] text-muted transition-colors hover:text-foreground"
-                  onClick={finish}
-                >
-                  修改
-                </Link>
-              </div>
-            </div>
 
-            <div className="mt-5 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                className="text-[13px] text-muted transition-colors hover:text-foreground"
-                onClick={finish}
-              >
-                跳过
-              </button>
-              <Button variant="primary" className="btn-press" onPress={finish}>
-                开始使用
-              </Button>
-            </div>
+                <div className="mt-5 flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    className="text-[13px] text-muted transition-colors hover:text-foreground"
+                    onClick={goEngineOrFinish}
+                  >
+                    跳过
+                  </button>
+                  <Button variant="primary" className="btn-press" onPress={goEngineOrFinish}>
+                    继续
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="type-section">怎么识别</h2>
+                <p className="mt-1 type-meta">选一个就能开口</p>
+
+                <div className="mt-4 flex flex-col gap-3">
+                  <button
+                    type="button"
+                    className="onboard-choice"
+                    disabled={downloading}
+                    onClick={useApple}
+                  >
+                    <div className="type-ui">系统识别</div>
+                    <div className="mt-0.5 type-meta">无需下载 · 马上能用</div>
+                  </button>
+
+                  {modelReady ? (
+                    <button
+                      type="button"
+                      className="onboard-choice onboard-choice-accent"
+                      disabled={downloading}
+                      onClick={() => void useExistingQwen()}
+                    >
+                      <div className="type-ui">本机 Qwen</div>
+                      <div className="mt-0.5 type-meta">已安装 · 点一下加载</div>
+                    </button>
+                  ) : (
+                    <div className="onboard-choice onboard-choice-accent flex flex-col gap-3">
+                      <div>
+                        <div className="type-ui">本机 Qwen</div>
+                        <div className="mt-0.5 type-meta">约 2GB · 权重与 tokenizer 一次下完</div>
+                      </div>
+                      {downloading && progress ? (
+                        <div className="type-meta">{progressLabel(progress)}</div>
+                      ) : null}
+                      {downloading && progress?.percent != null ? (
+                        <div className="update-progress-track">
+                          <div
+                            className="update-progress-bar"
+                            style={
+                              {
+                                "--progress":
+                                  Math.min(100, Math.max(0, progress.percent)) / 100,
+                              } as CSSProperties
+                            }
+                          />
+                        </div>
+                      ) : null}
+                      <Button
+                        fullWidth
+                        variant="primary"
+                        className="btn-press"
+                        isPending={downloading}
+                        isDisabled={downloading}
+                        onPress={() => void downloadQwen()}
+                      >
+                        <Download size={14} />
+                        {downloading ? "下载中…" : "下载并启用"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-5 flex items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    className="text-[13px] text-muted transition-colors hover:text-foreground"
+                    disabled={downloading}
+                    onClick={() => setStep("perms")}
+                  >
+                    上一步
+                  </button>
+                  <button
+                    type="button"
+                    className="text-[13px] text-muted transition-colors hover:text-foreground"
+                    disabled={downloading}
+                    onClick={useApple}
+                  >
+                    先用系统识别
+                  </button>
+                </div>
+              </>
+            )}
           </motion.div>
         </motion.div>
       ) : null}

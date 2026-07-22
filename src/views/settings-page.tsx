@@ -77,6 +77,11 @@ import {
   seedLlmCredentials,
 } from "@/lib/constants";
 import { useFade } from "@/lib/motion";
+import {
+  type ModelDownloadProgress,
+  type ModelStatus,
+  progressLabel,
+} from "@/lib/model-download";
 import type {
   AgentKind,
   AgentProfile,
@@ -185,6 +190,7 @@ type AppInfo = {
   platform?: string;
   executable_path?: string;
   apple_speech_available?: boolean;
+  qwen_local_available?: boolean;
 };
 
 type ReleaseAsset = {
@@ -762,28 +768,11 @@ function SystemPanel({
   );
 }
 
-type ModelStatus = {
-  model_id: string;
-  path: string;
-  installed: boolean;
-  needs_download: boolean;
-  has_tokenizer: boolean;
-};
-
-type ModelDownloadProgress = {
-  model_id: string;
-  file: string;
-  downloaded: number;
-  total: number | null;
-  file_index: number;
-  file_count: number;
-  percent: number | null;
-};
-
 function AsrProviderPanel() {
   const { config, updateConfig, saveConfig, chooseModelDir, loadModel } =
     useApp();
   const [appleAvailable, setAppleAvailable] = useState(true);
+  const [qwenLocal, setQwenLocal] = useState(false);
   const [status, setStatus] = useState<ModelStatus | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
@@ -791,17 +780,19 @@ function AsrProviderPanel() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   useEffect(() => {
-    void invoke<{ apple_speech_available?: boolean; platform?: string }>(
-      "get_app_info",
-    )
+    void invoke<AppInfo>("get_app_info")
       .then((info) => {
         const ok = info.apple_speech_available ?? info.platform === "macos";
         setAppleAvailable(ok);
+        setQwenLocal(info.qwen_local_available ?? false);
         if (!ok && config.asr_provider === "apple") {
           updateConfig("asr_provider", "elevenlabs");
         }
       })
-      .catch(() => setAppleAvailable(false));
+      .catch(() => {
+        setAppleAvailable(false);
+        setQwenLocal(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -848,7 +839,7 @@ function AsrProviderPanel() {
       updateConfig("asr_model_id", modelId);
       toast.success("模型已下载，正在加载…");
       await refreshStatus();
-      await loadModel();
+      await loadModel(path);
     } catch (error) {
       toast.danger(
         `下载失败: ${error instanceof Error ? error.message : String(error)}`,
@@ -861,6 +852,7 @@ function AsrProviderPanel() {
   const alignReady = Boolean(config.align_model_dir?.trim());
 
   const isQwen = config.asr_provider === "qwen";
+  const needsDownload = isQwen && (status?.needs_download ?? !status?.installed);
 
   return (
     <div className="flex flex-col gap-4">
@@ -891,8 +883,12 @@ function AsrProviderPanel() {
                 ElevenLabs Scribe
                 <ListBox.ItemIndicator />
               </ListBox.Item>
-              <ListBox.Item id="qwen" textValue="Qwen 本地">
-                Qwen 本地
+              <ListBox.Item
+                id="qwen"
+                textValue="Qwen 本地"
+                isDisabled={!qwenLocal}
+              >
+                Qwen 本地{!qwenLocal ? "（当前构建未启用）" : ""}
                 <ListBox.ItemIndicator />
               </ListBox.Item>
             </ListBox>
@@ -942,13 +938,53 @@ function AsrProviderPanel() {
                 </ListBox>
               </Select.Popover>
             </Select>
-            {status?.installed ? (
+            {status?.installed && !status.needs_download ? (
               <p className="-mt-2 truncate type-meta">
                 <span className="badge-soft" data-tone="success">
                   已安装
                 </span>{" "}
                 {status.path}
               </p>
+            ) : null}
+
+            {needsDownload ? (
+              <div className="flex flex-col gap-3 rounded-xl bg-default/40 p-4">
+                <div>
+                  <div className="type-ui">下载模型才能用</div>
+                  <div className="mt-0.5 type-meta">
+                    约 2GB · 权重与 tokenizer 一次下完 · 下完自动加载
+                  </div>
+                </div>
+                {downloading && progress ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="type-meta">{progressLabel(progress)}</div>
+                    <div className="update-progress-track">
+                      <div
+                        className="update-progress-bar"
+                        style={
+                          {
+                            "--progress":
+                              progress.percent != null
+                                ? Math.min(100, Math.max(0, progress.percent)) /
+                                  100
+                                : 0.3,
+                          } as CSSProperties
+                        }
+                      />
+                    </div>
+                  </div>
+                ) : null}
+                <Button
+                  fullWidth
+                  variant="primary"
+                  className="btn-press"
+                  isPending={downloading}
+                  onPress={() => void startDownload()}
+                >
+                  <Download size={14} />
+                  {downloading ? "下载中…" : "开始下载"}
+                </Button>
+              </div>
             ) : null}
 
             <div className="settings-switchrow">
@@ -1072,7 +1108,7 @@ function AsrProviderPanel() {
       ) : null}
 
       <div className="form-actions">
-        {isQwen ? (
+        {isQwen && !needsDownload ? (
           <div className="form-actions-secondary">
             <Button
               size="sm"
@@ -1081,7 +1117,7 @@ function AsrProviderPanel() {
               onPress={() => void startDownload()}
             >
               <Download size={14} />
-              {status?.needs_download ?? true ? "下载模型" : "重新下载"}
+              重新下载
             </Button>
           </div>
         ) : null}

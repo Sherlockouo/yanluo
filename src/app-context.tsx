@@ -58,7 +58,8 @@ type AppContextValue = {
   deleteAgentJob: (id: string) => Promise<boolean>;
   clearAgentJobs: (finishedOnly?: boolean) => Promise<number>;
   chooseModelDir: () => Promise<void>;
-  loadModel: () => Promise<void>;
+  /** Pass `path` right after download — avoids stale empty `asr_model_dir` wiping Rust. */
+  loadModel: (path?: string) => Promise<void>;
   testLlm: () => Promise<void>;
   addTerm: () => void;
   saveVocabulary: (vocabulary: string[]) => Promise<void>;
@@ -588,10 +589,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await invoke("set_model_dir", { path: selected });
   }, [config]);
 
-  const loadModel = useCallback(async () => {
+  const loadModel = useCallback(async (path?: string) => {
+    const dir = (path ?? config.asr_model_dir)?.trim() ?? "";
+    if (!dir) {
+      toast.danger("请先下载或选择模型目录");
+      return;
+    }
     setModelLoading(true);
     try {
-      await invoke("set_model_dir", { path: config.asr_model_dir });
+      await invoke("set_model_dir", { path: dir });
       await invoke("load_model");
     } catch (error) {
       setModelLoading(false);

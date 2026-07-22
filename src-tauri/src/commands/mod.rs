@@ -45,6 +45,8 @@ pub(crate) struct AppInfo {
     pub(crate) platform: String,
     pub(crate) executable_path: String,
     pub(crate) apple_speech_available: bool,
+    /// True when binary built with `--features qwen-local` (MLX).
+    pub(crate) qwen_local_available: bool,
 }
 
 #[tauri::command]
@@ -56,6 +58,7 @@ pub(crate) fn get_app_info() -> AppInfo {
         platform: perms.platform,
         executable_path: perms.executable_path,
         apple_speech_available: cfg!(target_os = "macos"),
+        qwen_local_available: cfg!(feature = "qwen-local"),
     }
 }
 

@@ -368,6 +368,30 @@ button.form-actions-primary,
   padding-top: 0;
 }
 
+.onboard-choice {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 1rem 1.05rem;
+  border-radius: 0.9rem;
+  background: color-mix(in oklab, var(--heroui-default) 55%, transparent);
+  border: 1px solid transparent;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.onboard-choice:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--heroui-default) 75%, transparent);
+}
+
+.onboard-choice:disabled {
+  opacity: 0.55;
+}
+
+.onboard-choice-accent {
+  background: color-mix(in oklab, var(--heroui-foreground) 5%, transparent);
+  border-color: color-mix(in oklab, var(--heroui-foreground) 10%, transparent);
+}
+
 /*
   Generic row inside a card (hotkeys, trusted dirs) — spacing hierarchy, no lines.
 */

@@ -2,6 +2,15 @@
 
 All notable changes to 言落 (Yanluo) are documented in this file.
 
+## [0.10.2] — 2026-07-22
+
+### Added
+- 首次引导：选系统识别或一键下载本机 Qwen（权重 + tokenizer，下完自动加载）
+- README：CI / Release badge
+
+### Fixed
+- 模型下载后 `loadModel` 用空 path 盖掉刚写入目录的竞态
+
 ## [0.10.1] — 2026-07-22
 
 ### Added

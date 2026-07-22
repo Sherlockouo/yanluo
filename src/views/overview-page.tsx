@@ -13,6 +13,11 @@ import {
   CLOUD_SOURCES,
   type CloudSource,
 } from "@/lib/word-freq";
+import {
+  type ModelDownloadProgress,
+  type ModelStatus,
+  progressLabel,
+} from "@/lib/model-download";
 import { useApp } from "@/app-context";
 
 const CLOUD_SOURCE_KEY = "yanluo:home-cloud-source";
@@ -26,24 +31,6 @@ function readCloudSource(): CloudSource {
   }
   return "fn";
 }
-
-type ModelStatus = {
-  model_id: string;
-  path: string;
-  installed: boolean;
-  needs_download: boolean;
-  has_tokenizer: boolean;
-};
-
-type ModelDownloadProgress = {
-  model_id: string;
-  file: string;
-  downloaded: number;
-  total: number | null;
-  file_index: number;
-  file_count: number;
-  percent: number | null;
-};
 
 export function OverviewPage() {
   const { config, modelLoaded, updateConfig, loadModel, agentJobs, history } =
@@ -112,7 +99,7 @@ export function OverviewPage() {
       updateConfig("asr_model_id", modelId);
       toast.success("模型已下载，正在加载…");
       await refreshStatus();
-      await loadModel();
+      await loadModel(path);
     } catch (error) {
       toast.danger(
         `下载失败: ${error instanceof Error ? error.message : String(error)}`,
@@ -122,11 +109,11 @@ export function OverviewPage() {
     }
   };
 
-  // Local dir set → skip install CTA; only prompt download when no path.
+  // Missing weights/tokenizer, or empty dir before status arrives.
   const needsInstall =
     config.asr_provider === "qwen" &&
-    !config.asr_model_dir?.trim() &&
-    (status?.needs_download ?? !modelLoaded);
+    (status?.needs_download ?? !config.asr_model_dir?.trim()) &&
+    !modelLoaded;
 
   const activeAgents = agentJobs.filter(
     (j) => j.status === "queued" || j.status === "running",
@@ -155,12 +142,7 @@ export function OverviewPage() {
             <p className="mt-1 type-meta">只需下载一次 · 装好后即可出稿</p>
           </div>
           {downloading && progress ? (
-            <div className="type-meta">
-              {progress.file} ·{" "}
-              {progress.percent != null
-                ? `${progress.percent.toFixed(0)}%`
-                : `${progress.file_index}/${progress.file_count}`}
-            </div>
+            <div className="type-meta">{progressLabel(progress)}</div>
           ) : null}
           <Button
             fullWidth
