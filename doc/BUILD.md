@@ -15,8 +15,8 @@ MLX error: Failed to load the default metallib. library not found
 
 **解决**（已接入打包）：
 
-- `pnpm tauri build --features qwen-local` 前会跑 `scripts/stage-mlx-metallib.mjs`，把 metallib 放进 `Yanluo.app/Contents/MacOS/`
-- 本地开发：`build.rs` 也会拷到 `target/{debug,release}/mlx.metallib`
+- **权威步骤**：`beforeBundleCommand` → `scripts/stage-mlx-metallib.mjs --bundle`，cargo **整编完成后**把 metallib 塞进 `Yanluo.app/Contents/MacOS/`
+- `build.rs` 只做 best-effort（给 `tauri:dev:local`）；CI 里若出现 `mlx.metallib not staged yet` **可忽略**，bundle hook 会再拷
 - 已装坏的包可手动修：
 
 ```bash
@@ -24,7 +24,6 @@ node scripts/stage-mlx-metallib.mjs --app /Applications/Yanluo.app
 codesign --force --deep --sign - /Applications/Yanluo.app
 xattr -cr /Applications/Yanluo.app
 ```
-
 ## Gatekeeper「已损坏 / 无法验证」
 
 **症状**：从 Release 拖到「应用程序」后打不开；`spctl` 报 signature / resources。

@@ -8,7 +8,7 @@
  *
  * Usage:
  *   node scripts/stage-mlx-metallib.mjs           # best-effort (dev)
- *   node scripts/stage-mlx-metallib.mjs --bundle  # for beforeBundleCommand
+ *   node scripts/stage-mlx-metallib.mjs --bundle  # for beforeBundleCommand (required)
  *   node scripts/stage-mlx-metallib.mjs --require # fail if missing
  *   node scripts/stage-mlx-metallib.mjs --app /path/to/Yanluo.app
  */
@@ -31,21 +31,86 @@ function isDarwin() {
   return process.platform === "darwin";
 }
 
+function targetRoots() {
+  const roots = [];
+  const envTarget = process.env.CARGO_TARGET_DIR;
+  if (envTarget) roots.push(path.resolve(envTarget));
+  roots.push(path.join(srcTauri, "target"));
+  return [...new Set(roots)].filter((p) => fs.existsSync(p));
+}
+
+/** Prefer out/lib/mlx.metallib; accept any mlx.metallib under qwen3-asr-rs build outs. */
 function findMetallib() {
   const candidates = [];
-  for (const profile of ["release", "debug"]) {
-    const buildRoot = path.join(srcTauri, "target", profile, "build");
-    if (!fs.existsSync(buildRoot)) continue;
-    for (const ent of fs.readdirSync(buildRoot, { withFileTypes: true })) {
-      if (!ent.isDirectory() || !ent.name.startsWith("qwen3-asr-rs-")) continue;
-      const lib = path.join(buildRoot, ent.name, "out", "lib", "mlx.metallib");
-      if (fs.existsSync(lib)) {
-        const st = fs.statSync(lib);
-        candidates.push({ lib, mtime: st.mtimeMs, size: st.size });
+
+  function consider(lib) {
+    try {
+      const st = fs.statSync(lib);
+      if (!st.isFile() || st.size < 1024) return;
+      const norm = lib.replace(/\\/g, "/");
+      const rank =
+        (norm.includes("/out/lib/mlx.metallib") ? 3 : 0) +
+        (norm.includes("/qwen3-asr-rs-") ? 1 : 0) +
+        (norm.includes("/lib/") ? 1 : 0);
+      candidates.push({ lib, mtime: st.mtimeMs, size: st.size, rank });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function walk(dir, depth) {
+    if (depth > 10) return;
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      const full = path.join(dir, ent.name);
+      if (ent.isFile() && ent.name === "mlx.metallib") {
+        consider(full);
+        continue;
+      }
+      if (!ent.isDirectory()) continue;
+      const n = ent.name;
+      // Skip huge irrelevant trees.
+      if (n === ".git" || n === "incremental" || n === "deps" || n === "examples") continue;
+      if (
+        n === "build" ||
+        n === "out" ||
+        n === "lib" ||
+        n === "release" ||
+        n === "debug" ||
+        n === "metal" ||
+        n === "kernels" ||
+        n.startsWith("qwen3-asr-rs-") ||
+        n.includes("mlx") ||
+        n.includes("apple") ||
+        n.includes("darwin")
+      ) {
+        walk(full, depth + 1);
+      } else if (depth <= 2) {
+        // target/<triple>/{release,debug}
+        walk(full, depth + 1);
       }
     }
   }
-  candidates.sort((a, b) => b.mtime - a.mtime);
+
+  for (const root of targetRoots()) {
+    // Fast path: classic layout.
+    for (const profile of ["release", "debug"]) {
+      const buildRoot = path.join(root, profile, "build");
+      if (!fs.existsSync(buildRoot)) continue;
+      for (const ent of fs.readdirSync(buildRoot, { withFileTypes: true })) {
+        if (!ent.isDirectory() || !ent.name.startsWith("qwen3-asr-rs-")) continue;
+        consider(path.join(buildRoot, ent.name, "out", "lib", "mlx.metallib"));
+      }
+    }
+    walk(root, 0);
+  }
+
+  candidates.sort((a, b) => b.rank - a.rank || b.mtime - a.mtime || b.size - a.size);
   return candidates[0]?.lib ?? null;
 }
 
@@ -56,11 +121,24 @@ function copyFile(src, dest) {
 }
 
 function stageBesideBinaries(src) {
-  for (const profile of ["release", "debug"]) {
-    const binDir = path.join(srcTauri, "target", profile);
-    if (!fs.existsSync(binDir)) continue;
-    // Next to cargo / tauri binary (dladdr parent).
-    copyFile(src, path.join(binDir, "mlx.metallib"));
+  for (const root of targetRoots()) {
+    for (const profile of ["release", "debug"]) {
+      const binDir = path.join(root, profile);
+      if (!fs.existsSync(binDir)) continue;
+      copyFile(src, path.join(binDir, "mlx.metallib"));
+      // target/<triple>/<profile>/
+      try {
+        for (const ent of fs.readdirSync(root, { withFileTypes: true })) {
+          if (!ent.isDirectory()) continue;
+          const tripleProfile = path.join(root, ent.name, profile);
+          if (fs.existsSync(tripleProfile)) {
+            copyFile(src, path.join(tripleProfile, "mlx.metallib"));
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
   }
 }
 
@@ -83,7 +161,7 @@ function main() {
   if (!src) {
     if (requireLib) {
       console.error(
-        "[mlx-metallib] mlx.metallib not found under target/*/build/qwen3-asr-rs-*/out/lib/\n" +
+        "[mlx-metallib] mlx.metallib not found under target/**/qwen3-asr-rs-*/\n" +
           "  Build with: pnpm tauri build --features qwen-local\n" +
           "  (Metal Toolchain required — see doc/BUILD.md)",
       );
@@ -93,6 +171,7 @@ function main() {
     return;
   }
 
+  console.log(`[mlx-metallib] using ${src}`);
   fs.mkdirSync(generatedDir, { recursive: true });
   copyFile(src, generatedLib);
   stageBesideBinaries(src);
@@ -101,9 +180,10 @@ function main() {
     stageIntoApp(src, appPath);
   }
 
-  // Also patch any already-bundled apps under target/release/bundle/macos.
-  const bundleMac = path.join(srcTauri, "target", "release", "bundle", "macos");
-  if (fs.existsSync(bundleMac)) {
+  // Patch already-bundled apps under target/**/bundle/macos.
+  for (const root of targetRoots()) {
+    const bundleMac = path.join(root, "release", "bundle", "macos");
+    if (!fs.existsSync(bundleMac)) continue;
     for (const name of fs.readdirSync(bundleMac)) {
       if (!name.endsWith(".app")) continue;
       stageIntoApp(src, path.join(bundleMac, name));
