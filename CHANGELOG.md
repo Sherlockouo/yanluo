@@ -2,6 +2,12 @@
 
 All notable changes to 言落 (Yanluo) are documented in this file.
 
+## [0.10.3] — 2026-07-23
+
+### Fixed
+- 打包缺 `mlx.metallib` → 回退 CI 绝对路径导致 MLX 加载失败；macOS bundle 自动塞入 `Contents/MacOS/`
+- 无证书时关闭 `hardenedRuntime`，减轻 Gatekeeper「无法验证 / 已损坏」
+
 ## [0.10.2] — 2026-07-22
 
 ### Added

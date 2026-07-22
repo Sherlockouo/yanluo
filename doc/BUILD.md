@@ -2,6 +2,47 @@
 
 本地 Qwen / MLX 编译与运行时踩过的坑。日常开发见根目录 [`README.md`](../README.md)。
 
+## 打包后 `Failed to load the default metallib`
+
+**症状**：`.app` 能开，加载 Qwen 时报：
+
+```
+MLX error: Failed to load the default metallib. library not found
+… at /Users/runner/.cargo/git/checkouts/qwen3_asr_rs-…/mlx-c/mlx/c/stream.cpp:31
+```
+
+**根因**：MLX 先在可执行文件同目录找 `mlx.metallib`，找不到再回退到**编译机绝对路径**（CI = `/Users/runner/...`）。路径里的 `.cpp` 是报错位置，不是 metallib 路径。
+
+**解决**（已接入打包）：
+
+- `pnpm tauri build --features qwen-local` 前会跑 `scripts/stage-mlx-metallib.mjs`，把 metallib 放进 `Yanluo.app/Contents/MacOS/`
+- 本地开发：`build.rs` 也会拷到 `target/{debug,release}/mlx.metallib`
+- 已装坏的包可手动修：
+
+```bash
+node scripts/stage-mlx-metallib.mjs --app /Applications/Yanluo.app
+codesign --force --deep --sign - /Applications/Yanluo.app
+xattr -cr /Applications/Yanluo.app
+```
+
+## Gatekeeper「已损坏 / 无法验证」
+
+**症状**：从 Release 拖到「应用程序」后打不开；`spctl` 报 signature / resources。
+
+**根因**（常见叠两层）：
+
+1. 未配置 Apple Developer ID / 公证 → 包是 **adhoc** 签名  
+2. 旧包缺 `mlx.metallib` 或签名未密封 Resources
+
+**当前策略**：`tauri.macos.conf.json` 里 `hardenedRuntime: false`（无证书时避免 hardened+adhoc 互撕）。有证书后应在 CI 配 `APPLE_CERTIFICATE*` 并重新打开 hardened + notarize（见 `RELEASE.md`）。
+
+临时绕过（本机自建 / 可信来源）：
+
+```bash
+xattr -cr /Applications/Yanluo.app
+codesign --force --deep --sign - /Applications/Yanluo.app
+```
+
 ## Metal Toolchain 缺失 → `bfloat16_t` 未识别
 
 **症状**：编译 mlx-c 时 Metal shader 失败：

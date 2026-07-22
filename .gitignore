@@ -21,6 +21,7 @@ Thumbs.db
 
 # Tauri
 src-tauri/gen/
+src-tauri/generated/
 
 # Model weights (download separately, do not commit)
 Qwen3-ASR-*/

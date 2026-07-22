@@ -1,0 +1,13 @@
+{
+  "build": {
+    "beforeBundleCommand": "node ../scripts/stage-mlx-metallib.mjs --bundle"
+  },
+  "bundle": {
+    "macOS": {
+      "files": {
+        "MacOS/mlx.metallib": "generated/mlx.metallib"
+      },
+      "hardenedRuntime": false
+    }
+  }
+}

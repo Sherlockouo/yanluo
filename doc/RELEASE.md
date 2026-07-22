@@ -41,10 +41,14 @@ Apple Speech is **macOS-only**. Linux/Windows default to ElevenLabs (Qwen local 
 
 ## One-time setup
 1. Enable GitHub Actions with `contents: write`.
-2. Optional Apple signing secrets for notarized macOS builds.
+2. Optional Apple signing secrets for notarized macOS builds (`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, `APPLE_TEAM_ID`). Without these, macOS builds are **adhoc** — Gatekeeper may say「已损坏」; users need `xattr -cr` or right-click → Open. `hardenedRuntime` stays off until secrets are wired (`tauri.macos.conf.json`).
 3. Keep the repo **Public** so in-app update checks can read Releases without auth.
    Private repos return **404** to unauthenticated API (browser login can still see them — that is why the Updates page can look “wrong”).
    Dev-only: set `GITHUB_TOKEN` / `GH_TOKEN` before launching the app.
+
+## macOS MLX metallib
+
+`qwen-local` builds must ship `Contents/MacOS/mlx.metallib` (staged by `scripts/stage-mlx-metallib.mjs` via `beforeBundleCommand`). Missing file → runtime falls back to CI absolute `METAL_PATH` and fails on user machines. See `doc/BUILD.md`.
 
 ## Cut a release
 1. Follow **Version source of truth** above.

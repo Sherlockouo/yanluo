@@ -16,7 +16,13 @@ run:
 install-local:
 	$(TAURI) build --features qwen-local
 ifeq ($(UNAME_S),Darwin)
-	open src-tauri/target/release/bundle/macos/*.app
+	node scripts/stage-mlx-metallib.mjs --bundle
+	@APP=$$(ls -d src-tauri/target/release/bundle/macos/*.app 2>/dev/null | head -1); \
+	  if [ -n "$$APP" ]; then \
+	    node scripts/stage-mlx-metallib.mjs --app "$$APP"; \
+	    codesign --force --deep --sign - "$$APP" 2>/dev/null || true; \
+	    open "$$APP"; \
+	  fi
 endif
 
 ## Cross-platform package (default features; no MLX).
