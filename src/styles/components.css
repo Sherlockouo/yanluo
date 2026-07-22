@@ -136,6 +136,10 @@
   overflow: visible;
 }
 
+.home-cloud-stage {
+  width: 100%;
+}
+
 .home-cloud-word {
   font-family: var(--font-sans);
   letter-spacing: -0.03em;

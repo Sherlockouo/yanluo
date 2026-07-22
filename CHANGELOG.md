@@ -2,6 +2,19 @@
 
 All notable changes to 言落 (Yanluo) are documented in this file.
 
+## [0.10.1] — 2026-07-22
+
+### Added
+- 派活：消息内本地路径 / URL 识别；可预览文件弹窗（图/音视频/PDF/HTML/文本）
+- Markdown 裸 URL 自动可点，系统浏览器打开
+
+### Changed
+- 派活消息脚注：复制 + 时间挪到底栏
+- 首页词云：仅指针进入且悬停词才磁吸；静止无漂浮
+
+### Fixed
+- 路径提取过滤假阳（`f:\n`、泛目录、书名号碎片等）
+
 ## [0.10.0] — 2026-07-21
 
 ### Added

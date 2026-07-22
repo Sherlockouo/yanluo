@@ -9,6 +9,7 @@ import {
   Bot,
   ChevronDown,
   Clipboard,
+  ExternalLink,
   FileText,
   FolderOpen,
   Image as ImageIcon,
@@ -30,6 +31,11 @@ import {
 import { MarkdownBody } from "@/components/shared/markdown-body";
 import { AttachMediaBody } from "@/components/ui/attach-media-body";
 import {
+  FilePreviewModal,
+  isInAppPreviewable,
+  openPathInSystem,
+} from "@/components/ui/file-preview-modal";
+import {
   toolCallToMarkdown,
   toolResultToMarkdown,
 } from "@/lib/agent-tool-md";
@@ -37,6 +43,7 @@ import { defaultConfig, agentModelsFor } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import { springUI } from "@/lib/motion";
 import { friendlyAgentError } from "@/lib/agent-errors";
+import { extractPaths } from "@/lib/extract-paths";
 import type {
   AgentJob,
   AgentJobEvent,
@@ -109,18 +116,6 @@ function copyText(text: string) {
   void navigator.clipboard
     .writeText(text)
     .then(() => toast.success("已复制"), () => toast.danger("复制失败"));
-}
-
-function extractPaths(text: string): string[] {
-  const re =
-    /(?:^|[\s`"'(])((?:\/Users\/|\/home\/|\/var\/|\/tmp\/|[A-Za-z]:\\)[^\s`"')\]]+)/gm;
-  const out: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const p = m[1].replace(/[.,;:]+$/, "");
-    if (p && !out.includes(p)) out.push(p);
-  }
-  return out.slice(0, 40);
 }
 
 /** Drop duplicate assistant/result rows that show the same body (fig1 issue). */
@@ -252,18 +247,23 @@ function EventRowContent({
       <article className="agent-chat-row agent-row-motion is-user">
         <div className="agent-chat-bubble">
           {body ? <MarkdownBody text={body} /> : null}
-          {body ? (
-            <button
-              type="button"
-              className="agent-msg-copy"
-              aria-label="复制"
-              onClick={() => copyText(event.text)}
-            >
-              <Clipboard size={12} />
-            </button>
-          ) : null}
         </div>
-        {clock ? <span className="agent-chat-ts">{clock}</span> : null}
+        {(clock || body) ? (
+          <div className="agent-msg-foot is-user">
+            {body ? (
+              <button
+                type="button"
+                className="agent-msg-copy"
+                aria-label="复制"
+                onClick={() => copyText(event.text)}
+              >
+                <Clipboard size={12} />
+                <span>复制</span>
+              </button>
+            ) : null}
+            {clock ? <span className="agent-chat-ts">{clock}</span> : null}
+          </div>
+        ) : null}
       </article>
     );
   }
@@ -360,18 +360,23 @@ function EventRowContent({
         {body ? (
           <MarkdownBody className="w-full" text={body} streaming={streaming} />
         ) : null}
-        {body && !streaming ? (
-          <button
-            type="button"
-            className="agent-msg-copy"
-            aria-label="复制"
-            onClick={() => copyText(event.text)}
-          >
-            <Clipboard size={12} />
-          </button>
+        {(clock || (body && !streaming)) ? (
+          <div className="agent-msg-foot">
+            {body && !streaming ? (
+              <button
+                type="button"
+                className="agent-msg-copy"
+                aria-label="复制"
+                onClick={() => copyText(event.text)}
+              >
+                <Clipboard size={12} />
+                <span>复制</span>
+              </button>
+            ) : null}
+            {clock ? <span className="agent-chat-ts">{clock}</span> : null}
+          </div>
         ) : null}
       </div>
-      {clock ? <span className="agent-chat-ts">{clock}</span> : null}
     </article>
   );
 }
@@ -501,6 +506,8 @@ export function AgentJobPage() {
   const [preview, setPreview] = useState<Attachment | AgentPathInfo | null>(
     null,
   );
+  /** Side-bar / full preview dialog (image · video · audio · pdf · text). */
+  const [modalPreview, setModalPreview] = useState<AgentPathInfo | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [reply, setReply] = useState("");
   const [replyAttach, setReplyAttach] = useState<Attachment[]>([]);
@@ -589,17 +596,53 @@ export function AgentJobPage() {
     return merged;
   }, [job, events, replyAttach]);
 
+  /** Body-extracted candidates may be stale/junk — keep only real non-dir paths. */
+  const [verifiedPaths, setVerifiedPaths] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const attachSet = new Set([
+      ...(job?.attachments ?? []),
+      ...replyAttach.map((a) => a.path),
+    ]);
+    const run = async () => {
+      const out: string[] = [];
+      for (const p of paths) {
+        if (attachSet.has(p)) {
+          out.push(p);
+          continue;
+        }
+        try {
+          const info = await invoke<AgentPathInfo>("get_path_info", { path: p });
+          if (info.kind === "dir") continue;
+          out.push(info.path);
+        } catch {
+          /* missing / junk */
+        }
+      }
+      if (!cancelled) setVerifiedPaths(out);
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [paths, job?.attachments, replyAttach]);
+
   useEffect(() => {
     const el = timelineRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [events.length, job?.progress, job?.status]);
 
-  const openPreview = async (path: string) => {
+  /** Side file: in-app modal when previewable, else `open` via system. */
+  const openSideFile = async (path: string) => {
     setPreviewBusy(true);
     try {
       const info = await invoke<AgentPathInfo>("get_path_info", { path });
-      setPreview(info);
+      if (isInAppPreviewable(info)) {
+        setModalPreview(info);
+      } else {
+        await openPathInSystem(info.path);
+      }
     } catch (e) {
       toast.warning(e instanceof Error ? e.message : String(e));
     } finally {
@@ -937,7 +980,7 @@ export function AgentJobPage() {
             </div>
 
             <div
-              className="agent-chat-composer-wrap shrink-0 px-3 pb-3 pt-1"
+              className="agent-chat-composer-wrap shrink-0 px-3 pb-3.5 pt-3"
               data-continue-composer
             >
               {canContinue || canDispatchNew || active ? (
@@ -1224,27 +1267,26 @@ export function AgentJobPage() {
                   <PanelRightClose size={14} />
                 </Button>
               </div>
-              {paths.length === 0 ? (
+              {verifiedPaths.length === 0 ? (
                 <p className="type-meta">附件与结果路径会出现在这里</p>
               ) : (
                 <ul className="flex flex-col gap-0.5">
-                  {paths.map((p) => {
+                  {verifiedPaths.map((p) => {
                     const name = p.split("/").filter(Boolean).pop() || p;
                     const pending = replyAttach.some((a) => a.path === p);
+                    const selected = modalPreview?.path === p;
                     return (
-                      <li key={p}>
+                      <li key={p} className="agent-side-file-item group flex items-center gap-0.5">
                         <Button
                           variant="ghost"
                           aria-label={p}
                           isDisabled={previewBusy}
                           className={cn(
-                            "agent-side-file-row h-auto min-h-0 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-normal shadow-none hover:bg-default/50 data-[hovered=true]:bg-default/50",
-                            preview?.path === p && "bg-default/40",
+                            "agent-side-file-row h-auto min-h-0 min-w-0 flex-1 justify-start gap-2 rounded-lg px-2 py-1.5 text-left text-xs font-normal shadow-none hover:bg-default/50 data-[hovered=true]:bg-default/50",
+                            selected && "bg-default/40",
                           )}
                           onPress={() => {
-                            const local = replyAttach.find((a) => a.path === p);
-                            if (local) setPreview(local);
-                            else void openPreview(p);
+                            void openSideFile(p);
                           }}
                         >
                           {pending ? (
@@ -1260,33 +1302,32 @@ export function AgentJobPage() {
                           )}
                           <span className="min-w-0 truncate">{name}</span>
                         </Button>
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant="ghost"
+                          aria-label={`系统打开 ${name}`}
+                          isDisabled={previewBusy}
+                          className="agent-side-file-open h-7 w-7 shrink-0 rounded-md text-muted opacity-55 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-[hovered=true]:bg-default/50 data-[hovered=true]:opacity-100"
+                          onPress={() => void openPathInSystem(p)}
+                        >
+                          <ExternalLink size={12} />
+                        </Button>
                       </li>
                     );
                   })}
                 </ul>
               )}
             </div>
-
-            <AnimatePresence initial={false}>
-              {preview && !replyAttach.some((a) => a.path === preview.path) ? (
-                <motion.div
-                  key="side-preview"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  transition={springUI}
-                >
-                  <AttachPreview
-                    item={preview}
-                    onClose={() => setPreview(null)}
-                  />
-                </motion.div>
-              ) : null}
-            </AnimatePresence>
             </motion.aside>
           ) : null}
         </AnimatePresence>
       </div>
+
+      <FilePreviewModal
+        item={modalPreview}
+        onClose={() => setModalPreview(null)}
+      />
     </PageShell>
   );
 }

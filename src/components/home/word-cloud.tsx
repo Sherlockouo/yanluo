@@ -117,6 +117,9 @@ export function WordCloud({
   const reduce = useReducedMotion();
   const navigate = useNavigate();
   const svgRef = useRef<SVGSVGElement>(null);
+  /** Magnetic only while pointer is inside the cloud surface. */
+  const insideRef = useRef(false);
+  const [inside, setInside] = useState(false);
   const [ptr, setPtr] = useState<{ x: number; y: number } | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const placed = useMemo(() => packWordCloud(words), [words]);
@@ -130,6 +133,13 @@ export function WordCloud({
       x: ((clientX - r.left) / r.width) * W,
       y: ((clientY - r.top) / r.height) * H,
     };
+  };
+
+  const leaveCloud = () => {
+    insideRef.current = false;
+    setInside(false);
+    setPtr(null);
+    setHoverKey(null);
   };
 
   const openWord = (p: Placed) => {
@@ -149,94 +159,87 @@ export function WordCloud({
   }
 
   return (
-    <motion.svg
-      ref={svgRef}
-      className="home-cloud-svg"
-      viewBox={`0 0 ${W} ${H}`}
-      role="img"
-      aria-label="本机高频词"
-      initial={reduce ? false : { opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: duration.slow, ease: easeOut }}
-      onPointerMove={(e) => {
+    <div
+      className="home-cloud-stage"
+      onPointerEnter={(e) => {
         if (reduce) return;
+        insideRef.current = true;
+        setInside(true);
         const p = toSvg(e.clientX, e.clientY);
         if (p) setPtr(p);
       }}
-      onPointerLeave={() => {
-        setPtr(null);
-        setHoverKey(null);
+      onPointerLeave={leaveCloud}
+      onPointerMove={(e) => {
+        if (reduce || !insideRef.current) return;
+        const p = toSvg(e.clientX, e.clientY);
+        if (p) setPtr(p);
       }}
     >
-      {placed.map((p, i) => {
-        const key = `${p.word}-${p.rank}`;
-        const hot = hoverKey === key;
-        // Magnetic pull toward pointer; hovered word follows harder.
-        let pullX = 0;
-        let pullY = 0;
-        if (!reduce && ptr) {
-          const dx = ptr.x - p.x;
-          const dy = ptr.y - p.y;
-          const dist = Math.hypot(dx, dy) || 1;
-          const falloff = Math.max(0, 1 - dist / 320);
-          const strength = hot ? 0.28 : 0.08 * falloff;
-          pullX = dx * strength;
-          pullY = dy * strength;
-        }
-        const tracking = !reduce && (ptr != null || hot);
-        const floatAmp = reduce || tracking ? 0 : i % 2 === 0 ? -2.4 : 2.4;
-        return (
-          <motion.g
-            key={key}
-            initial={false}
-            animate={{
-              x: p.x + pullX,
-              y: tracking
-                ? p.y + pullY
-                : [p.y, p.y + floatAmp, p.y],
-              scale: hot ? 1.16 : 1,
-            }}
-            transition={
-              tracking
-                ? { type: "spring", stiffness: 320, damping: 26, mass: 0.35 }
-                : reduce
-                  ? undefined
-                  : {
-                      duration: 5.5 + (i % 5) * 0.55,
-                      repeat: Infinity,
-                      ease: "easeInOut",
-                      delay: (i % 7) * 0.18,
-                    }
-            }
-            style={{ cursor: "pointer" }}
-            onPointerEnter={() => setHoverKey(key)}
-            onPointerLeave={() =>
-              setHoverKey((cur) => (cur === key ? null : cur))
-            }
-            onClick={() => openWord(p)}
-          >
-            <title>
-              {p.entryId
-                ? `${p.word} · ${p.count} 次 · 打开记录`
-                : `${p.word} · ${p.count} 次`}
-            </title>
-            <text
-              x={0}
-              y={0}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              className="home-cloud-word"
-              style={{
-                fontSize: p.fontSize,
-                fill: fillForRank(p.rank, placed.length, hot),
-                fontWeight: hot || p.rank < 3 ? 600 : 500,
+      <motion.svg
+        ref={svgRef}
+        className="home-cloud-svg"
+        viewBox={`0 0 ${W} ${H}`}
+        role="img"
+        aria-label="本机高频词"
+        initial={reduce ? false : { opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: duration.slow, ease: easeOut }}
+      >
+        {placed.map((p) => {
+          const key = `${p.word}-${p.rank}`;
+          const hot = inside && hoverKey === key;
+          // Magnet only after pointer entered the cloud AND is on this word.
+          // Idle = still; no ambient float (mouse-not-moving must look frozen).
+          let pullX = 0;
+          let pullY = 0;
+          if (!reduce && hot && ptr) {
+            pullX = (ptr.x - p.x) * 0.62;
+            pullY = (ptr.y - p.y) * 0.62;
+          }
+          return (
+            <motion.g
+              key={key}
+              initial={false}
+              animate={{
+                x: p.x + pullX,
+                y: p.y + pullY,
+                scale: hot ? 1.22 : 1,
               }}
+              transition={
+                hot
+                  ? { type: "spring", stiffness: 380, damping: 22, mass: 0.28 }
+                  : { type: "spring", stiffness: 420, damping: 36, mass: 0.4 }
+              }
+              style={{ cursor: "pointer" }}
+              onPointerEnter={() => setHoverKey(key)}
+              onPointerLeave={() =>
+                setHoverKey((cur) => (cur === key ? null : cur))
+              }
+              onClick={() => openWord(p)}
             >
-              {p.word}
-            </text>
-          </motion.g>
-        );
-      })}
-    </motion.svg>
+              <title>
+                {p.entryId
+                  ? `${p.word} · ${p.count} 次 · 打开记录`
+                  : `${p.word} · ${p.count} 次`}
+              </title>
+              <text
+                x={0}
+                y={0}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                className="home-cloud-word"
+                style={{
+                  fontSize: p.fontSize,
+                  fill: fillForRank(p.rank, placed.length, hot),
+                  fontWeight: hot || p.rank < 3 ? 600 : 500,
+                }}
+              >
+                {p.word}
+              </text>
+            </motion.g>
+          );
+        })}
+      </motion.svg>
+    </div>
   );
 }

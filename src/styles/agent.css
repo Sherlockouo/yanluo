@@ -105,20 +105,33 @@
   position: relative;
 }
 
-.agent-msg-copy {
-  position: absolute;
-  top: 0.35rem;
-  right: 0.35rem;
-  z-index: 1;
-  display: inline-flex;
-  height: 26px;
-  width: 26px;
+/* Footer meta — time + copy, bottom-right of the reply */
+.agent-msg-foot {
+  display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.45rem;
+  min-height: 1.1rem;
+}
+
+.agent-msg-foot.is-user {
+  padding-inline: 0.15rem;
+}
+
+.agent-msg-copy {
+  display: inline-flex;
+  height: 22px;
+  align-items: center;
+  gap: 0.3rem;
   border: 0;
-  border-radius: 10px;
-  background: color-mix(in oklab, var(--surface) 88%, transparent);
+  border-radius: 8px;
+  padding: 0 0.4rem;
+  background: transparent;
   color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  letter-spacing: 0.01em;
   opacity: 0;
   cursor: pointer;
   transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
@@ -147,7 +160,20 @@
 
 .agent-chat-bubble .agent-md,
 .agent-msg-block .agent-md {
-  padding-right: 1.5rem;
+  padding-right: 0;
+}
+
+.agent-md-link {
+  color: var(--accent-soft-foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+
+.agent-md-link:hover {
+  color: color-mix(in oklab, var(--accent-soft-foreground) 80%, var(--foreground));
 }
 
 /* Mono meta — timestamps, session ids, durations (IBM Plex Mono) */
@@ -368,6 +394,7 @@
     var(--surface) 72%,
     color-mix(in oklab, var(--surface) 0%, transparent)
   );
+  padding-top: 0.85rem;
 }
 
 .agent-chat-timeline {
@@ -376,14 +403,14 @@
     to bottom,
     transparent 0,
     #000 12px,
-    #000 calc(100% - 16px),
+    #000 calc(100% - 28px),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0,
     #000 12px,
-    #000 calc(100% - 16px),
+    #000 calc(100% - 28px),
     transparent 100%
   );
 }
@@ -669,6 +696,27 @@
   background: color-mix(in oklab, var(--foreground) 4%, var(--surface));
 }
 
+/* Full-screen file preview modal body — media fills remaining height. */
+.agent-file-preview-body {
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in oklab, var(--foreground) 3%, var(--surface));
+}
+
+.agent-file-preview-body > * {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.agent-file-preview-text {
+  padding: 0.25rem 0.5rem;
+}
+
+.agent-file-preview-text .agent-md {
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+
 /* Unified composer well — one surface, controls live inside (no tray / divider). */
 .agent-composer {
   position: relative;
@@ -676,7 +724,7 @@
   flex-direction: column;
   gap: 0;
   border: 0;
-  border-radius: var(--radius-lg);
+  border-radius: 14px;
   background: var(--surface-secondary);
   box-shadow: none;
   padding: 4px 4px 6px;
@@ -898,6 +946,12 @@
 .agent-chat-row > .agent-chat-ts {
   margin-top: 0.25rem;
   padding-inline: 0.25rem;
+}
+
+.agent-msg-foot .agent-chat-ts {
+  margin-top: 0;
+  padding-inline: 0;
+  flex-shrink: 0;
 }
 
 /* Empty states */
