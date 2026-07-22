@@ -6795,7 +6795,7 @@ dependencies = [
 
 [[package]]
 name = "yanluo"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "block2",
  "cc",

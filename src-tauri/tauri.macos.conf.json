@@ -1,6 +1,6 @@
 {
   "build": {
-    "beforeBundleCommand": "node ../scripts/stage-mlx-metallib.mjs --bundle"
+    "beforeBundleCommand": "node scripts/stage-mlx-metallib.mjs --bundle"
   },
   "bundle": {
     "macOS": {

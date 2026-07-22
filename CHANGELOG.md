@@ -2,6 +2,11 @@
 
 All notable changes to 言落 (Yanluo) are documented in this file.
 
+## [0.10.4] — 2026-07-23
+
+### Fixed
+- `beforeBundleCommand` 脚本路径：工作目录是仓库根，应为 `scripts/…`（原 `../scripts` 导致本地/CI 打包失败）
+
 ## [0.10.3] — 2026-07-23
 
 ### Fixed
