@@ -188,13 +188,14 @@ export function WordCloud({
         {placed.map((p) => {
           const key = `${p.word}-${p.rank}`;
           const hot = inside && hoverKey === key;
-          // Magnet only after pointer entered the cloud AND is on this word.
-          // Idle = still; no ambient float (mouse-not-moving must look frozen).
+          // Enter cloud → every word magnetically follows the pointer.
+          // Idle outside = frozen. Hover only bumps scale/color.
           let pullX = 0;
           let pullY = 0;
-          if (!reduce && hot && ptr) {
-            pullX = (ptr.x - p.x) * 0.62;
-            pullY = (ptr.y - p.y) * 0.62;
+          if (!reduce && inside && ptr) {
+            const strength = hot ? 0.72 : 0.55;
+            pullX = (ptr.x - p.x) * strength;
+            pullY = (ptr.y - p.y) * strength;
           }
           return (
             <motion.g
@@ -205,11 +206,12 @@ export function WordCloud({
                 y: p.y + pullY,
                 scale: hot ? 1.22 : 1,
               }}
-              transition={
-                hot
-                  ? { type: "spring", stiffness: 380, damping: 22, mass: 0.28 }
-                  : { type: "spring", stiffness: 420, damping: 36, mass: 0.4 }
-              }
+              transition={{
+                type: "spring",
+                stiffness: hot ? 360 : 280,
+                damping: hot ? 22 : 28,
+                mass: 0.32,
+              }}
               style={{ cursor: "pointer" }}
               onPointerEnter={() => setHoverKey(key)}
               onPointerLeave={() =>

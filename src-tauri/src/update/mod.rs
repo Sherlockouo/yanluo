@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 
-const REPO: &str = "XBCoder128/asr-cli";
+const REPO: &str = "Sherlockouo/yanluo";
 const USER_AGENT: &str = "Yanluo-Updater";
 
 static DOWNLOAD_IN_FLIGHT: AtomicBool = AtomicBool::new(false);

@@ -34,7 +34,7 @@ function spectrumFromRms(rms: number, bands: number[] | undefined): number[] {
   }
 
   return Array.from({ length: n }, (_, i) => {
-    const t = n === 1 ? 0.5 : i / (n - 1);
+    const t = i / (n - 1);
     return level * (0.45 + 0.55 * Math.sin(Math.PI * t));
   });
 }

@@ -5,7 +5,7 @@ import { AsrPage } from "@/views/asr-page";
 import { TranscribePage } from "@/views/transcribe-page";
 import { HistoryPage } from "@/views/history-page";
 import { TranslatePage } from "@/views/translate-page";
-import { providerLabel, asrLanguageOptions } from "@/lib/constants";
+import { providerLabel } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import { useApp } from "@/app-context";
 import { useTabScroll } from "@/hooks/use-tab-scroll";
@@ -166,13 +166,6 @@ export function DraftPage() {
       { replace: true },
     );
   };
-
-  const languageLabel =
-    config.language === "auto"
-      ? "自动检测语言"
-      : (asrLanguageOptions(config.extra_languages).find(
-          ([v]) => v === config.language,
-        )?.[1] ?? config.language);
 
   return (
     <PageShell className="max-w-[880px]">

@@ -5,7 +5,7 @@ export type ChangelogEntry = {
   notes: string[];
 };
 
-export const APP_REPO = "XBCoder128/asr-cli";
+export const APP_REPO = "Sherlockouo/yanluo";
 export const APP_REPO_URL = `https://github.com/${APP_REPO}`;
 export const APP_RELEASES_URL = `${APP_REPO_URL}/releases`;
 
