@@ -40,6 +40,9 @@ import { duration, easeOut, springBounce } from "@/lib/motion";
 
 const CAPSULE_W = 420;
 const CAPSULE_H = 56;
+/** Confirm/edit: wider + taller so multi-line select/edit is usable. */
+const CAPSULE_EDIT_W = 560;
+const CAPSULE_EDIT_H = 120;
 const AGENT_W = 520;
 /** Pills row above + capsule row (attachments inline — no extra strip). */
 const AGENT_BASE_H = 88;
@@ -98,7 +101,6 @@ export function AsrHud() {
   const [pickerMode, setPickerMode] = useState<"" | "agent" | "cwd">("");
   const [profiles, setProfiles] = useState(defaultConfig.agent_profiles);
   const [profileId, setProfileId] = useState(defaultConfig.agent_profile_id);
-  const [fnLabel, setFnLabel] = useState(defaultConfig.hotkey_transcribe.label);
 
   const payloadRef = useRef(payload);
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -153,36 +155,42 @@ export function AsrHud() {
     profiles.find((p) => p.id === profileId)?.name ??
     (agent === "claude" ? "Claude" : "Codex");
 
-  const resize = useCallback((agentMode: boolean) => {
-    if (!agentMode) {
+  const resize = useCallback((agentMode: boolean, editMode: boolean) => {
+    if (agentMode) {
       void invoke("resize_floating_hud", {
-        width: CAPSULE_W,
-        height: CAPSULE_H,
+        width: AGENT_W,
+        height: AGENT_BASE_H,
       }).catch(() => {});
+      void getCurrentWindow()
+        .setSize(new LogicalSize(AGENT_W, AGENT_BASE_H))
+        .catch(() => {});
       return;
     }
-    void invoke("resize_floating_hud", {
-      width: AGENT_W,
-      height: AGENT_BASE_H,
-    }).catch(() => {});
-    void getCurrentWindow()
-      .setSize(new LogicalSize(AGENT_W, AGENT_BASE_H))
-      .catch(() => {});
+    const width = editMode ? CAPSULE_EDIT_W : CAPSULE_W;
+    const height = editMode ? CAPSULE_EDIT_H : CAPSULE_H;
+    void invoke("resize_floating_hud", { width, height }).catch(() => {});
   }, []);
 
   useEffect(() => {
-    resize(isAgent);
-  }, [isAgent, resize]);
+    resize(isAgent, confirmEditing);
+  }, [isAgent, confirmEditing, resize]);
 
   useEffect(() => {
     if (!editing) return;
     setEditText(payload.text || "");
+  }, [editing, payload.text]);
+
+  // Focus once on enter edit — do not re-selectAll on every text sync (kills drag-select).
+  useEffect(() => {
+    if (!editing) return;
     requestAnimationFrame(() => {
-      editRef.current?.focus();
-      editRef.current?.select();
+      const el = editRef.current;
+      if (!el) return;
+      el.focus();
+      el.select();
     });
     void getCurrentWindow().setFocus().catch(() => {});
-  }, [editing, payload.text]);
+  }, [editing]);
 
   const confirmTranscript = useCallback(async () => {
     if (confirmingRef.current) return;
@@ -397,9 +405,6 @@ export function AsrHud() {
             : defaultConfig.agent_profiles,
         );
         setProfileId(cfg.agent_profile_id || "claude");
-        setFnLabel(
-          cfg.hotkey_transcribe?.label ?? defaultConfig.hotkey_transcribe.label,
-        );
       })
       .catch(() => {});
 
@@ -608,9 +613,6 @@ export function AsrHud() {
             : defaultConfig.agent_profiles,
         );
         setProfileId(cfg.agent_profile_id || "claude");
-        setFnLabel(
-          cfg.hotkey_transcribe?.label ?? defaultConfig.hotkey_transcribe.label,
-        );
       }),
     );
 
@@ -754,7 +756,16 @@ export function AsrHud() {
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         const t = event.target as HTMLElement;
-        if (t.closest("input,textarea,button,a,[data-no-drag]")) return;
+        if (t.closest("input,textarea,button,a,[data-no-drag],.hud-edit-field")) {
+          return;
+        }
+        // Edit mode: only bars/colon drag — rest is for text select.
+        if (
+          (confirmEditing || agentEditing) &&
+          !t.closest(".hud-drag-handle")
+        ) {
+          return;
+        }
         void getCurrentWindow().startDragging().catch(() => {});
       }}
     >
@@ -818,7 +829,6 @@ export function AsrHud() {
               busy={busy}
               error={error}
               editRef={editRef}
-              fnLabel={fnLabel}
               onEditChange={setEditText}
               onEditKey={onEditKey}
             />
@@ -1076,7 +1086,6 @@ function FloatingCapsule({
   busy,
   error,
   editRef,
-  fnLabel,
   onEditChange,
   onEditKey,
 }: {
@@ -1087,7 +1096,6 @@ function FloatingCapsule({
   busy: boolean;
   error: string | null;
   editRef: RefObject<HTMLTextAreaElement | null>;
-  fnLabel?: string;
   onEditChange: (v: string) => void;
   onEditKey: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
 }) {
@@ -1130,6 +1138,14 @@ function FloatingCapsule({
     void invoke("recenter_floating_hud", { width: CAPSULE_W }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (!editing) return;
+    void invoke("resize_floating_hud", {
+      width: CAPSULE_EDIT_W,
+      height: CAPSULE_EDIT_H,
+    }).catch(() => {});
+  }, [editing]);
+
   useLayoutEffect(() => {
     if (editing) return;
     const el = textViewportRef.current;
@@ -1139,16 +1155,18 @@ function FloatingCapsule({
   }, [displayText, committed, active, loading, switching, editing]);
 
   const hint = error ?? (busy ? "确认中…" : "");
+  const capsuleH = editing ? CAPSULE_EDIT_H : CAPSULE_H;
 
   return (
     <div
       className={cn(
         "hud-capsule",
+        editing && "hud-capsule-editing",
         loading && "hud-capsule-refining",
         switching && "hud-capsule-switching",
         justRefined && "hud-capsule-refined",
       )}
-      style={{ width: "100%", height: CAPSULE_H }}
+      style={{ width: "100%", height: capsuleH }}
     >
       <div className="hud-inner">
         {loading ? (
@@ -1165,10 +1183,10 @@ function FloatingCapsule({
               rms={smoothed}
               bands={meter.bands}
               active
-              className="hud-live-bars"
+              className="hud-live-bars hud-drag-handle"
             />
         ) : (
-          <div className="hud-brand-bars" aria-hidden>
+          <div className="hud-brand-bars hud-drag-handle" aria-hidden>
             <div className="hud-brand-bar" />
             <div className="hud-brand-bar" />
             <div className="hud-brand-bar" />
@@ -1176,26 +1194,23 @@ function FloatingCapsule({
             <div className="hud-brand-bar" />
           </div>
         )}
-        <span className="hud-colon" aria-hidden>
+        <span className="hud-colon hud-drag-handle" aria-hidden>
           :
         </span>
         {editing ? (
-          <TextField
-            aria-label={hint || "确认或修改后按 Fn / Enter"}
+          <textarea
+            ref={editRef}
+            rows={3}
+            aria-label={hint || "确认或修改后按 Enter"}
+            placeholder={hint || "确认或修改后按 Enter"}
             value={editText}
-            onChange={onEditChange}
-            isDisabled={busy}
-            className="min-w-0 flex-1"
-          >
-            <TextArea
-              ref={editRef}
-              rows={1}
-              placeholder={hint || "确认或修改后按 Fn / Enter"}
-              className="hud-agent-input flex"
-              data-no-drag
-              onKeyDown={onEditKey}
-            />
-          </TextField>
+            disabled={busy}
+            className="hud-agent-input hud-edit-input min-w-0 flex-1"
+            data-no-drag
+            onChange={(e) => onEditChange(e.target.value)}
+            onKeyDown={onEditKey}
+            onPointerDown={(e) => e.stopPropagation()}
+          />
         ) : (
           <div
             ref={textViewportRef}
@@ -1240,9 +1255,6 @@ function FloatingCapsule({
             </motion.span>
           </div>
         )}
-        {editing && fnLabel ? (
-          <span className="hud-fn-badge">{fnLabel}</span>
-        ) : null}
       </div>
     </div>
   );

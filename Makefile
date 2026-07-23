@@ -17,6 +17,7 @@ install-local:
 	$(TAURI) build --features qwen-local
 ifeq ($(UNAME_S),Darwin)
 	node scripts/stage-mlx-metallib.mjs --bundle
+	node scripts/embed-gatekeeper-fix.mjs
 	@APP=$$(ls -d src-tauri/target/release/bundle/macos/*.app 2>/dev/null | head -1); \
 	  if [ -n "$$APP" ]; then \
 	    node scripts/stage-mlx-metallib.mjs --app "$$APP"; \

@@ -450,7 +450,9 @@ fn configure_floating_overlay_panel(
         ns_window.setOpaque(false);
         ns_window.setBackgroundColor(Some(&NSColor::clearColor()));
         ns_window.setHasShadow(has_shadow);
-        ns_window.setMovableByWindowBackground(true);
+        // false: true steals drag-to-select in textarea (window moves instead).
+        // Drag chrome via FE startDragging / -webkit-app-region on handles only.
+        ns_window.setMovableByWindowBackground(false);
         ns_window.setIgnoresMouseEvents(false);
         ns_window.setLevel(NSMainMenuWindowLevel + 2);
 

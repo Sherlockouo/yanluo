@@ -5,7 +5,7 @@ export type RecState =
   | "refining"
   | "editing";
 
-export type AsrProvider = "qwen" | "apple" | "elevenlabs";
+export type AsrProvider = "qwen" | "apple";
 
 /** Built-in provider presets. User-added custom providers use arbitrary string ids. */
 export type LlmBuiltinProvider =
@@ -120,7 +120,9 @@ export type AppConfig = {
   /** Catalog id e.g. Qwen3-ASR-0.6B */
   asr_model_id: string;
   asr_provider: AsrProvider;
+  /** @deprecated ElevenLabs ASR removed — kept for config.json compat. */
   elevenlabs_api_key: string;
+  /** @deprecated */
   elevenlabs_model: string;
   language: string;
   /** Shift+Fn 翻译目标语言（不含 auto）。 */

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -248,7 +248,7 @@ pub(crate) fn emit_floating_status(app: &AppHandle, visible: bool, state: &str, 
 }
 
 pub(crate) const FLOATING_HUD_H: f64 = 56.0;
-/// Fixed HUD width — transcript scrolls inside; window does not grow.
+/// Compact listen/process floor; confirm/edit grows toward MAX_W.
 pub(crate) const FLOATING_HUD_MIN_W: f64 = 400.0;
 pub(crate) const FLOATING_HUD_MAX_W: f64 = 560.0;
 /// Gap from monitor bottom to capsule bottom — clear Dock / taskbar.
@@ -321,6 +321,11 @@ pub(crate) struct HudPositionFile {
     /// Per-monitor remembered drag offsets (key = monitor name or origin).
     #[serde(default)]
     pub(crate) by_monitor: std::collections::HashMap<String, HudMonitorPos>,
+    /// Last absolute logical top-left — fallback when monitor key misses.
+    #[serde(default)]
+    pub(crate) last_x: Option<f64>,
+    #[serde(default)]
+    pub(crate) last_y: Option<f64>,
     /// Legacy absolute logical coords (pre per-monitor). Migrated on load.
     #[serde(default)]
     pub(crate) x: Option<f64>,
@@ -328,14 +333,15 @@ pub(crate) struct HudPositionFile {
     pub(crate) y: Option<f64>,
 }
 
-fn skip_hud_move_persist() -> &'static AtomicBool {
-    static FLAG: AtomicBool = AtomicBool::new(false);
+fn skip_hud_move_persist() -> &'static AtomicU32 {
+    static FLAG: AtomicU32 = AtomicU32::new(0);
     &FLAG
 }
 
-/// Next `Moved` is from programmatic `set_position` — don't overwrite memory.
+/// Next N `Moved` events are from programmatic set_size/set_position — don't overwrite memory.
 pub(crate) fn mark_hud_programmatic_move() {
-    skip_hud_move_persist().store(true, Ordering::Release);
+    // size + position often each emit Moved
+    skip_hud_move_persist().fetch_add(2, Ordering::Release);
 }
 
 pub(crate) fn hud_position_path() -> PathBuf {
@@ -422,7 +428,7 @@ pub(crate) fn resolve_hud_logical_position(app: &AppHandle, win_w: f64) -> (f64,
 
     // Migrate legacy absolute x/y → per-monitor offset once.
     if file.by_monitor.is_empty() {
-        if let (Some(sx), Some(sy)) = (file.x, file.y) {
+        if let (Some(sx), Some(sy)) = (file.x.or(file.last_x), file.y.or(file.last_y)) {
             if sx.is_finite() && sy.is_finite() {
                 let mon = app
                     .available_monitors()
@@ -439,6 +445,8 @@ pub(crate) fn resolve_hud_logical_position(app: &AppHandle, win_w: f64) -> (f64,
                         y: sy - ly,
                     },
                 );
+                file.last_x = Some(sx);
+                file.last_y = Some(sy);
                 file.x = None;
                 file.y = None;
                 save_hud_position_file(&file);
@@ -446,13 +454,21 @@ pub(crate) fn resolve_hud_logical_position(app: &AppHandle, win_w: f64) -> (f64,
         }
     }
 
+    let (lx, ly, lw, lh) = monitor_logical_rect(&cm);
+    let max_x = (lw - win_w.clamp(FLOATING_HUD_MIN_W, FLOATING_HUD_MAX_W)).max(0.0);
+    let max_y = (lh - FLOATING_HUD_H).max(0.0);
+
     if let Some(saved) = file.by_monitor.get(&key) {
-        let (lx, ly, lw, lh) = monitor_logical_rect(&cm);
-        let max_x = (lw - win_w.clamp(FLOATING_HUD_MIN_W, FLOATING_HUD_MAX_W)).max(0.0);
-        let max_y = (lh - FLOATING_HUD_H).max(0.0);
         let x = lx + saved.x.clamp(0.0, max_x);
         let y = ly + saved.y.clamp(0.0, max_y);
         return (x, y);
+    }
+
+    // Fallback: last absolute point if it still lands on this monitor.
+    if let (Some(sx), Some(sy)) = (file.last_x.or(file.x), file.last_y.or(file.y)) {
+        if sx.is_finite() && sy.is_finite() && monitor_contains_logical(&cm, sx, sy) {
+            return (sx.clamp(lx, lx + max_x), sy.clamp(ly, ly + max_y));
+        }
     }
 
     // Different display (or never dragged here) → default on cursor monitor.
@@ -484,6 +500,8 @@ pub(crate) fn persist_floating_hud_position(window: &tauri::WebviewWindow) {
             y: wy - ly,
         },
     );
+    file.last_x = Some(wx);
+    file.last_y = Some(wy);
     file.x = None;
     file.y = None;
     save_hud_position_file(&file);
@@ -536,7 +554,10 @@ pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
     let app_for_move = app.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Moved(_) = event {
-            if skip_hud_move_persist().swap(false, Ordering::AcqRel) {
+            let skip = skip_hud_move_persist();
+            let prev = skip.load(Ordering::Acquire);
+            if prev > 0 {
+                skip.fetch_sub(1, Ordering::AcqRel);
                 // Programmatic show/resize — keep per-monitor memory intact.
             } else {
                 persist_floating_hud_position(&win_for_move);
@@ -778,6 +799,22 @@ pub(crate) fn get_floating_status(app: AppHandle) -> FloatingStatus {
         .unwrap_or_default()
 }
 
+/// Keep horizontal center; grow/shrink **upward** (bottom edge stays put).
+fn anchored_resize_xy(
+    cur_x: f64,
+    cur_y: f64,
+    cur_w: f64,
+    cur_h: f64,
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
+    let center_x = cur_x + cur_w / 2.0;
+    let bottom = cur_y + cur_h;
+    let x = (center_x - width / 2.0).max(8.0);
+    let y = (bottom - height).max(8.0);
+    (x, y)
+}
+
 /// Keep the frosted capsule anchored on its current center as elastic width changes.
 /// Preserves user-dragged X/Y (only adjusts X for width delta) and persists it.
 #[tauri::command]
@@ -792,26 +829,26 @@ pub(crate) fn recenter_floating_hud(app: AppHandle, width: f64) {
                     let cur_x = pos.x as f64 / scale;
                     let cur_y = pos.y as f64 / scale;
                     let cur_w = size.width as f64 / scale;
-                    let center_x = cur_x + cur_w / 2.0;
-                    ((center_x - width / 2.0).max(8.0), cur_y)
+                    let cur_h = size.height as f64 / scale;
+                    let height = cur_h.clamp(FLOATING_HUD_H, 280.0);
+                    anchored_resize_xy(cur_x, cur_y, cur_w, cur_h, width, height)
                 }
                 _ => resolve_hud_logical_position(&app, width),
             };
-            // Keep current height (agent HUD may be taller than FLOATING_HUD_H).
             let height = window
                 .outer_size()
                 .ok()
                 .map(|s| (s.height as f64 / scale).clamp(FLOATING_HUD_H, 280.0))
                 .unwrap_or(FLOATING_HUD_H);
-            let _ = window.set_size(tauri::LogicalSize::new(width, height));
             mark_hud_programmatic_move();
+            let _ = window.set_size(tauri::LogicalSize::new(width, height));
             let _ = window.set_position(tauri::LogicalPosition::new(x, y));
-            persist_floating_hud_position(&window);
+            // Do not persist here — programmatic; user-drag / hide persist.
         }
     });
 }
 
-/// Resize floating HUD (agent mode grows for rail / preview / edit).
+/// Resize floating HUD (agent / confirm-edit grow). Bottom edge stays put.
 #[tauri::command]
 pub(crate) fn resize_floating_hud(app: AppHandle, width: f64, height: f64) {
     let app_clone = app.clone();
@@ -825,13 +862,13 @@ pub(crate) fn resize_floating_hud(app: AppHandle, width: f64, height: f64) {
                     let cur_x = pos.x as f64 / scale;
                     let cur_y = pos.y as f64 / scale;
                     let cur_w = size.width as f64 / scale;
-                    let center_x = cur_x + cur_w / 2.0;
-                    ((center_x - width / 2.0).max(8.0), cur_y)
+                    let cur_h = size.height as f64 / scale;
+                    anchored_resize_xy(cur_x, cur_y, cur_w, cur_h, width, height)
                 }
                 _ => resolve_hud_logical_position(&app, width),
             };
-            let _ = window.set_size(tauri::LogicalSize::new(width, height));
             mark_hud_programmatic_move();
+            let _ = window.set_size(tauri::LogicalSize::new(width, height));
             let _ = window.set_position(tauri::LogicalPosition::new(x, y));
         }
     });

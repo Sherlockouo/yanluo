@@ -454,8 +454,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return;
         }
         if (stateRef.current !== "idle") return;
+        if (
+          (current.asr_provider as string) === "elevenlabs"
+        ) {
+          toast.warning("ElevenLabs 已移除 — 请到设置 → 识别改选 Apple 或 Qwen");
+          return;
+        }
         if (current.asr_provider === "qwen" && !modelLoadedRef.current) {
-          toast.warning("请先加载 ASR 模型，或切到 Apple/ElevenLabs");
+          toast.warning("请先在设置 → 识别 加载 Qwen 模型，或改用 Apple Speech");
           return;
         }
         if (shift) {

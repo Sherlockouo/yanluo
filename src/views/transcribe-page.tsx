@@ -764,7 +764,7 @@ function UploadPhase({
           <div className="flex flex-col gap-5 pt-12">
             {modelBlocked ? (
               <div className="rounded-xl bg-warning/10 px-3 py-2 type-meta text-warning">
-                模型未就绪
+                Qwen 模型未加载 — 去设置 → 识别点「加载模型」，或改用 Apple Speech
               </div>
             ) : null}
 

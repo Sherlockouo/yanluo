@@ -9,6 +9,8 @@ macOS 桌面应用：开会 / 口述 / 文件转写成稿，或把活派给 Clau
 
 [下载最新版](https://github.com/Sherlockouo/yanluo/releases) · [更新日志](./CHANGELOG.md)
 
+macOS：若提示「已损坏」，把 Yanluo 拖进「应用程序」后，双击 DMG 里的 **若打不开-点我.command**。
+
 ---
 
 ## 使用态

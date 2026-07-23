@@ -3,7 +3,6 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -18,6 +17,7 @@ import {
   Kbd,
   Label,
   ListBox,
+  NumberField,
   Select,
   Switch,
   TextArea,
@@ -74,7 +74,6 @@ import {
   QWEN_ASR_MODELS,
   RECOMMENDED_REFINE_MODELS,
   resolveLlmCreds,
-  seedLlmCredentials,
 } from "@/lib/constants";
 import { useFade } from "@/lib/motion";
 import {
@@ -85,7 +84,6 @@ import {
 import type {
   AgentKind,
   AgentProfile,
-  AppConfig,
   AsrProvider,
   ExtraLanguage,
   HotkeyBinding,
@@ -252,7 +250,7 @@ const SYSTEM_SUBS: { id: SystemSub; label: string }[] = [
 
 /** One muted 13px description line under the serif section head (v3.1). */
 const TAB_DESC: Record<SettingsTab, string> = {
-  general: "语言、录音源与外观。改动即时生效，保存写入磁盘。",
+  general: "语言、录音源与外观。各页自行保存。",
   asr: "识别引擎、型号与逐字对齐。",
   polish: "服务商配置、纠错学习与词库。",
   agent: "内置 Claude · Codex · Pi，选一个作为默认派活 Agent。",
@@ -576,125 +574,7 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {/* Sticky 保存条 — 只在有未保存修改时出现 (v3.1) */}
-      <SettingsSaveBar />
     </PageShell>
-  );
-}
-
-/** Mirror of app-context's loadConfig merge so the baseline matches hydrated config. */
-function mergeSavedConfig(saved: AppConfig): AppConfig {
-  const merged: AppConfig = {
-    ...defaultConfig,
-    ...saved,
-    language: saved.language || "auto",
-  };
-  merged.llm_credentials = seedLlmCredentials(merged);
-  return merged;
-}
-
-/** Key-order-independent stringify so seeded objects compare equal to spread ones. */
-function stableStringify(value: unknown): string {
-  if (value === undefined) return "undefined";
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value) ?? "null";
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-  const obj = value as Record<string, unknown>;
-  return `{${Object.keys(obj)
-    .sort()
-    .map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`)
-    .join(",")}}`;
-}
-
-/**
- * Sticky savebar (v3.1) — appears only when the live config differs from what
- * is persisted on disk. Baseline refetches (debounced) after every config
- * change so silent saves elsewhere re-sync, plus a slow poll while dirty to
- * catch same-reference saves that skip a re-render.
- */
-function SettingsSaveBar() {
-  const { config, updateConfig, saveConfig } = useApp();
-  const [baseline, setBaseline] = useState<AppConfig | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    const t = window.setTimeout(() => {
-      void invoke<AppConfig>("get_app_config")
-        .then((saved) => {
-          if (alive) setBaseline(mergeSavedConfig(saved));
-        })
-        .catch(() => {});
-    }, 300);
-    return () => {
-      alive = false;
-      window.clearTimeout(t);
-    };
-  }, [config]);
-
-  const dirtyKeys = useMemo(() => {
-    if (!baseline) return [];
-    const live = config as unknown as Record<string, unknown>;
-    const saved = baseline as unknown as Record<string, unknown>;
-    const keys = new Set([...Object.keys(live), ...Object.keys(saved)]);
-    return [...keys].filter(
-      (k) => stableStringify(live[k]) !== stableStringify(saved[k]),
-    );
-  }, [config, baseline]);
-
-  useEffect(() => {
-    if (dirtyKeys.length === 0) return;
-    const id = window.setInterval(() => {
-      void invoke<AppConfig>("get_app_config")
-        .then((saved) => setBaseline(mergeSavedConfig(saved)))
-        .catch(() => {});
-    }, 3000);
-    return () => window.clearInterval(id);
-  }, [dirtyKeys.length]);
-
-  if (dirtyKeys.length === 0 || !baseline) return null;
-
-  const discard = () => {
-    const apply = updateConfig as unknown as (
-      key: string,
-      value: unknown,
-    ) => void;
-    const saved = baseline as unknown as Record<string, unknown>;
-    for (const key of dirtyKeys) apply(key, saved[key]);
-  };
-
-  const save = () => {
-    void saveConfig()
-      .then(() => setBaseline(config))
-      .catch(() => {});
-  };
-
-  return (
-    <div className="set-savebar" role="status">
-      <span className="set-savebar-hint">
-        已修改 {dirtyKeys.length} 项 · 保存后生效
-      </span>
-      <div className="set-savebar-actions">
-        <Button
-          size="sm"
-          variant="ghost"
-          className="set-savebar-ghost"
-          onPress={discard}
-        >
-          放弃
-        </Button>
-        <Button
-          size="sm"
-          variant="primary"
-          className="set-savebar-cta btn-press"
-          onPress={save}
-        >
-          保存
-        </Button>
-      </div>
-    </div>
   );
 }
 
@@ -769,7 +649,7 @@ function SystemPanel({
 }
 
 function AsrProviderPanel() {
-  const { config, updateConfig, saveConfig, chooseModelDir, loadModel } =
+  const { config, updateConfig, saveConfig, chooseModelDir, loadModel, modelLoaded, modelLoading } =
     useApp();
   const [appleAvailable, setAppleAvailable] = useState(true);
   const [qwenLocal, setQwenLocal] = useState(false);
@@ -786,7 +666,7 @@ function AsrProviderPanel() {
         setAppleAvailable(ok);
         setQwenLocal(info.qwen_local_available ?? false);
         if (!ok && config.asr_provider === "apple") {
-          updateConfig("asr_provider", "elevenlabs");
+          updateConfig("asr_provider", "qwen");
         }
       })
       .catch(() => {
@@ -879,10 +759,6 @@ function AsrProviderPanel() {
                   <ListBox.ItemIndicator />
                 </ListBox.Item>
               ) : null}
-              <ListBox.Item id="elevenlabs" textValue="ElevenLabs Scribe">
-                ElevenLabs Scribe
-                <ListBox.ItemIndicator />
-              </ListBox.Item>
               <ListBox.Item
                 id="qwen"
                 textValue="Qwen 本地"
@@ -895,21 +771,10 @@ function AsrProviderPanel() {
           </Select.Popover>
         </Select>
 
-        {config.asr_provider === "elevenlabs" ? (
-          <TextField
-            fullWidth
-            variant="secondary"
-            type="password"
-            value={config.elevenlabs_api_key}
-            onChange={(value) => updateConfig("elevenlabs_api_key", value)}
-          >
-            <Label>API Key</Label>
-            <Input />
-          </TextField>
-        ) : null}
-
         {config.asr_provider === "apple" ? (
-          <p className="type-meta">系统语音识别，无需额外配置。</p>
+          <p className="type-meta">
+            系统语音识别，录音时实时出字。需在「系统 → 权限」打开语音识别。
+          </p>
         ) : null}
 
         {isQwen ? (
@@ -1066,16 +931,19 @@ function AsrProviderPanel() {
                 onChange={(value) => updateConfig("asr_model_dir", value)}
               >
                 <Label>模型目录</Label>
-                <div className="flex gap-2">
-                  <Input className="min-w-0 flex items-center font-mono text-[13px]" />
-                  <Button
-                    variant="secondary"
-                    onPress={() => void chooseModelDir()}
-                  >
-                    <FolderOpen size={16} />
-                    浏览
-                  </Button>
-                </div>
+                <InputGroup className="w-full">
+                  <InputGroup.Input className="min-w-0 font-mono text-[13px]" />
+                  <InputGroup.Suffix className="pr-1">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onPress={() => void chooseModelDir()}
+                    >
+                      <FolderOpen size={16} />
+                      浏览
+                    </Button>
+                  </InputGroup.Suffix>
+                </InputGroup>
               </TextField>
 
               <Checkbox
@@ -1097,7 +965,7 @@ function AsrProviderPanel() {
                 onChange={(value) => updateConfig("align_model_dir", value)}
               >
                 <Label>对齐模型目录</Label>
-                <Input className="min-w-0 flex items-center font-mono text-[13px]" />
+                <Input className="min-w-0 font-mono text-[13px]" />
               </TextField>
 
               <VadAdvancedFields config={config} updateConfig={updateConfig} />
@@ -1109,7 +977,7 @@ function AsrProviderPanel() {
 
       <div className="form-actions">
         {isQwen && !needsDownload ? (
-          <div className="form-actions-secondary">
+          <div className="form-actions-secondary flex gap-2">
             <Button
               size="sm"
               variant="secondary"
@@ -1119,19 +987,115 @@ function AsrProviderPanel() {
               <Download size={14} />
               重新下载
             </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              isPending={modelLoading}
+              isDisabled={!config.asr_model_dir?.trim()}
+              onPress={() => void loadModel()}
+            >
+              {modelLoaded ? "重新加载" : "加载模型"}
+            </Button>
           </div>
         ) : null}
         <Button
           className="form-actions-primary btn-press"
           fullWidth
           variant="primary"
-          onPress={() => void saveConfig()}
+          onPress={() => {
+            void saveConfig(config, { silent: true }).then(() =>
+              toast.success("已保存"),
+            );
+          }}
         >
           <Save size={16} />
           保存
         </Button>
       </div>
+      {isQwen && !needsDownload && !modelLoaded ? (
+        <p className="type-meta text-warning">
+          模型未加载 — 点「加载模型」后才能用 Fn 录音识别。
+        </p>
+      ) : null}
     </div>
+  );
+}
+
+
+/**
+ * Controlled number field that allows empty / intermediate typing.
+ * Commits + clamps on blur only — never snaps mid-keystroke.
+ */
+function ConfigNumberField({
+  label,
+  value,
+  onCommit,
+  min,
+  max,
+  step = 1,
+}: {
+  label: string;
+  value: number;
+  onCommit: (n: number) => void;
+  min?: number;
+  max?: number;
+  step?: number;
+}) {
+  const [local, setLocal] = useState<number>(value);
+  const focusedRef = useRef(false);
+
+  useEffect(() => {
+    if (!focusedRef.current) setLocal(value);
+  }, [value]);
+
+  const clamp = (n: number) => {
+    let next = n;
+    if (min != null) next = Math.max(min, next);
+    if (max != null) next = Math.min(max, next);
+    return next;
+  };
+
+  return (
+    <NumberField
+      fullWidth
+      variant="secondary"
+      value={local}
+      minValue={min}
+      maxValue={max}
+      step={step}
+      onFocusChange={(focused) => {
+        focusedRef.current = focused;
+        if (!focused) {
+          if (!Number.isFinite(local)) {
+            setLocal(value);
+            return;
+          }
+          const next = clamp(local);
+          setLocal(next);
+          if (next !== value) onCommit(next);
+        }
+      }}
+      onChange={(n) => {
+        setLocal(n);
+        // Commit only in-range finite values (stepper + finished typing).
+        // Out-of-range / empty wait for blur clamp — avoids snap while editing.
+        if (
+          Number.isFinite(n) &&
+          (min == null || n >= min) &&
+          (max == null || n <= max)
+        ) {
+          onCommit(n);
+        }
+      }}
+    >
+      <Label>{label}</Label>
+      <NumberField.Group
+        className="w-full"
+        style={{ gridTemplateColumns: "minmax(0, 1fr)" }}
+      >
+        <NumberField.Input className="w-full min-w-0 font-mono text-[13px]" />
+      </NumberField.Group>
+    </NumberField>
   );
 }
 
@@ -1184,34 +1148,22 @@ function VadAdvancedFields({
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <TextField
-          fullWidth
-          variant="secondary"
-          type="number"
-          value={String(config.chunk_size_sec ?? 1.5)}
-          onChange={(value) => {
-            const n = Number(value);
-            if (!Number.isFinite(n)) return;
-            updateConfig("chunk_size_sec", Math.max(0.2, Math.min(5, n)));
-          }}
-        >
-          <Label>分片秒数</Label>
-          <Input className="font-mono text-[13px]" />
-        </TextField>
-        <TextField
-          fullWidth
-          variant="secondary"
-          type="number"
-          value={String(config.unfixed_token_num ?? 5)}
-          onChange={(value) => {
-            const n = Number.parseInt(value, 10);
-            if (!Number.isFinite(n)) return;
-            updateConfig("unfixed_token_num", Math.max(1, Math.min(32, n)));
-          }}
-        >
-          <Label>未固定 token</Label>
-          <Input className="font-mono text-[13px]" />
-        </TextField>
+        <ConfigNumberField
+          label="分片秒数"
+          value={config.chunk_size_sec ?? 1.5}
+          min={0.2}
+          max={5}
+          step={0.1}
+          onCommit={(n) => updateConfig("chunk_size_sec", n)}
+        />
+        <ConfigNumberField
+          label="未固定 token"
+          value={config.unfixed_token_num ?? 5}
+          min={1}
+          max={32}
+          step={1}
+          onCommit={(n) => updateConfig("unfixed_token_num", Math.round(n))}
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -1251,140 +1203,85 @@ function VadAdvancedFields({
             </ListBox>
           </Select.Popover>
         </Select>
-        <TextField
-          fullWidth
-          variant="secondary"
-          type="number"
-          value={String(config.vad_aggression ?? 2)}
-          onChange={(value) => {
-            const n = Number.parseInt(value, 10);
-            if (!Number.isFinite(n)) return;
-            updateConfig("vad_aggression", Math.max(0, Math.min(3, n)));
-          }}
-        >
-          <Label>灵敏度</Label>
-          <Input className="font-mono text-[13px]" />
-        </TextField>
+        <ConfigNumberField
+          label="灵敏度"
+          value={config.vad_aggression ?? 2}
+          min={0}
+          max={3}
+          step={1}
+          onCommit={(n) => updateConfig("vad_aggression", Math.round(n))}
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <TextField
-          fullWidth
-          variant="secondary"
-          type="number"
-          value={String(config.vad_min_silence_ms ?? 900)}
-          onChange={(value) => {
-            const n = Number.parseInt(value, 10);
-            if (!Number.isFinite(n)) return;
-            updateConfig("vad_min_silence_ms", Math.max(400, n));
-          }}
-        >
-          <Label>最短静音 ms</Label>
-          <Input className="font-mono text-[13px]" />
-        </TextField>
-        <TextField
-          fullWidth
-          variant="secondary"
-          type="number"
-          value={String(config.vad_commit_hold_ms ?? 500)}
-          onChange={(value) => {
-            const n = Number.parseInt(value, 10);
-            if (!Number.isFinite(n)) return;
-            updateConfig("vad_commit_hold_ms", Math.max(200, n));
-          }}
-        >
-          <Label>提交等待 ms</Label>
-          <Input className="font-mono text-[13px]" />
-        </TextField>
+        <ConfigNumberField
+          label="最短静音 ms"
+          value={config.vad_min_silence_ms ?? 900}
+          min={400}
+          step={50}
+          onCommit={(n) => updateConfig("vad_min_silence_ms", Math.round(n))}
+        />
+        <ConfigNumberField
+          label="提交等待 ms"
+          value={config.vad_commit_hold_ms ?? 500}
+          min={200}
+          step={50}
+          onCommit={(n) => updateConfig("vad_commit_hold_ms", Math.round(n))}
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <TextField
-          fullWidth
-          variant="secondary"
-          type="number"
-          value={String(config.vad_min_segment_ms ?? 2500)}
-          onChange={(value) => {
-            const n = Number.parseInt(value, 10);
-            if (!Number.isFinite(n)) return;
-            updateConfig("vad_min_segment_ms", Math.max(1000, n));
-          }}
-        >
-          <Label>最短段 ms</Label>
-          <Input className="font-mono text-[13px]" />
-        </TextField>
-        <TextField
-          fullWidth
-          variant="secondary"
-          type="number"
-          value={String(config.vad_max_segment_sec ?? 90)}
-          onChange={(value) => {
-            const n = Number(value);
-            if (!Number.isFinite(n)) return;
-            updateConfig("vad_max_segment_sec", Math.max(10, Math.min(180, n)));
-          }}
-        >
-          <Label>最长段 秒</Label>
-          <Input className="font-mono text-[13px]" />
-        </TextField>
+        <ConfigNumberField
+          label="最短段 ms"
+          value={config.vad_min_segment_ms ?? 2500}
+          min={1000}
+          step={100}
+          onCommit={(n) => updateConfig("vad_min_segment_ms", Math.round(n))}
+        />
+        <ConfigNumberField
+          label="最长段 秒"
+          value={config.vad_max_segment_sec ?? 90}
+          min={10}
+          max={180}
+          step={1}
+          onCommit={(n) => updateConfig("vad_max_segment_sec", n)}
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <TextField
-          fullWidth
-          variant="secondary"
-          type="number"
-          value={String(config.vad_overlap_ms ?? 500)}
-          onChange={(value) => {
-            const n = Number.parseInt(value, 10);
-            if (!Number.isFinite(n)) return;
-            updateConfig("vad_overlap_ms", Math.max(200, n));
-          }}
-        >
-          <Label>重叠 ms</Label>
-          <Input className="font-mono text-[13px]" />
-        </TextField>
-        <TextField
-          fullWidth
-          variant="secondary"
-          type="number"
-          value={String(config.cross_segment_prefix_tokens ?? 64)}
-          onChange={(value) => {
-            const n = Number.parseInt(value, 10);
-            if (!Number.isFinite(n)) return;
-            updateConfig(
-              "cross_segment_prefix_tokens",
-              Math.max(0, Math.min(256, n)),
-            );
-          }}
-        >
-          <Label>跨段前缀</Label>
-          <Input className="font-mono text-[13px]" />
-        </TextField>
+        <ConfigNumberField
+          label="重叠 ms"
+          value={config.vad_overlap_ms ?? 500}
+          min={200}
+          step={50}
+          onCommit={(n) => updateConfig("vad_overlap_ms", Math.round(n))}
+        />
+        <ConfigNumberField
+          label="跨段前缀"
+          value={config.cross_segment_prefix_tokens ?? 64}
+          min={0}
+          max={256}
+          step={1}
+          onCommit={(n) =>
+            updateConfig("cross_segment_prefix_tokens", Math.round(n))
+          }
+        />
       </div>
 
       {config.vad_backend === "energy" ? (
-        <TextField
-          fullWidth
-          variant="secondary"
-          type="number"
-          value={String(config.vad_energy_threshold ?? 0.01)}
-          onChange={(value) => {
-            const n = Number(value);
-            if (!Number.isFinite(n)) return;
-            updateConfig(
-              "vad_energy_threshold",
-              Math.max(0.001, Math.min(0.05, n)),
-            );
-          }}
-        >
-          <Label>能量阈值</Label>
-          <Input className="font-mono text-[13px]" />
-        </TextField>
+        <ConfigNumberField
+          label="能量阈值"
+          value={config.vad_energy_threshold ?? 0.01}
+          min={0.001}
+          max={0.05}
+          step={0.001}
+          onCommit={(n) => updateConfig("vad_energy_threshold", n)}
+        />
       ) : null}
     </div>
   );
 }
+
 
 function LlmProviderPanel() {
   const { config, updateConfig, saveConfig } = useApp();
@@ -1838,7 +1735,7 @@ function ProviderEditor({
 }
 
 function GeneralPanel() {
-  const { config, updateConfig, theme, setTheme } = useApp();
+  const { config, updateConfig, theme, setTheme, saveConfig } = useApp();
   const langOptions = asrLanguageOptions(config.extra_languages);
   const addable = addableLanguageCatalog(config.extra_languages);
   const [pendingAdd, setPendingAdd] = useState<string>(addable[0]?.[0] ?? "");
@@ -2021,12 +1918,28 @@ function GeneralPanel() {
           </Button>
         </div>
       </div>
+
+      <div className="form-actions">
+        <Button
+          className="form-actions-primary btn-press"
+          fullWidth
+          variant="primary"
+          onPress={() => {
+            void saveConfig(config, { silent: true }).then(() =>
+              toast.success("已保存"),
+            );
+          }}
+        >
+          <Save size={16} />
+          保存
+        </Button>
+      </div>
     </div>
   );
 }
 
 function HotkeysPanel() {
-  const { config, updateConfig } = useApp();
+  const { config, updateConfig, saveConfig } = useApp();
   const [listening, setListening] = useState<
     null | "transcribe" | "translate" | "cancel" | "agent"
   >(null);
@@ -2047,7 +1960,17 @@ function HotkeysPanel() {
         if (slot === "agent") updateConfig("hotkey_agent", binding);
         setListening(null);
         setPreview(null);
-        toast.success(`已设置：${binding.label}`);
+        const patch =
+          slot === "transcribe"
+            ? { hotkey_transcribe: binding }
+            : slot === "translate"
+              ? { hotkey_translate: binding }
+              : slot === "cancel"
+                ? { hotkey_cancel: binding }
+                : { hotkey_agent: binding };
+        void saveConfig({ ...config, ...patch }, { silent: true }).then(() =>
+          toast.success(`已设置：${binding.label}`),
+        );
       }),
       listen("hotkey-capture-cancelled", () => {
         setListening(null);
@@ -2068,7 +1991,7 @@ function HotkeysPanel() {
       unlisteners.forEach((u) => u());
       void invoke("cancel_hotkey_capture").catch(() => {});
     };
-  }, [updateConfig]);
+  }, [updateConfig, saveConfig, config]);
 
   const startCapture = async (
     slot: "transcribe" | "translate" | "cancel" | "agent",
@@ -2166,6 +2089,45 @@ function HotkeysPanel() {
             </div>
           );
         })}
+      </div>
+
+      <div className="rounded-xl bg-default/40 p-3">
+        <div className="type-ui mb-1">Fn 键说明</div>
+        <p className="type-meta">
+          若按 Fn 无反应：系统设置 → 键盘 →「按下 🌐 键」选「用作修饰键」（不要选表情 / 听写 / 输入法）。
+        </p>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="mt-2"
+          onPress={() => {
+            void invoke("open_permission_settings", { kind: "keyboard" }).catch(
+              () => {
+                void invoke("open_path_in_system", {
+                  path: "/System/Library/PreferencePanes/Keyboard.prefPane",
+                }).catch(() => {});
+              },
+            );
+          }}
+        >
+          打开键盘设置
+        </Button>
+      </div>
+
+      <div className="form-actions">
+        <Button
+          className="form-actions-primary btn-press"
+          fullWidth
+          variant="primary"
+          onPress={() => {
+            void saveConfig(config, { silent: true }).then(() =>
+              toast.success("已保存"),
+            );
+          }}
+        >
+          <Save size={16} />
+          保存
+        </Button>
       </div>
     </SectionCard>
   );

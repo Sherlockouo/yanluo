@@ -485,7 +485,7 @@ pub(crate) fn default_asr_provider() -> AsrProvider {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        AsrProvider::Elevenlabs
+        AsrProvider::Qwen
     }
 }
 
@@ -665,8 +665,14 @@ pub(crate) fn ensure_agent_profiles(config: &mut AppConfig) {
 pub(crate) fn normalize_config_for_platform(config: &mut AppConfig) {
     #[cfg(not(target_os = "macos"))]
     {
-        if matches!(config.asr_provider, AsrProvider::Apple) {
-            config.asr_provider = AsrProvider::Elevenlabs;
+        if matches!(config.asr_provider, AsrProvider::Apple | AsrProvider::Elevenlabs) {
+            config.asr_provider = AsrProvider::Qwen;
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if matches!(config.asr_provider, AsrProvider::Elevenlabs) {
+            config.asr_provider = AsrProvider::Apple;
         }
     }
     let _ = config;

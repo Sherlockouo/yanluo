@@ -50,6 +50,10 @@ Apple Speech is **macOS-only**. Linux/Windows default to ElevenLabs (Qwen local 
 
 `qwen-local` builds must ship `Contents/MacOS/mlx.metallib` (staged by `scripts/stage-mlx-metallib.mjs` via `beforeBundleCommand`). Missing file → runtime falls back to CI absolute `METAL_PATH` and fails on user machines. See `doc/BUILD.md`.
 
+## macOS Gatekeeper helper
+
+After the DMG is built, `scripts/embed-gatekeeper-fix.mjs` puts `若打不开-点我.command` on the DMG volume (and beside `.app` when present). CI re-uploads the patched DMG. Users who see「已损坏」drag the app to Applications, then double-click that script.
+
 ## Cut a release
 1. Follow **Version source of truth** above.
 2. **Release** workflow builds all platforms and uploads to the GitHub Release for that tag.

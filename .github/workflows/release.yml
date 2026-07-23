@@ -155,3 +155,18 @@ jobs:
         if: steps.ver.outputs.publish != 'true'
         shell: bash
         run: pnpm tauri build ${{ matrix.args }}
+
+      - name: Embed Gatekeeper fix into macOS DMG
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.ver.outputs.tag }}
+          PUBLISH: ${{ steps.ver.outputs.publish }}
+        run: |
+          node scripts/embed-gatekeeper-fix.mjs
+          if [[ "$PUBLISH" == "true" && -n "$TAG" ]]; then
+            shopt -s nullglob
+            assets=(packaging/若打不开-点我.command src-tauri/target/release/bundle/dmg/*.dmg)
+            gh release upload "$TAG" "${assets[@]}" --clobber
+          fi

@@ -253,7 +253,7 @@ export const defaultConfig: AppConfig = {
   align_model_dir: "",
   align_enabled: true,
   asr_model_id: "Qwen3-ASR-0.6B",
-  // Apple Speech is macOS-only; non-macOS remaps to elevenlabs at runtime.
+  // Apple Speech is macOS-only; non-macOS remaps to qwen at runtime.
   asr_provider: "apple",
   elevenlabs_api_key: "",
   elevenlabs_model: "scribe_v2",
@@ -579,7 +579,6 @@ export const CAPSULE_TAIL_CHARS = 34;
 
 export function providerLabel(provider: AsrProvider) {
   if (provider === "apple") return "Apple Speech";
-  if (provider === "elevenlabs") return "ElevenLabs";
   return "本机识别";
 }
 

@@ -1266,8 +1266,12 @@ pub(crate) fn finalize_successful_result(
     }
 
     // Fn: optional LLM 纠错 after vocab. Translate has its own stream; agent stays raw for edit.
+    // Skip polish entirely when disabled or credentials incomplete — go straight to HUD editing.
+    let can_polish = config.llm_enabled
+        && !config.llm_api_base_url.trim().is_empty()
+        && !config.llm_model.trim().is_empty();
     if source == "fn"
-        && config.llm_enabled
+        && can_polish
         && !result.text.trim().is_empty()
         && !(is_transcribe && has_timed)
     {
@@ -1405,6 +1409,7 @@ pub(crate) fn finalize_successful_result(
         if fallback.is_empty() {
             eprintln!("[asr] hud confirm-wait skipped: empty result mode={source}");
             AsrEngine::set_pending_hud_confirm(app, None);
+            result.error = Some("未识别到内容 — 请检查麦克风 / 语音识别权限 / 是否在说话".into());
             return Some(false);
         }
         eprintln!(
@@ -1562,9 +1567,13 @@ pub(crate) fn transcribe_with_elevenlabs(config: &AppConfig, samples: &[f32]) ->
 }
 
 #[cfg(target_os = "macos")]
-mod apple_speech_ffi {
+pub(crate) mod apple_speech_ffi {
     use std::ffi::{CStr, CString};
-    use std::os::raw::c_char;
+    use std::os::raw::{c_char, c_void};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    type PartialFn = Option<unsafe extern "C" fn(*const c_char, *mut c_void)>;
 
     unsafe extern "C" {
         fn asr_speech_recognize_file(
@@ -1575,6 +1584,68 @@ mod apple_speech_ffi {
             err_buf: *mut c_char,
             err_len: usize,
         ) -> i32;
+        fn asr_speech_stream_start(
+            locale: *const c_char,
+            cb: PartialFn,
+            ctx: *mut c_void,
+            err_buf: *mut c_char,
+            err_len: usize,
+        ) -> i32;
+        fn asr_speech_stream_append(
+            samples: *const f32,
+            count: usize,
+            err_buf: *mut c_char,
+            err_len: usize,
+        ) -> i32;
+        fn asr_speech_stream_finish(
+            out_buf: *mut c_char,
+            out_len: usize,
+            err_buf: *mut c_char,
+            err_len: usize,
+        ) -> i32;
+        fn asr_speech_stream_cancel();
+    }
+
+    struct PartialCtx {
+        cb: Box<dyn Fn(String) + Send + 'static>,
+    }
+
+    static STREAM_CTX: AtomicUsize = AtomicUsize::new(0);
+    static STREAM_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+    fn read_c_buf(buf: &[u8]) -> String {
+        unsafe { CStr::from_ptr(buf.as_ptr().cast()) }
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    fn map_rc(rc: i32, err: &[u8]) -> String {
+        let msg = read_c_buf(err);
+        if msg.is_empty() {
+            format!("Apple Speech failed (code {rc})")
+        } else {
+            msg
+        }
+    }
+
+    fn free_stream_ctx() {
+        let ptr = STREAM_CTX.swap(0, Ordering::AcqRel);
+        if ptr != 0 {
+            unsafe {
+                drop(Box::from_raw(ptr as *mut PartialCtx));
+            }
+        }
+    }
+
+    unsafe extern "C" fn apple_partial_trampoline(utf8: *const c_char, ctx: *mut c_void) {
+        if utf8.is_null() || ctx.is_null() {
+            return;
+        }
+        let text = unsafe { CStr::from_ptr(utf8) }
+            .to_string_lossy()
+            .into_owned();
+        let partial = unsafe { &*(ctx as *const PartialCtx) };
+        (partial.cb)(text);
     }
 
     pub(crate) fn recognize(path: &str, locale: &str) -> Result<String, String> {
@@ -1593,20 +1664,142 @@ mod apple_speech_ffi {
             )
         };
         if rc == 0 {
-            let text = unsafe { CStr::from_ptr(out.as_ptr().cast()) }
-                .to_string_lossy()
-                .into_owned();
-            Ok(text)
+            Ok(read_c_buf(&out))
         } else {
-            let msg = unsafe { CStr::from_ptr(err.as_ptr().cast()) }
-                .to_string_lossy()
-                .into_owned();
-            Err(if msg.is_empty() {
-                format!("Apple Speech failed (code {rc})")
-            } else {
-                msg
-            })
+            Err(map_rc(rc, &err))
         }
+    }
+
+    pub(crate) fn stream_start(
+        locale: &str,
+        on_partial: Box<dyn Fn(String) + Send + 'static>,
+    ) -> Result<(), String> {
+        if STREAM_ACTIVE.load(Ordering::Acquire) {
+            cancel_stream();
+        }
+        let locale_c = CString::new(locale).map_err(|_| "locale contains NUL".to_string())?;
+        let ctx = Box::into_raw(Box::new(PartialCtx { cb: on_partial }));
+        let mut err = vec![0u8; 2048];
+        let rc = unsafe {
+            asr_speech_stream_start(
+                locale_c.as_ptr(),
+                Some(apple_partial_trampoline),
+                ctx.cast(),
+                err.as_mut_ptr().cast(),
+                err.len(),
+            )
+        };
+        if rc != 0 {
+            unsafe {
+                drop(Box::from_raw(ctx));
+            }
+            return Err(map_rc(rc, &err));
+        }
+        STREAM_CTX.store(ctx as usize, Ordering::Release);
+        STREAM_ACTIVE.store(true, Ordering::Release);
+        Ok(())
+    }
+
+    pub(crate) fn stream_append(samples: &[f32]) -> Result<(), String> {
+        if samples.is_empty() || !STREAM_ACTIVE.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let mut err = vec![0u8; 2048];
+        let rc = unsafe {
+            asr_speech_stream_append(
+                samples.as_ptr(),
+                samples.len(),
+                err.as_mut_ptr().cast(),
+                err.len(),
+            )
+        };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(map_rc(rc, &err))
+        }
+    }
+
+    pub(crate) fn stream_finish() -> Result<String, String> {
+        if !STREAM_ACTIVE.swap(false, Ordering::AcqRel) {
+            free_stream_ctx();
+            return Err("Apple Speech stream not active".into());
+        }
+        let mut out = vec![0u8; 64 * 1024];
+        let mut err = vec![0u8; 2048];
+        let rc = unsafe {
+            asr_speech_stream_finish(
+                out.as_mut_ptr().cast(),
+                out.len(),
+                err.as_mut_ptr().cast(),
+                err.len(),
+            )
+        };
+        free_stream_ctx();
+        if rc == 0 {
+            Ok(read_c_buf(&out))
+        } else {
+            Err(map_rc(rc, &err))
+        }
+    }
+
+    pub(crate) fn cancel_stream() {
+        if STREAM_ACTIVE.swap(false, Ordering::AcqRel) {
+            unsafe {
+                asr_speech_stream_cancel();
+            }
+        }
+        free_stream_ctx();
+    }
+
+    pub(crate) fn stream_active() -> bool {
+        STREAM_ACTIVE.load(Ordering::Acquire)
+    }
+
+    /// Feed recorder PCM into Apple live stream until `recording` clears.
+    pub(crate) fn spawn_apple_stream_pump(
+        app: tauri::AppHandle,
+        recording: Arc<AtomicBool>,
+        locale: String,
+    ) {
+        use tauri::Emitter;
+        std::thread::spawn(move || {
+            let app_for_cb = app.clone();
+            if let Err(e) = stream_start(
+                &locale,
+                Box::new(move |text| {
+                    let partial = super::PartialResult::display(text.clone());
+                    let _ = app_for_cb.emit("partial-result", &partial);
+                    let _ = app_for_cb.emit_to("floating", "partial-result", &partial);
+                    if let Ok(mut slot) = crate::hud::floating_status_slot(&app_for_cb).lock() {
+                        if slot.state == "recording" || slot.state == "processing" {
+                            slot.text = text;
+                        }
+                    }
+                }),
+            ) {
+                eprintln!("[asr] apple stream start failed: {e}");
+                let _ = app.emit(
+                    "audio-capture-warning",
+                    format!("Apple 流式识别未启动：{e}"),
+                );
+                return;
+            }
+
+            eprintln!("[asr] apple stream started locale={locale}");
+            let mut cursor = 0usize;
+            while recording.load(Ordering::Acquire) {
+                if let Some((from, chunk)) = crate::state::AsrEngine::get_audio_from(&app, cursor)
+                {
+                    cursor = from.saturating_add(chunk.len());
+                    if let Err(e) = stream_append(&chunk) {
+                        eprintln!("[asr] apple stream append: {e}");
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(40));
+            }
+            eprintln!("[asr] apple stream pump exit (await finish from stop)");
+        });
     }
 }
 

@@ -603,7 +603,26 @@ pub(crate) fn start_recording(
     if matches!(config.asr_provider, AsrProvider::Qwen)
         && !engine.inner().model_loaded.load(Ordering::Acquire)
     {
-        return Err("Model not loaded".into());
+        return Err("Model not loaded — 请先在设置 → 识别 加载 Qwen 模型".into());
+    }
+    #[cfg(target_os = "macos")]
+    if matches!(config.asr_provider, AsrProvider::Apple) {
+        let perms = permissions::get_permission_status();
+        if !perms.speech_recognition {
+            return Err(
+                "未授权语音识别 — 设置 → 系统 → 权限，打开「语音识别」"
+                    .into(),
+            );
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    if matches!(config.asr_provider, AsrProvider::Apple) {
+        return Err("Apple Speech 仅支持 macOS，请改用 Qwen 本地识别".into());
+    }
+    if matches!(config.asr_provider, AsrProvider::Elevenlabs) {
+        return Err(
+            "ElevenLabs 已移除 — 请在设置 → 识别 改选 Apple 或 Qwen".into(),
+        );
     }
 
     let session = match mode.as_deref() {
@@ -685,6 +704,15 @@ pub(crate) fn start_recording(
             language,
         })?;
     }
+    #[cfg(target_os = "macos")]
+    if matches!(config.asr_provider, AsrProvider::Apple) {
+        let locale = crate::transcription::language_for_apple(&config.language);
+        apple_speech_ffi::spawn_apple_stream_pump(
+            app.clone(),
+            engine.inner().recording.clone(),
+            locale,
+        );
+    }
     eprintln!(
         "[asr] recording started, provider={} mode={} chunk={}s rollback={}",
         config.asr_provider.label(),
@@ -751,6 +779,10 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
         .unwrap_or_default();
     if !matches!(config.asr_provider, AsrProvider::Qwen) {
         let _ = AsrEngine::take_recorder_and_stop(app);
+    }
+    #[cfg(target_os = "macos")]
+    if matches!(config.asr_provider, AsrProvider::Apple) {
+        apple_speech_ffi::cancel_stream();
     }
 
     emit_floating_status(app, false, "idle", "", 0.0);
@@ -998,11 +1030,57 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
     std::thread::spawn(move || {
         if AsrEngine::finalize_aborted(&app, finalize_gen) {
             eprintln!("[asr] stop aborted before provider ASR");
+            #[cfg(target_os = "macos")]
+            apple_speech_ffi::cancel_stream();
             return;
         }
-        let mut result = match config.asr_provider {
-            AsrProvider::Elevenlabs => transcribe_with_elevenlabs(&config, &samples)
-                .unwrap_or_else(|error| TranscriptionResult {
+
+        // Apple live stream: prefer finish() over re-batch file ASR.
+        #[cfg(target_os = "macos")]
+        let mut result = if matches!(config.asr_provider, AsrProvider::Apple)
+            && apple_speech_ffi::stream_active()
+        {
+            // Let pump flush the last PCM chunk after recording=false.
+            std::thread::sleep(Duration::from_millis(80));
+            match apple_speech_ffi::stream_finish() {
+                Ok(text) => {
+                    eprintln!(
+                        "[asr] apple stream finish ok chars={}",
+                        text.chars().count()
+                    );
+                    TranscriptionResult {
+                        text: text.clone(),
+                        raw_text: text,
+                        llm_text: None,
+                        language: config.language.clone(),
+                        duration_seconds: samples.len() as f64 / 16_000.0,
+                        refined: false,
+                        error: None,
+                        segments: Vec::new(),
+                        alignment: None,
+                    }
+                }
+                Err(stream_err) => {
+                    eprintln!("[asr] apple stream finish failed: {stream_err}; fallback file ASR");
+                    transcribe_with_apple_speech(&config, &samples).unwrap_or_else(|error| {
+                        TranscriptionResult {
+                            text: String::new(),
+                            raw_text: String::new(),
+                            llm_text: None,
+                            language: config.language.clone(),
+                            duration_seconds: samples.len() as f64 / 16_000.0,
+                            refined: false,
+                            error: Some(error),
+                            segments: Vec::new(),
+                            alignment: None,
+                        }
+                    })
+                }
+            }
+        } else {
+            match config.asr_provider {
+                AsrProvider::Elevenlabs => transcribe_with_elevenlabs(&config, &samples)
+                    .unwrap_or_else(|error| TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
                         llm_text: None,
@@ -1013,18 +1091,50 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
                         segments: Vec::new(),
                         alignment: None,
                     }),
+                AsrProvider::Apple => {
+                    transcribe_with_apple_speech(&config, &samples).unwrap_or_else(|error| {
+                        TranscriptionResult {
+                            text: String::new(),
+                            raw_text: String::new(),
+                            llm_text: None,
+                            language: config.language.clone(),
+                            duration_seconds: samples.len() as f64 / 16_000.0,
+                            refined: false,
+                            error: Some(error),
+                            segments: Vec::new(),
+                            alignment: None,
+                        }
+                    })
+                }
+                AsrProvider::Qwen => unreachable!(),
+            }
+        };
+        #[cfg(not(target_os = "macos"))]
+        let mut result = match config.asr_provider {
+            AsrProvider::Elevenlabs => transcribe_with_elevenlabs(&config, &samples)
+                .unwrap_or_else(|error| TranscriptionResult {
+                    text: String::new(),
+                    raw_text: String::new(),
+                    llm_text: None,
+                    language: config.language.clone(),
+                    duration_seconds: samples.len() as f64 / 16_000.0,
+                    refined: false,
+                    error: Some(error),
+                    segments: Vec::new(),
+                    alignment: None,
+                }),
             AsrProvider::Apple => transcribe_with_apple_speech(&config, &samples).unwrap_or_else(
                 |error| TranscriptionResult {
-                        text: String::new(),
-                        raw_text: String::new(),
-                        llm_text: None,
-                        language: config.language.clone(),
-                        duration_seconds: samples.len() as f64 / 16_000.0,
-                        refined: false,
-                        error: Some(error),
-                        segments: Vec::new(),
-                        alignment: None,
-                    },
+                    text: String::new(),
+                    raw_text: String::new(),
+                    llm_text: None,
+                    language: config.language.clone(),
+                    duration_seconds: samples.len() as f64 / 16_000.0,
+                    refined: false,
+                    error: Some(error),
+                    segments: Vec::new(),
+                    alignment: None,
+                },
             ),
             AsrProvider::Qwen => unreachable!(),
         };

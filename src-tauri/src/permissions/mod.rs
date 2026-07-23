@@ -344,6 +344,10 @@ pub fn open_permission_settings(kind: &str) -> Result<(), String> {
                 "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_ScreenCapture",
                 "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
             ),
+            "keyboard" => (
+                "x-apple.systempreferences:com.apple.Keyboard-Settings.extension",
+                "x-apple.systempreferences:com.apple.preference.keyboard",
+            ),
             _ => return Err(format!("unknown permission kind: {kind}")),
         };
         for url in [modern, legacy] {

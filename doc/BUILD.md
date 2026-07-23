@@ -35,7 +35,9 @@ xattr -cr /Applications/Yanluo.app
 
 **当前策略**：`tauri.macos.conf.json` 里 `hardenedRuntime: false`（无证书时避免 hardened+adhoc 互撕）。有证书后应在 CI 配 `APPLE_CERTIFICATE*` 并重新打开 hardened + notarize（见 `RELEASE.md`）。
 
-临时绕过（本机自建 / 可信来源）：
+**DMG 里自带修复脚本**：拖完 Yanluo 到「应用程序」后，双击同卷上的 `若打不开-点我.command`（会跑 `xattr -cr` + 本机 adhoc 重签）。本地打包后也会生成在 `bundle/macos/`。
+
+临时绕过（终端）：
 
 ```bash
 xattr -cr /Applications/Yanluo.app
