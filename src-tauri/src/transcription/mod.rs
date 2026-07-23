@@ -2427,8 +2427,74 @@ pub(crate) fn apply_vocabulary(text: &str, vocabulary: &[String]) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// MLX worker thread — owns the inference engine, all MLX ops happen here.
+// Local ASR worker — owns the inference engine (MLX on macOS, libtorch elsewhere).
 // ---------------------------------------------------------------------------
+
+#[cfg(feature = "qwen-local")]
+fn init_local_asr_backend() {
+    #[cfg(target_os = "macos")]
+    {
+        qwen3_asr_rs::backend::mlx::stream::init_mlx(true);
+        eprintln!("[asr-worker] MLX Metal initialized");
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        eprintln!("[asr-worker] libtorch (tch) backend ready");
+    }
+}
+
+/// Prefer GPU (Metal / CUDA). On libtorch builds without CUDA, fall back to CPU.
+#[cfg(feature = "qwen-local")]
+fn load_asr_inference(
+    path: &std::path::Path,
+) -> Result<qwen3_asr_rs::inference::AsrInference, String> {
+    use qwen3_asr_rs::tensor::Device;
+    match qwen3_asr_rs::inference::AsrInference::load(path, Device::Gpu(0)) {
+        Ok(inf) => {
+            eprintln!("[asr-worker] model loaded on GPU {:?}", path);
+            Ok(inf)
+        }
+        Err(gpu_err) => {
+            #[cfg(target_os = "macos")]
+            {
+                Err(format!("Failed to load model on Metal GPU: {gpu_err}"))
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                eprintln!(
+                    "[asr-worker] GPU load failed ({gpu_err}); falling back to CPU"
+                );
+                qwen3_asr_rs::inference::AsrInference::load(path, Device::Cpu).map_err(|e| {
+                    format!("GPU load failed: {gpu_err}; CPU load failed: {e}")
+                })
+            }
+        }
+    }
+}
+
+#[cfg(feature = "qwen-local")]
+fn load_align_inference(
+    path: &std::path::Path,
+) -> Result<qwen3_asr_rs::align::AlignInference, String> {
+    use qwen3_asr_rs::tensor::Device;
+    match qwen3_asr_rs::align::AlignInference::load(path, Device::Gpu(0)) {
+        Ok(a) => Ok(a),
+        Err(gpu_err) => {
+            #[cfg(target_os = "macos")]
+            {
+                Err(gpu_err.to_string())
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                eprintln!(
+                    "[asr-worker] ForcedAligner GPU load failed ({gpu_err}); trying CPU"
+                );
+                qwen3_asr_rs::align::AlignInference::load(path, Device::Cpu)
+                    .map_err(|e| e.to_string())
+            }
+        }
+    }
+}
 
 #[cfg(feature = "qwen-local")]
 pub(crate) fn mlx_worker(
@@ -2438,8 +2504,8 @@ pub(crate) fn mlx_worker(
     recording: Arc<AtomicBool>,
     cancel_requested: Arc<AtomicBool>,
 ) {
-    qwen3_asr_rs::backend::mlx::stream::init_mlx(true);
-    eprintln!("[mlx-worker] MLX initialized, waiting for commands...");
+    init_local_asr_backend();
+    eprintln!("[asr-worker] waiting for commands...");
 
     let mut inference: Option<qwen3_asr_rs::inference::AsrInference> = None;
     let mut aligner: Option<qwen3_asr_rs::align::AlignInference> = None;
@@ -2447,13 +2513,9 @@ pub(crate) fn mlx_worker(
     while let Ok(cmd) = rx.recv() {
         match cmd {
             WorkerCommand::LoadModel { path } => {
-                eprintln!("[mlx-worker] Loading model from {:?}", path);
-                match qwen3_asr_rs::inference::AsrInference::load(
-                    &path,
-                    qwen3_asr_rs::tensor::Device::Gpu(0),
-                ) {
+                eprintln!("[asr-worker] Loading model from {:?}", path);
+                match load_asr_inference(&path) {
                     Ok(inf) => {
-                        eprintln!("[mlx-worker] Model loaded successfully");
                         inference = Some(inf);
                         model_loaded.store(true, Ordering::Release);
                         let _ = app.emit("model-loaded", &path.to_string_lossy().to_string());
@@ -2468,17 +2530,14 @@ pub(crate) fn mlx_worker(
                             .unwrap_or_default();
                         if align_enabled && !align_dir.trim().is_empty() {
                             let align_path = PathBuf::from(&align_dir);
-                            eprintln!("[mlx-worker] Loading ForcedAligner from {:?}", align_path);
-                            match qwen3_asr_rs::align::AlignInference::load(
-                                &align_path,
-                                qwen3_asr_rs::tensor::Device::Gpu(0),
-                            ) {
+                            eprintln!("[asr-worker] Loading ForcedAligner from {:?}", align_path);
+                            match load_align_inference(&align_path) {
                                 Ok(a) => {
-                                    eprintln!("[mlx-worker] ForcedAligner loaded");
+                                    eprintln!("[asr-worker] ForcedAligner loaded");
                                     aligner = Some(a);
                                 }
                                 Err(e) => {
-                                    eprintln!("[mlx-worker] ForcedAligner load failed: {e}");
+                                    eprintln!("[asr-worker] ForcedAligner load failed: {e}");
                                     aligner = None;
                                 }
                             }
@@ -2487,7 +2546,7 @@ pub(crate) fn mlx_worker(
                         }
                     }
                     Err(e) => {
-                        eprintln!("[mlx-worker] Model load failed: {}", e);
+                        eprintln!("[asr-worker] Model load failed: {}", e);
                         model_loaded.store(false, Ordering::Release);
                         aligner = None;
                         let _ = app.emit("model-error", &format!("Failed to load model: {}", e));
@@ -2503,7 +2562,7 @@ pub(crate) fn mlx_worker(
                 let inf = match inference.as_mut() {
                     Some(inf) => inf,
                     None => {
-                        eprintln!("[mlx-worker] StartStreaming but no model loaded");
+                        eprintln!("[asr-worker] StartStreaming but no model loaded");
                         continue;
                     }
                 };
@@ -3432,7 +3491,7 @@ pub(crate) fn mlx_worker(
                 model_loaded.store(false, Ordering::Release);
                 let _ = app.emit(
                     "model-error",
-                    "Local Qwen backend disabled. Run `cargo run --features qwen-local` with full Xcode Metal toolchain installed.",
+                    "Local Qwen backend disabled in this build. macOS: rebuild with `--features qwen-local` (MLX). Linux/Windows: same flag + set LIBTORCH to a libtorch 2.7 install (CPU or CUDA).",
                 );
             }
             WorkerCommand::StartStreaming { .. } => {

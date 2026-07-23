@@ -23,12 +23,18 @@ jobs:
           - platform: macos-aarch64
             os: macos-14
             args: --features qwen-local --bundles app,dmg
+            libtorch: ""
           - platform: linux-x86_64
             os: ubuntu-22.04
-            args: --bundles deb,appimage
+            # CUDA libtorch → NVIDIA GPU when drivers present; CPU fallback at load.
+            args: --config src-tauri/tauri.linux.conf.json --features qwen-local --bundles deb,appimage
+            libtorch: cuda
           - platform: windows-x86_64
             os: windows-latest
-            args: --bundles msi,nsis
+            # Official Win CUDA link needs full VS+CUDA toolkit; ship CPU libtorch.
+            # Local NVIDIA builds: node scripts/fetch-libtorch.mjs --cuda
+            args: --config src-tauri/tauri.windows.conf.json --features qwen-local --bundles msi,nsis
+            libtorch: cpu
 
     name: Build (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
@@ -90,6 +96,26 @@ jobs:
             libayatana-appindicator3-dev \
             libasound2-dev
 
+      - name: Fetch libtorch (Linux / Windows local Qwen)
+        if: matrix.libtorch != ''
+        shell: bash
+        run: |
+          EXTRA=""
+          if [[ "${{ matrix.libtorch }}" == "cuda" ]]; then EXTRA="--cuda"; fi
+          node scripts/fetch-libtorch.mjs $EXTRA
+          echo "LIBTORCH=${GITHUB_WORKSPACE}/src-tauri/libtorch" >> "$GITHUB_ENV"
+          echo "LIBTORCH_BYPASS_VERSION_CHECK=1" >> "$GITHUB_ENV"
+          if [[ -d /usr/local/cuda/lib64 ]]; then
+            echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install CUDA toolkit (link CUDA libtorch)
+        if: matrix.libtorch == 'cuda' && runner.os == 'Linux'
+        uses: Jimver/cuda-toolkit@v0.2.23
+        with:
+          cuda: "12.6.0"
+          method: network
+
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
@@ -141,6 +167,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LIBTORCH: ${{ env.LIBTORCH }}
+          LIBTORCH_BYPASS_VERSION_CHECK: "1"
+          LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH }}
         with:
           tagName: ${{ steps.ver.outputs.tag }}
           releaseName: 言落 ${{ steps.ver.outputs.tag }}
@@ -154,6 +183,10 @@ jobs:
       - name: Build only (manual / no tag)
         if: steps.ver.outputs.publish != 'true'
         shell: bash
+        env:
+          LIBTORCH: ${{ env.LIBTORCH }}
+          LIBTORCH_BYPASS_VERSION_CHECK: "1"
+          LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH }}
         run: pnpm tauri build ${{ matrix.args }}
 
       - name: Embed Gatekeeper fix into macOS DMG

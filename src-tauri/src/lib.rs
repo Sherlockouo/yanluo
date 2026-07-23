@@ -31,6 +31,9 @@ pub fn main() {
     // Info.plist is already embedded by `tauri::generate_context!()` —
     // do not call embed_plist again (duplicate `_EMBED_INFO_PLIST` symbol).
 
+    #[cfg(all(feature = "qwen-local", not(target_os = "macos")))]
+    prepend_bundled_libtorch_path();
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -191,4 +194,67 @@ pub fn main() {
         }
         _ => {}
     });
+}
+
+/// Point the dynamic linker at bundled libtorch (AppImage/deb/msi resources or
+/// `target/release/libtorch` next to the binary). Must run before tch loads.
+#[cfg(all(feature = "qwen-local", not(target_os = "macos")))]
+fn prepend_bundled_libtorch_path() {
+    use std::env;
+    use std::path::PathBuf;
+
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(exe) = env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("libtorch").join("lib"));
+            candidates.push(dir.join("torch-libs"));
+            // AppImage / some install layouts: ../lib/yanluo/libtorch/lib
+            candidates.push(dir.join("libtorch").join("lib"));
+            if let Some(parent) = dir.parent() {
+                candidates.push(parent.join("lib").join("libtorch").join("lib"));
+                candidates.push(parent.join("resources").join("libtorch").join("lib"));
+            }
+        }
+    }
+
+    if let Ok(libtorch) = env::var("LIBTORCH") {
+        candidates.push(PathBuf::from(libtorch).join("lib"));
+    }
+
+    let existing: Vec<PathBuf> = candidates
+        .into_iter()
+        .filter(|p| p.is_dir())
+        .collect();
+    if existing.is_empty() {
+        eprintln!(
+            "[asr] no bundled libtorch found beside binary; set LIBTORCH if local Qwen fails to load"
+        );
+        return;
+    }
+
+    #[cfg(target_os = "linux")]
+    let key = "LD_LIBRARY_PATH";
+    #[cfg(target_os = "windows")]
+    let key = "PATH";
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    let key = "LD_LIBRARY_PATH";
+
+    let prefix = env::join_paths(existing.iter().map(|p| p.as_path()))
+        .unwrap_or_else(|_| existing[0].clone().into());
+    let merged = match env::var_os(key) {
+        Some(prev) => {
+            let mut paths = vec![PathBuf::from(&prefix)];
+            for p in env::split_paths(&prev) {
+                paths.push(p);
+            }
+            env::join_paths(paths).unwrap_or(prefix)
+        }
+        None => prefix,
+    };
+    // SAFETY: single-threaded at process start before worker spawn.
+    unsafe {
+        env::set_var(key, &merged);
+    }
+    eprintln!("[asr] {key} prepended with bundled libtorch ({})", existing[0].display());
 }

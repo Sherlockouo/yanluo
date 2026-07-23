@@ -35,15 +35,22 @@ jobs:
           - os: macos-14
             features: ""
             extra: qwen-local
+            libtorch: ""
           - os: ubuntu-22.04
             features: ""
-            extra: ""
+            extra: qwen-local
+            libtorch: cpu
           - os: windows-latest
             features: ""
-            extra: ""
+            extra: qwen-local
+            libtorch: cpu
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        if: matrix.libtorch != ''
+        with:
+          node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -62,6 +69,16 @@ jobs:
             libayatana-appindicator3-dev \
             libasound2-dev
 
+      - name: Fetch libtorch
+        if: matrix.libtorch != ''
+        shell: bash
+        run: |
+          EXTRA=""
+          if [[ "${{ matrix.libtorch }}" == "cuda" ]]; then EXTRA="--cuda"; fi
+          node scripts/fetch-libtorch.mjs $EXTRA
+          echo "LIBTORCH=${GITHUB_WORKSPACE}/src-tauri/libtorch" >> "$GITHUB_ENV"
+          echo "LIBTORCH_BYPASS_VERSION_CHECK=1" >> "$GITHUB_ENV"
+
       - name: Check (default)
         working-directory: src-tauri
         run: cargo check ${{ matrix.features }}
@@ -69,4 +86,7 @@ jobs:
       - name: Check (qwen-local)
         if: matrix.extra == 'qwen-local'
         working-directory: src-tauri
+        env:
+          LIBTORCH: ${{ env.LIBTORCH }}
+          LIBTORCH_BYPASS_VERSION_CHECK: "1"
         run: cargo check --features qwen-local

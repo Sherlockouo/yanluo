@@ -1,7 +1,7 @@
 {
   "name": "yanluo",
   "private": true,
-  "version": "0.10.4",
+  "version": "0.10.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,8 @@
     "tauri:dev:local": "tauri dev --features qwen-local",
     "tauri:build:local": "tauri build --features qwen-local",
     "tauri:build": "tauri build",
+    "libtorch:fetch": "node scripts/fetch-libtorch.mjs",
+    "libtorch:fetch:cuda": "node scripts/fetch-libtorch.mjs --cuda",
     "typecheck": "tsc --noEmit",
     "version:sync": "node scripts/sync-version.mjs",
     "version:check": "node scripts/sync-version.mjs --check"

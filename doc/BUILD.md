@@ -1,6 +1,29 @@
 # Build troubleshooting（言落）
 
-本地 Qwen / MLX 编译与运行时踩过的坑。日常开发见根目录 [`README.md`](../README.md)。
+本地 Qwen 编译与运行时踩过的坑。日常开发见根目录 [`README.md`](../README.md)。
+
+## Backends
+
+| OS | Feature | Backend | Notes |
+|----|---------|---------|-------|
+| macOS (Apple Silicon) | `--features qwen-local` | MLX / Metal | Need Metal Toolchain to **compile** |
+| Linux | `--features qwen-local` | libtorch (`tch`) | `scripts/fetch-libtorch.mjs` then `export LIBTORCH=…` |
+| Windows | `--features qwen-local` | libtorch (`tch`) | Same; CUDA zip from pytorch.org |
+
+```bash
+# Linux / Windows — CPU libtorch
+node scripts/fetch-libtorch.mjs
+export LIBTORCH="$PWD/src-tauri/libtorch"
+export LIBTORCH_BYPASS_VERSION_CHECK=1
+pnpm tauri:dev:local
+
+# NVIDIA GPU build (CUDA 12.6 libtorch)
+node scripts/fetch-libtorch.mjs --cuda
+export LIBTORCH="$PWD/src-tauri/libtorch"
+export LIBTORCH_BYPASS_VERSION_CHECK=1
+# Linux: ensure /usr/local/cuda/lib64 or driver libs on LD_LIBRARY_PATH
+pnpm tauri:build:local
+```
 
 ## 打包后 `Failed to load the default metallib`
 

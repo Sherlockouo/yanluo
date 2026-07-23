@@ -49,6 +49,89 @@ const AGENT_BASE_H = 88;
 
 type Attachment = AgentPathInfo & { at: boolean };
 
+/**
+ * Water-slow flow: pin newest text to the right; older glyphs drift left via
+ * continuous exponential lerp on transform (compositor). Retarget never snaps.
+ */
+function useFlowShift(
+  viewportRef: RefObject<HTMLDivElement | null>,
+  stripRef: RefObject<HTMLElement | null>,
+  contentKey: string,
+  enabled: boolean,
+) {
+  const [overflowing, setOverflowing] = useState(false);
+  const targetX = useRef(0);
+  const currentX = useRef(0);
+  const raf = useRef(0);
+  const lastTs = useRef(0);
+
+  const stop = useCallback(() => {
+    if (raf.current) {
+      cancelAnimationFrame(raf.current);
+      raf.current = 0;
+    }
+    lastTs.current = 0;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!enabled) {
+      stop();
+      targetX.current = 0;
+      currentX.current = 0;
+      const strip = stripRef.current;
+      if (strip) strip.style.transform = "translate3d(0,0,0)";
+      setOverflowing(false);
+      return;
+    }
+
+    const tick = (now: number) => {
+      const strip = stripRef.current;
+      const prev = lastTs.current || now;
+      lastTs.current = now;
+      const dt = Math.min(0.05, (now - prev) / 1000);
+      // Viscous: τ ≈ 0.55s — new words push left slowly like water.
+      const alpha = 1 - Math.exp(-dt / 0.55);
+      const cur = currentX.current;
+      const tgt = targetX.current;
+      const next = cur + (tgt - cur) * alpha;
+      if (Math.abs(tgt - next) < 0.15) {
+        currentX.current = tgt;
+        if (strip) strip.style.transform = `translate3d(${tgt}px,0,0)`;
+        raf.current = 0;
+        lastTs.current = 0;
+        return;
+      }
+      currentX.current = next;
+      if (strip) strip.style.transform = `translate3d(${next}px,0,0)`;
+      raf.current = requestAnimationFrame(tick);
+    };
+
+    const vp = viewportRef.current;
+    const strip = stripRef.current;
+    if (!vp || !strip) return;
+
+    const overflow = strip.scrollWidth > vp.clientWidth + 1;
+    setOverflowing(overflow);
+    targetX.current = overflow ? vp.clientWidth - strip.scrollWidth : 0;
+
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) {
+      stop();
+      currentX.current = targetX.current;
+      strip.style.transform = `translate3d(${targetX.current}px,0,0)`;
+      return;
+    }
+
+    if (!raf.current) {
+      raf.current = requestAnimationFrame(tick);
+    }
+  }, [contentKey, enabled, stop, stripRef, viewportRef]);
+
+  useEffect(() => () => stop(), [stop]);
+
+  return overflowing;
+}
+
 function applyHudTheme(theme: "light" | "dark") {
   const root = document.documentElement;
   root.classList.remove("light", "dark");
@@ -1107,6 +1190,7 @@ function FloatingCapsule({
   const smoothed = useSmoothedRms(meter.rms, recording);
   const lastTextRef = useRef("");
   const textViewportRef = useRef<HTMLDivElement>(null);
+  const textStripRef = useRef<HTMLSpanElement>(null);
   const sizedRef = useRef(false);
 
   if (payload.text.trim()) {
@@ -1128,7 +1212,15 @@ function FloatingCapsule({
   const loading =
     !editing && (refining || switching || (processing && !justRefined));
 
-  const [overflowing, setOverflowing] = useState(false);
+  const flowKey = hasSplit
+    ? `${committed}\u0001${active}`
+    : displayText;
+  const overflowing = useFlowShift(
+    textViewportRef,
+    textStripRef,
+    flowKey,
+    !editing && !switching,
+  );
 
   useEffect(() => {
     if (sizedRef.current) return;
@@ -1145,14 +1237,6 @@ function FloatingCapsule({
       height: CAPSULE_EDIT_H,
     }).catch(() => {});
   }, [editing]);
-
-  useLayoutEffect(() => {
-    if (editing) return;
-    const el = textViewportRef.current;
-    if (!el) return;
-    el.scrollLeft = el.scrollWidth;
-    setOverflowing(el.scrollWidth > el.clientWidth + 1);
-  }, [displayText, committed, active, loading, switching, editing]);
 
   const hint = error ?? (busy ? "确认中…" : "");
   const capsuleH = editing ? CAPSULE_EDIT_H : CAPSULE_H;
@@ -1222,13 +1306,7 @@ function FloatingCapsule({
               justRefined && "hud-text-refined",
             )}
           >
-            <motion.span
-              key={switching ? "switching" : "content"}
-              className="hud-text-scroll"
-              initial={{ opacity: 0.7 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: duration.fast, ease: easeOut }}
-            >
+            <span ref={textStripRef} className="hud-text-scroll">
               {switching ? (
                 "切换中"
               ) : hasSplit && recording && !loading ? (
@@ -1252,7 +1330,7 @@ function FloatingCapsule({
                   <i />
                 </span>
               ) : null}
-            </motion.span>
+            </span>
           </div>
         )}
       </div>

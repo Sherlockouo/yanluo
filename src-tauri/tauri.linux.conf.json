@@ -1,0 +1,10 @@
+{
+  "build": {
+    "beforeBundleCommand": "node scripts/stage-libtorch.mjs --bundle"
+  },
+  "bundle": {
+    "resources": {
+      "libtorch/lib": "libtorch/lib"
+    }
+  }
+}

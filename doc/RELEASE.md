@@ -31,13 +31,15 @@ git push origin "v$VERSION"
 CI **fails** if `v*` tag ≠ `package.json`. The built app’s displayed version is the same string (from `CARGO_PKG_VERSION`).
 
 ## Platforms
-| Platform | Runner | Features | Artifacts |
-|----------|--------|----------|-----------|
-| macOS ARM64 | `macos-14` | `qwen-local` (MLX) | `.app` / `.dmg` |
-| Linux x86_64 | `ubuntu-22.04` | default | `.deb` / `.AppImage` |
-| Windows x86_64 | `windows-latest` | default | `.msi` / NSIS |
+| Platform | Runner | Features | Backend | Artifacts |
+|----------|--------|----------|---------|-----------|
+| macOS ARM64 | `macos-14` | `qwen-local` | MLX (Metal) | `.app` / `.dmg` |
+| Linux x86_64 | `ubuntu-22.04` | `qwen-local` | libtorch **CUDA 12.6** (CPU fallback if no GPU) | `.deb` / `.AppImage` |
+| Windows x86_64 | `windows-latest` | `qwen-local` | libtorch **CPU** (CUDA: local `--cuda` build) | `.msi` / NSIS |
 
-Apple Speech is **macOS-only**. Linux/Windows default to ElevenLabs (Qwen local needs MLX / separate backend).
+Apple Speech is **macOS-only**. Local Qwen uses MLX on Apple Silicon; Linux/Windows use [qwen3_asr_rs](https://github.com/XBCoder128/qwen3_asr_rs) `tch-backend` + bundled libtorch (see `scripts/fetch-libtorch.mjs`).
+
+**NVIDIA users (Linux/Windows):** Release builds link CUDA libtorch. Need a working NVIDIA driver (CUDA 12.x runtime). No discrete GPU → load falls back to CPU (slower). Missing driver libs may prevent CUDA path from loading — CPU fallback in worker.
 
 ## One-time setup
 1. Enable GitHub Actions with `contents: write`.
@@ -49,6 +51,10 @@ Apple Speech is **macOS-only**. Linux/Windows default to ElevenLabs (Qwen local 
 ## macOS MLX metallib
 
 `qwen-local` builds must ship `Contents/MacOS/mlx.metallib` (staged by `scripts/stage-mlx-metallib.mjs` via `beforeBundleCommand`). Missing file → runtime falls back to CI absolute `METAL_PATH` and fails on user machines. See `doc/BUILD.md`.
+
+## Linux / Windows libtorch
+
+Release jobs run `node scripts/fetch-libtorch.mjs --cuda` then set `LIBTORCH` / `LIBTORCH_BYPASS_VERSION_CHECK`. Bundle hooks (`tauri.linux.conf.json` / `tauri.windows.conf.json`) stage libs via `scripts/stage-libtorch.mjs`. Runtime prepends bundled `libtorch/lib` to `LD_LIBRARY_PATH` / `PATH`.
 
 ## macOS Gatekeeper helper
 

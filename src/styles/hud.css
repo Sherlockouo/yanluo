@@ -1008,31 +1008,19 @@ html.light[data-floating="1"] .hud-text-switching .hud-text-scroll {
 .hud-text-viewport {
   flex: 1;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  overflow: hidden;
+  /* transform-flow — no scrollLeft (main-thread jank) */
 }
 
 .hud-text-viewport.hud-text-overflow {
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 12px,
-    #000 calc(100% - 16px),
-    transparent 100%
-  );
+  /* Fade only the departing (left) edge — right stays crisp for new ink */
+  mask-image: linear-gradient(to right, transparent 0, #000 28px, #000 100%);
   -webkit-mask-image: linear-gradient(
     to right,
     transparent 0,
-    #000 12px,
-    #000 calc(100% - 16px),
-    transparent 100%
+    #000 28px,
+    #000 100%
   );
-}
-
-.hud-text-viewport::-webkit-scrollbar {
-  display: none;
 }
 
 .hud-text-scroll {
@@ -1043,43 +1031,34 @@ html.light[data-floating="1"] .hud-text-switching .hud-text-scroll {
   letter-spacing: 0;
   color: rgba(255, 255, 255, 0.92);
   line-height: 1.35;
-  /* Satoshi token first — CJK glyphs fall through to PingFang automatically. */
   font-family:
     var(--font-sans), "PingFang SC", "Hiragino Sans GB", "Helvetica Neue",
     -apple-system, sans-serif;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
 }
 
 html.light[data-floating="1"] .hud-text-scroll {
-  color: rgba(16, 16, 18, 0.88);
-}
-
-.hud-text-committed {
-  color: rgba(255, 255, 255, 0.55);
-  font-weight: 450;
-}
-
-.hud-text-active {
-  color: rgba(255, 255, 255, 0.96);
-  font-weight: 560;
-}
-
-html.light[data-floating="1"] .hud-text-committed {
-  color: rgba(16, 16, 18, 0.48);
-}
-
-html.light[data-floating="1"] .hud-text-active {
   color: rgba(16, 16, 18, 0.92);
 }
 
+/* Same ink as live text — no gray “history” dim. */
+.hud-text-committed,
+.hud-text-active {
+  color: inherit;
+  font-weight: inherit;
+}
+
 .hud-text-refining .hud-text-scroll {
-  color: rgba(255, 255, 255, 0.72);
+  color: inherit;
 }
 
 html.light[data-floating="1"] .hud-text-refining .hud-text-scroll {
-  color: rgba(16, 16, 18, 0.62);
+  color: inherit;
 }
 
 .hud-text-refined .hud-text-scroll {

@@ -65,16 +65,23 @@ macOS：若提示「已损坏」，把 Yanluo 拖进「应用程序」后，双�
 栈：**Tauri 2 · React 19 · Tailwind · Rust**（ASR：[qwen3_asr_rs](https://github.com/XBCoder128/qwen3_asr_rs) + MLX）。
 
 ```bash
-# 依赖（macOS / Apple Silicon）
+# 依赖
+# macOS / Apple Silicon: Xcode + cmake；本地 Qwen = MLX
 xcode-select --install
 brew install cmake
 
+# Linux / Windows: 本地 Qwen = libtorch（见 doc/BUILD.md）
+# node scripts/fetch-libtorch.mjs          # CPU
+# node scripts/fetch-libtorch.mjs --cuda   # NVIDIA CUDA 12.6
+# export LIBTORCH=$PWD/src-tauri/libtorch
+# export LIBTORCH_BYPASS_VERSION_CHECK=1
+
 pnpm install
-pnpm tauri:dev:local     # 带本地 Qwen/MLX（首次编译 5–10 分钟）
-pnpm tauri dev           # 不带本地 Qwen（仅系统识别 / 云端）
+pnpm tauri:dev:local     # 带本地 Qwen（首次编译较久）
+pnpm tauri dev           # 不带本地 Qwen（仅系统识别等）
 ```
 
-应用内点「下载模型」会一次拉齐权重 + `tokenizer.json`，下完自动写入目录并加载。发布包（macOS ARM）已带 `qwen-local`。
+应用内点「下载模型」会一次拉齐权重 + `tokenizer.json`，下完自动写入目录并加载。发布包（macOS ARM / Linux / Windows）均带 `qwen-local`。Linux Release 打 CUDA libtorch（有 NVIDIA 驱动即可 GPU，否则回退 CPU）；Windows Release 当前为 CPU libtorch（本机可用 `--cuda` 自编）。
 
 更新 ASR 引擎依赖：
 

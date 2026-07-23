@@ -2,13 +2,20 @@
 
 All notable changes to 言落 (Yanluo) are documented in this file.
 
+## [0.10.5] — 2026-07-23
+
+### Added
+- DMG / bundle 附带 `若打不开-点我.command`（双击清 quarantine + 本机重签）
+- Linux / Windows 本地 Qwen：libtorch（`scripts/fetch-libtorch.mjs`）；Release 已带 `qwen-local`（Linux CUDA / Windows CPU）
+- HUD / Apple Speech / 设置与转写打磨
+
+### Fixed
+- macOS Gatekeeper 辅助脚本打进 DMG；CI 打包后 `--clobber` 回传
+
 ## [0.10.4] — 2026-07-23
 
 ### Fixed
 - `beforeBundleCommand` 脚本路径：工作目录是仓库根，应为 `scripts/…`（原 `../scripts` 导致本地/CI 打包失败）
-
-### Added
-- DMG / bundle 附带 `若打不开-点我.command`（双击清 quarantine + 本机重签）
 
 ## [0.10.3] — 2026-07-23
 

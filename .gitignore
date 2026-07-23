@@ -23,6 +23,10 @@ Thumbs.db
 src-tauri/gen/
 src-tauri/generated/
 
+# libtorch (Linux/Windows local Qwen) — fetch via scripts/fetch-libtorch.mjs
+src-tauri/libtorch/
+src-tauri/.libtorch-tmp/
+
 # Model weights (download separately, do not commit)
 Qwen3-ASR-*/
 *.safetensors

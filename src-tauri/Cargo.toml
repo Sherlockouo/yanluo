@@ -1,6 +1,6 @@
 [package]
 name = "yanluo"
-version = "0.10.4"
+version = "0.10.5"
 description = "Desktop app for Qwen3-ASR, built with Tauri 2.0"
 authors = ["Sherlockouo"]
 edition = "2021"
@@ -39,16 +39,25 @@ objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSResponder", "NSVie
 objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSGeometry", "NSString"] }
 block2 = "0.6"
 
-# Qwen3-ASR Rust implementation (MLX — macOS).
-# Enable with `--features qwen-local` (Apple Silicon recommended).
+# Qwen3-ASR — backend is platform-specific (features mutually exclusive upstream).
+# macOS: MLX / Metal. Linux/Windows: libtorch (tch); CUDA if linked CUDA libtorch.
+# Enable with `--features qwen-local`.
 # Pin branch that exports init_streaming_with_context + pub chunk_id.
 # Local path override while co-developing:
 #   path = "../../qwen3_asr_rs"
-[dependencies.qwen3-asr-rs]
+
+[target.'cfg(target_os = "macos")'.dependencies.qwen3-asr-rs]
 git = "https://github.com/XBCoder128/qwen3_asr_rs"
 branch = "fix/asr-keep-punctuation"
 default-features = false
 features = ["mlx"]
+optional = true
+
+[target.'cfg(not(target_os = "macos"))'.dependencies.qwen3-asr-rs]
+git = "https://github.com/XBCoder128/qwen3_asr_rs"
+branch = "fix/asr-keep-punctuation"
+default-features = false
+features = ["tch-backend"]
 optional = true
 
 [features]
