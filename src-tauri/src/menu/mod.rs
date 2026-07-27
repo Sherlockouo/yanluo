@@ -12,8 +12,7 @@ use crate::config::*;
 /// Language / LLM live in the Settings UI — not as top-level menu bar hacks.
 pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
     let pkg = app.package_info();
-    // productName is ASCII "Yanluo" for WiX/filenames; menu/About stay 言落.
-    let app_name = "言落".to_string();
+    let app_name = "QuietType".to_string();
     let about_metadata = AboutMetadata {
         name: Some(app_name.clone()),
         version: Some(pkg.version.to_string()),
@@ -35,7 +34,7 @@ pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
         .build(app)
         .map_err(|e| e.to_string())?;
     // Custom quit — PredefinedMenuItem::quit can fight hide-on-close (Cmd+Q stuck).
-    let quit = MenuItemBuilder::with_id("app:quit", "退出言落")
+    let quit = MenuItemBuilder::with_id("app:quit", "Quit QuietType")
         .accelerator("CmdOrCtrl+Q")
         .build(app)
         .map_err(|e| e.to_string())?;
@@ -140,7 +139,7 @@ pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
 pub(crate) fn install_tray(app: &AppHandle) -> Result<(), String> {
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    let show = MenuItemBuilder::with_id("tray:show", "显示言落")
+    let show = MenuItemBuilder::with_id("tray:show", "Show QuietType")
         .build(app)
         .map_err(|e| e.to_string())?;
     let settings = MenuItemBuilder::with_id("tray:settings", "Settings...")
@@ -169,7 +168,7 @@ pub(crate) fn install_tray(app: &AppHandle) -> Result<(), String> {
     TrayIconBuilder::with_id("main")
         .icon(icon)
         .menu(&tray_menu)
-        .tooltip("言落")
+        .tooltip("QuietType")
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             handle_menu_event(app, event.id().as_ref());

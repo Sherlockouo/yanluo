@@ -1,4 +1,4 @@
-# 言落 (Yanluo) — Agent kit
+# QuietType（言落）— Agent kit
 
 本目录是言落给本机 CLI agent（Claude / Codex / Pi）用的工具包。
 改**本机设置**前先读这里，不要猜路径。

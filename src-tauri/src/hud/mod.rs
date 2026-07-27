@@ -15,7 +15,7 @@ pub(crate) struct AudioLevelPayload {
     pub(crate) bands: Vec<f32>,
 }
 
-pub(crate) const HUD_BAND_COUNT: usize = 6;
+pub(crate) const HUD_BAND_COUNT: usize = 5;
 
 pub(crate) fn spawn_audio_level_pump(app: AppHandle, recording: Arc<AtomicBool>) {
     std::thread::spawn(move || {
@@ -133,7 +133,7 @@ pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
                 // Invalidate any dismiss fade so re-summon isn't stuck at alpha 0.
                 let _ = crate::platform::bump_floating_fade_gen();
                 // Do NOT toggle Accessory/Regular here — that steals focus and
-                // makes Fn/cancel "jump back" to 言落. HUD was created
+                // makes Fn/cancel "jump back" to QuietType. HUD was created
                 // under Accessory once at launch so FullScreenAuxiliary sticks.
                 remember_frontmost_app();
                 let width = window
@@ -382,10 +382,132 @@ fn hud_default_on_monitor(monitor: &tauri::Monitor, win_w: f64) -> (f64, f64) {
     )
 }
 
-/// Monitor containing the mouse cursor (physical point → monitor).
+/// Monitor containing the mouse cursor.
+///
+/// # Coordinate‐system note (macOS multi‐monitor bug fix)
+///
+/// `AppHandle::cursor_position()` returns a **physical** position
+/// (CG‐logical × primary‐monitor scale‐factor) while
+/// `AppHandle::monitor_from_point()` hit‐tests against `CGDisplayBounds`
+/// rects which are in **CG logical** coordinates.  When the primary
+/// display is Retina (scale=2) the physical coords can fall outside the
+/// CG‐logical bounds of the correct monitor — especially for monitors
+/// stacked above the primary (negative Y) — causing a miss and the HUD
+/// landing on the wrong screen.
+///
+/// Fix: obtain cursor position directly from `CGEvent` (CG global logical
+/// coords, same space as `CGDisplayBounds`), iterate `CGDisplay::active_displays()`
+/// for hit‐testing in that space, then map the winning `CGDirectDisplayID` back
+/// to a Tauri `Monitor` by matching the CG logical origin.
+///
+/// ## Worked example
+///
+/// Setup: primary = Retina 3024×1964 physical, scale=2, CG logical 1512×982 at (0,0).
+///        Upper external = 2560×1440 physical, scale=1, CG logical 2560×1440 at (0,−1440).
+///
+/// Mouse at CG logical (500, −700) — middle of upper screen.
+///
+/// 1. `CGEvent::new(src).location()` → CGPoint { x:500, y:−700 }
+/// 2. Upper monitor CGDisplayBounds = { origin:(0,−1440), size:(2560,1440) }
+///    → rect covers x∈[0,2560], y∈[−1440, 0].
+///    500∈[0,2560] ✓, −700∈[−1440,0] ✓  → HIT.
+/// 3. Map CGDisplayID back to Tauri Monitor via matching CG logical origin:
+///    Monitor::position() = CG_logical_origin × monitor_scale.
+///    For upper monitor (scale=1): position = (0,−1440).
+///    CGDisplayBounds.origin = (0,−1440).  Match by
+///    (position.x / scale, position.y / scale) == (origin.x, origin.y).
+/// 4. `monitor_logical_rect` for the hit monitor returns (0, −1440, 2560, 1440).
+///    Default HUD pos: x = 0 + (2560−400)/2 = 1080, y = −1440 + (1440−56−120) = −176.
+/// 5. `set_position(LogicalPosition(1080, −176))` → tao converts to AppKit via
+///    `NSPoint(1080, pixels_high − (−176)) = NSPoint(1080, 982+176) = (1080, 1158)`.
+///    This is correct AppKit coords for a point on the upper screen.
+///
+/// Old (broken) path for same cursor:
+///   cursor_position() = (500*2, −700*2) = (1000, −1400) [physical].
+///   monitor_from_point(1000, −1400) tests against CGDisplayBounds{0,−1440,2560,1440}:
+///   x=1000∈[0,2560] ✓  y=−1400∈[−1440,0] ✓ — happens to pass HERE but would FAIL
+///   for cursor at CG logical (1300, −700) → phys (2600,−1400): x=2600>2560 MISS.
+///   Any cursor in the right ~half of the upper monitor would miss, falling back to
+///   primary (lower) screen.
+#[cfg(target_os = "macos")]
 fn cursor_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
-    let pos = app.cursor_position().ok()?;
-    app.monitor_from_point(pos.x, pos.y).ok().flatten()
+    use core_graphics::display::{CGDisplay, CGDirectDisplayID};
+    use core_graphics::event::CGEvent;
+    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    // 1. Get cursor in CG global logical coordinates.
+    let cg_point = {
+        let src = CGEventSource::new(CGEventSourceStateID::HIDSystemState).ok()?;
+        let evt = CGEvent::new(src).ok()?;
+        evt.location() // CGPoint in global display (logical) coords
+    };
+
+    // 2. Hit‐test against CGDisplayBounds (same coord space).
+    let displays = CGDisplay::active_displays().ok()?;
+    let mut hit_id: Option<CGDirectDisplayID> = None;
+    for &disp_id in &displays {
+        let bounds = CGDisplay::new(disp_id).bounds();
+        if bounds.contains(&cg_point) {
+            hit_id = Some(disp_id);
+            break;
+        }
+    }
+
+    let hit_id = match hit_id {
+        Some(id) => id,
+        None => {
+            eprintln!(
+                "[hud/position] no CG display contains cursor ({:.1}, {:.1})",
+                cg_point.x, cg_point.y
+            );
+            return None;
+        }
+    };
+
+    // 3. Map CGDirectDisplayID → Tauri Monitor.
+    //    Match by comparing CG logical origin (from CGDisplayBounds) against
+    //    each Tauri Monitor's position (= CG_logical_origin × monitor_scale).
+    let hit_bounds = CGDisplay::new(hit_id).bounds();
+    let hit_origin_lx = hit_bounds.origin.x;
+    let hit_origin_ly = hit_bounds.origin.y;
+
+    let monitors = app.available_monitors().ok()?;
+    let matched = monitors.into_iter().find(|m| {
+        let scale = m.scale_factor().max(1.0);
+        let pos = m.position();
+        let mon_lx = pos.x as f64 / scale;
+        let mon_ly = pos.y as f64 / scale;
+        // Allow small epsilon for floating‐point from scale division.
+        (mon_lx - hit_origin_lx).abs() < 1.0 && (mon_ly - hit_origin_ly).abs() < 1.0
+    });
+
+    if matched.is_none() {
+        eprintln!(
+            "[hud/position] CG display {} at ({:.0},{:.0}) has no matching Tauri Monitor",
+            hit_id, hit_origin_lx, hit_origin_ly
+        );
+    }
+    matched
+}
+
+/// Fallback for non‐macOS: use Tauri APIs directly (they share one scale on most setups).
+#[cfg(not(target_os = "macos"))]
+fn cursor_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
+    let pos = match app.cursor_position() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[hud/position] cursor_position failed: {e}");
+            return None;
+        }
+    };
+    let mon = app.monitor_from_point(pos.x, pos.y).ok().flatten();
+    if mon.is_none() {
+        eprintln!(
+            "[hud/position] no monitor found at cursor ({:.0}, {:.0})",
+            pos.x, pos.y
+        );
+    }
+    mon
 }
 
 fn monitor_contains_logical(monitor: &tauri::Monitor, x: f64, y: f64) -> bool {
@@ -406,7 +528,13 @@ pub(crate) fn floating_hud_logical_position(app: &AppHandle, win_w: f64) -> (f64
         .unwrap_or((200.0, 640.0))
 }
 
-/// Monitor rect in LOGICAL pixels (position/size are physical).
+/// Monitor rect in **CG logical coordinates** (origin at primary top‐left, y‐down).
+///
+/// Tauri `Monitor::position()` = CG_logical_origin × monitor_scale (physical).
+/// Tauri `Monitor::size()` = CG_logical_size × monitor_scale (physical).
+/// Dividing each by the monitor's own scale_factor reconstructs the CG logical rect,
+/// which is the coordinate space used by `set_position(LogicalPosition)` and
+/// `CGDisplayBounds`.
 fn monitor_logical_rect(monitor: &tauri::Monitor) -> (f64, f64, f64, f64) {
     let scale = monitor.scale_factor().max(1.0);
     let position = monitor.position();
@@ -480,13 +608,18 @@ pub(crate) fn persist_floating_hud_position(window: &tauri::WebviewWindow) {
         return;
     };
     let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
+    // outer_position() is physical (CG_logical × window_scale); divide to get CG logical.
     let wx = pos.x as f64 / scale;
     let wy = pos.y as f64 / scale;
     let app = window.app_handle().clone();
+    // Find which monitor contains the window's logical top-left.
+    // Do NOT use app.monitor_from_point(physical_x, physical_y) — see cursor_monitor() comment.
     let mon = app
-        .monitor_from_point(pos.x as f64, pos.y as f64)
+        .available_monitors()
         .ok()
+        .into_iter()
         .flatten()
+        .find(|m| monitor_contains_logical(m, wx, wy))
         .or_else(|| cursor_monitor(&app));
     let Some(mon) = mon else {
         return;

@@ -33,6 +33,8 @@ import {
   mergePendingLearn,
   type PendingLearn,
 } from "@/lib/pending-learn";
+import { useT } from "@/lib/i18n";
+import { lookupRustMsg } from "@/lib/i18n/rust-msg";
 
 export type ThemeMode = "dark" | "light";
 
@@ -104,6 +106,10 @@ export function applyTheme(theme: ThemeMode) {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
+  const t = useT();
+  // Long-lived Tauri listeners read the ref — always current locale, no re-subscribe.
+  const tRef = useRef(t);
+  tRef.current = t;
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [agentJobs, setAgentJobs] = useState<AgentJob[]>([]);
@@ -310,18 +316,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setState("idle");
         stateRef.current = "idle";
         if (result.error) {
-          toast.danger(result.error);
+          toast.danger(lookupRustMsg(result.error, tRef.current));
           return;
         }
         const mode = sessionModeRef.current;
         if (mode === "translate") {
-          toast.success(result.refined ? "已翻译并粘贴" : "已粘贴");
+          toast.success(
+            result.refined
+              ? tRef.current("toast.translatedPasted")
+              : tRef.current("toast.pasted"),
+          );
         } else if (mode === "transcribe") {
           toast.success(
-            result.refined ? "转写完成（已优化）" : "转写完成，已保存音频与文本",
+            result.refined
+              ? tRef.current("toast.transcribeDoneRefined")
+              : tRef.current("toast.transcribeDone"),
           );
         } else {
-          toast.success("已写入剪切板并粘贴");
+          toast.success(tRef.current("toast.clipboardPasted"));
         }
         sessionModeRef.current = "fn";
         void loadHistory();
@@ -329,12 +341,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       listen<string>("model-loaded", () => {
         setModelLoaded(true);
         setModelLoading(false);
-        toast.success("ASR 模型已加载");
+        toast.success(tRef.current("toast.modelLoaded"));
       }),
       listen<string>("model-error", (event) => {
         setModelLoaded(false);
         setModelLoading(false);
-        toast.danger(event.payload);
+        toast.danger(lookupRustMsg(event.payload, tRef.current));
       }),
       listen<string>("mlx-worker-dead", (event) => {
         setModelLoaded(false);
@@ -342,7 +354,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setState("idle");
         stateRef.current = "idle";
         toast.danger(
-          `ASR 引擎崩溃：${event.payload || "unknown"}。请重启应用。`,
+          tRef.current("toast.engineCrash", {
+            reason: event.payload || "unknown",
+          }),
         );
       }),
       listen<AppConfig>("config-updated", (event) => {
@@ -429,7 +443,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             setState("idle");
             stateRef.current = "idle";
           } catch (error) {
-            toast.danger(`跳过失败: ${error}`);
+            toast.danger(
+              tRef.current("toast.skipFailed", {
+                error: lookupRustMsg(String(error), tRef.current),
+              }),
+            );
           }
           return;
         }
@@ -449,7 +467,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           } catch (error) {
             setState("idle");
             stateRef.current = "idle";
-            toast.danger(`停止录音失败: ${error}`);
+            toast.danger(
+              tRef.current("toast.stopRecFailed", {
+                error: lookupRustMsg(String(error), tRef.current),
+              }),
+            );
           }
           return;
         }
@@ -457,11 +479,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (
           (current.asr_provider as string) === "elevenlabs"
         ) {
-          toast.warning("ElevenLabs 已移除 — 请到设置 → 识别改选 Apple 或 Qwen");
+          toast.warning(tRef.current("toast.elevenlabsRemoved"));
           return;
         }
         if (current.asr_provider === "qwen" && !modelLoadedRef.current) {
-          toast.warning("请先在设置 → 识别 加载 Qwen 模型，或改用 Apple Speech");
+          toast.warning(tRef.current("toast.loadQwenFirst"));
           return;
         }
         if (shift) {
@@ -469,7 +491,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             !current.llm_api_base_url?.trim() ||
             !current.llm_model?.trim()
           ) {
-            toast.warning("翻译需要先在「LLM」页配置 Base URL 与 Model（Key 可留空）");
+            toast.warning(tRef.current("toast.translateNeedsLlm"));
             return;
           }
         }
@@ -478,7 +500,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         stateRef.current = "recording";
         sessionModeRef.current = mode;
         try {
-          await invoke("save_app_config", { config: current });
           await invoke("start_recording", {
             chunkSec: current.chunk_size_sec ?? 1.0,
             rollbackTokens: current.unfixed_token_num ?? 5,
@@ -488,7 +509,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } catch (error) {
           setState("idle");
           stateRef.current = "idle";
-          toast.danger(`启动录音失败: ${error}`);
+          toast.danger(
+            tRef.current("toast.startRecFailed", {
+              error: lookupRustMsg(String(error), tRef.current),
+            }),
+          );
         }
       }),
       listen("escape-key-down", async () => {
@@ -497,9 +522,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
             await invoke("cancel_floating_transcript");
             setState("idle");
             stateRef.current = "idle";
-            toast.info("已取消");
+            toast.info(tRef.current("toast.cancelled"));
           } catch (error) {
-            toast.danger(`取消失败: ${error}`);
+            toast.danger(
+              tRef.current("toast.cancelFailed", {
+                error: lookupRustMsg(String(error), tRef.current),
+              }),
+            );
           }
           return;
         }
@@ -516,9 +545,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           await invoke("cancel_recording", { reason: "escape-key" });
           setState("idle");
           stateRef.current = "idle";
-          toast.info(midPipeline ? "已中止后续处理" : "已取消录音");
+          toast.info(
+            midPipeline
+              ? tRef.current("toast.abortedPipeline")
+              : tRef.current("toast.cancelledRecording"),
+          );
         } catch (error) {
-          toast.danger(`取消失败: ${error}`);
+          toast.danger(
+            tRef.current("toast.cancelFailed", {
+              error: lookupRustMsg(String(error), tRef.current),
+            }),
+          );
         }
       }),
       listen("recording-cancelled", () => {
@@ -526,13 +563,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         stateRef.current = "idle";
       }),
       listen<string>("fn-listener-error", (event) => {
-        toast.danger(event.payload);
+        toast.danger(lookupRustMsg(event.payload, tRef.current));
       }),
       listen<string>("partial-error", (event) => {
-        toast.warning(event.payload);
+        toast.warning(lookupRustMsg(event.payload, tRef.current));
       }),
       listen<string>("audio-capture-warning", (event) => {
-        toast.warning(event.payload);
+        toast.warning(lookupRustMsg(event.payload, tRef.current));
       }),
     ]).then((items) => {
       if (disposed) {
@@ -556,15 +593,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [loadConfig, loadHistory, loadAgentJobs, loadAgentModels, refreshAgentModels, navigate]);
 
+  // Debounce config persistence refs
+  const configSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const configInitializedRef = useRef(false);
+  const justSavedRef = useRef(false);
+  const latestConfigRef = useRef(config);
+
   const saveConfig = useCallback(
     async (next = config, opts?: { silent?: boolean }) => {
       await invoke("save_app_config", { config: next });
       setConfig(next);
-      if (!opts?.silent) toast.success("设置已保存");
+      justSavedRef.current = true;
+      if (!opts?.silent) toast.success(tRef.current("toast.configSaved"));
     },
     [config],
   );
 
+  // Debounce config persistence: write to disk ~1s after last config change.
+  useEffect(() => {
+    latestConfigRef.current = config;
+    if (!configInitializedRef.current) {
+      configInitializedRef.current = true;
+      return;
+    }
+    if (configSaveTimerRef.current) clearTimeout(configSaveTimerRef.current);
+    configSaveTimerRef.current = setTimeout(() => {
+      if (justSavedRef.current) {
+        justSavedRef.current = false;
+        return;
+      }
+      invoke("save_app_config", { config }).catch((e: unknown) =>
+        console.warn("[config] debounced save failed:", e)
+      );
+    }, 1000);
+    return () => {
+      if (configSaveTimerRef.current) clearTimeout(configSaveTimerRef.current);
+    };
+  }, [config]);
+
+  // Flush pending debounced save on unmount
+  useEffect(() => {
+    return () => {
+      if (configSaveTimerRef.current) {
+        clearTimeout(configSaveTimerRef.current);
+        invoke("save_app_config", { config: latestConfigRef.current }).catch(() => {});
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const testLlm = useCallback(async () => {
     try {
       // Persist form values first — test hits Rust engine config, not React state.
@@ -574,12 +650,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         text: sample,
       });
       if (refined === sample) {
-        toast.warning(`LLM 已响应，但未改写：${refined}`);
+        toast.warning(tRef.current("toast.llmNoChange", { text: refined }));
       } else {
-        toast.success(`LLM OK：${sample} → ${refined}`);
+        toast.success(
+          tRef.current("toast.llmOk", { before: sample, after: refined }),
+        );
       }
     } catch (error) {
-      toast.danger(`LLM 测试失败: ${error}`);
+      toast.danger(
+        tRef.current("toast.llmTestFailed", {
+          error: lookupRustMsg(String(error), tRef.current),
+        }),
+      );
     }
   }, [config]);
 
@@ -587,7 +669,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "选择 ASR 模型目录",
+      title: tRef.current("toast.chooseModelDirTitle"),
     });
     if (typeof selected !== "string") return;
     const next = { ...config, asr_model_dir: selected };
@@ -598,7 +680,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loadModel = useCallback(async (path?: string) => {
     const dir = (path ?? config.asr_model_dir)?.trim() ?? "";
     if (!dir) {
-      toast.danger("请先下载或选择模型目录");
+      toast.danger(tRef.current("toast.noModelDir"));
       return;
     }
     setModelLoading(true);
@@ -607,7 +689,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await invoke("load_model");
     } catch (error) {
       setModelLoading(false);
-      toast.danger(`加载失败: ${error}`);
+      toast.danger(
+        tRef.current("toast.loadFailed", {
+          error: lookupRustMsg(String(error), tRef.current),
+        }),
+      );
     }
   }, [config.asr_model_dir]);
 
@@ -769,12 +855,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
-    void listen<{ entry_id: string; before: string; after: string }>(
+    void listen<{ entry_id: string; before: string; after: string; learned_pairs?: Array<{ wrong: string; right: string }> }>(
       "learn-from-hud",
-      () => {
-        // Pair already in history (raw_text ↔ user_text). Vocab only via 本地/AI 提炼.
+      (event) => {
         void loadHistory();
-        toast.success("已加入学习 case（识别稿 ↔ 修正稿）");
+        const pairs = event.payload.learned_pairs;
+        if (pairs && pairs.length > 0) {
+          const msg =
+            pairs.length === 1
+              ? tRef.current("toast.learned", {
+                  wrong: pairs[0].wrong,
+                  right: pairs[0].right,
+                })
+              : tRef.current("toast.learnedMulti", {
+                  first: `${pairs[0].wrong} → ${pairs[0].right}`,
+                  n: pairs.length,
+                });
+          toast.success(msg);
+        } else {
+          toast.success(tRef.current("toast.learnedCase"));
+        }
       },
     ).then((u) => {
       unlisten = u;

@@ -41,6 +41,14 @@ type MotionBundle = {
   transition: Transition;
 };
 
+/*
+ * ─── Motion presets ───────────────────────────────────────────────────────────
+ * • fadeSlide — mode-level enter (tab/mode switch within a page, e.g. 出稿 modes).
+ *   Enter-only; no AnimatePresence exit to avoid ghosting in-flow swaps.
+ * • PageShell uses its own page-level enter (opacity 0.92→1, y 12→0, scale 0.995→1,
+ *   180ms tween) defined inline. Do not conflate with fadeSlide.
+ * ─────────────────────────────────────────────────────────────────────────────── */
+
 /**
  * Page / screen enter. Never start at opacity 0 — blank frame reads as hitch.
  * Transform + opacity only (GPU). Enter-only for mode/tab swaps — exit+enter

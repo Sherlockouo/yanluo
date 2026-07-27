@@ -8,26 +8,27 @@ import { AttachMediaBody } from "@/components/ui/attach-media-body";
 import { MarkdownBody } from "@/components/shared/markdown-body";
 import { toolResultToMarkdown } from "@/lib/agent-tool-md";
 import { duration, easeOut } from "@/lib/motion";
+import { useT } from "@/lib/i18n";
 import type { AgentPathInfo } from "@/types";
 
-function kindLabel(kind: string): string {
+function kindLabelKey(kind: string): string {
   switch (kind) {
     case "image":
-      return "图片";
+      return "common.fileKind.image";
     case "video":
-      return "视频";
+      return "common.fileKind.video";
     case "audio":
-      return "音频";
+      return "common.fileKind.audio";
     case "pdf":
-      return "PDF";
+      return "common.fileKind.pdf";
     case "html":
-      return "HTML";
+      return "common.fileKind.html";
     case "text":
-      return "文本";
+      return "common.fileKind.text";
     case "dir":
-      return "文件夹";
+      return "common.fileKind.dir";
     default:
-      return "文件";
+      return "common.fileKind.file";
   }
 }
 
@@ -69,6 +70,7 @@ type Props = {
  * Asset protocol via AttachMediaBody; always offers 「用系统打开」.
  */
 export function FilePreviewModal({ item, onClose }: Props) {
+  const t = useT();
   const open = Boolean(item);
 
   useEffect(() => {
@@ -118,7 +120,7 @@ export function FilePreviewModal({ item, onClose }: Props) {
               <div className="min-w-0">
                 <div className="truncate text-sm font-medium">{item.name}</div>
                 <div className="type-meta mt-0.5 flex flex-wrap items-center gap-2 font-mono">
-                  <span>{kindLabel(item.kind)}</span>
+                  <span>{t(kindLabelKey(item.kind))}</span>
                   {item.kind !== "dir" && item.size > 0 ? (
                     <span>{formatSize(item.size)}</span>
                   ) : null}
@@ -131,17 +133,17 @@ export function FilePreviewModal({ item, onClose }: Props) {
                 <Button
                   size="sm"
                   variant="secondary"
-                  aria-label="用系统打开"
+                  aria-label={t("common.openInSystem")}
                   onPress={() => void openPathInSystem(item.path)}
                 >
                   <ExternalLink size={14} aria-hidden />
-                  系统打开
+                  {t("common.openInSystemShort")}
                 </Button>
                 <Button
                   isIconOnly
                   size="sm"
                   variant="ghost"
-                  aria-label="关闭"
+                  aria-label={t("common.close")}
                   onPress={onClose}
                 >
                   <X size={16} aria-hidden />

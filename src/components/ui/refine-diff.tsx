@@ -6,6 +6,7 @@
 import { useMemo } from "react";
 import { ArrowDown } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 
 export type DiffPart = {
   type: "eq" | "del" | "ins";
@@ -94,15 +95,18 @@ export function RefineDiff({
   /** Tighter line-height for list previews. */
   compact?: boolean;
 }) {
+  const t = useT();
   const parts = useMemo(() => diffTexts(before, after), [before, after]);
 
   if (!before && !after) {
-    return <span className={cn("text-muted", className)}>（空）</span>;
+    return <span className={cn("text-muted", className)}>{t("common.emptyParen")}</span>;
   }
 
   if (before === after) {
     return (
-      <span className={cn("text-foreground", className)}>{after || "（空）"}</span>
+      <span className={cn("text-foreground", className)}>
+        {after || t("common.emptyParen")}
+      </span>
     );
   }
 
@@ -157,6 +161,7 @@ export function SemanticPair({
   className?: string;
   compact?: boolean;
 }) {
+  const t = useT();
   const textClass = compact
     ? "text-[13px] leading-snug"
     : "text-[14px] leading-relaxed";
@@ -164,7 +169,7 @@ export function SemanticPair({
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       <p className={cn("text-pretty wrap-break-word text-muted", textClass)}>
-        {before || "（空）"}
+        {before || t("common.emptyParen")}
       </p>
       <ArrowDown
         size={12}
@@ -177,7 +182,7 @@ export function SemanticPair({
           textClass,
         )}
       >
-        {after || "（空）"}
+        {after || t("common.emptyParen")}
       </p>
     </div>
   );

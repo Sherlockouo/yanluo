@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Button, Chip, Input, Label, TextField } from "@heroui/react";
 import { BookOpen, Plus, X } from "lucide-react";
 import {
@@ -9,10 +10,12 @@ import {
   Reveal,
   SoftCollapse,
 } from "@/components/shared/page-shell";
+import { useT } from "@/lib/i18n";
 import { useApp } from "@/app-context";
 
 /** Vocabulary entries. Used standalone or embedded in 设置 → 词库. */
 export function VocabularyPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const t = useT();
   const { config, newTerm, setNewTerm, addTerm, saveVocabulary } = useApp();
   const [addOpen, setAddOpen] = useState(config.vocabulary.length === 0);
   const terms = config.vocabulary;
@@ -24,7 +27,7 @@ export function VocabularyPage({ embedded = false }: { embedded?: boolean } = {}
       onPress={() => setAddOpen((v) => !v)}
     >
       <Plus size={14} />
-      添加
+      {t("vocab.add")}
     </Button>
   );
 
@@ -32,16 +35,23 @@ export function VocabularyPage({ embedded = false }: { embedded?: boolean } = {}
     <>
       {embedded ? (
         <PanelHeader
-          status={terms.length ? `${terms.length} 条` : undefined}
+          status={terms.length ? t("vocab.count", { n: terms.length }) : undefined}
           action={headerAction}
         />
       ) : (
         <PageHeader
-          title="词库"
-          status={terms.length ? `${terms.length} 条` : undefined}
+          title={t("vocab.title")}
+          status={terms.length ? t("vocab.count", { n: terms.length }) : undefined}
           action={headerAction}
         />
       )}
+
+      <p className="type-meta text-muted mb-1 px-1">
+        {t("vocab.descPrefix")}{" "}
+        <Link to="/settings?tab=refine" className="text-accent-soft-foreground hover:underline">
+          {t("vocab.descLink")}
+        </Link>
+      </p>
 
       <SoftCollapse open={addOpen}>
         <div className="surface-card mb-1 flex items-end gap-2 p-4">
@@ -51,9 +61,9 @@ export function VocabularyPage({ embedded = false }: { embedded?: boolean } = {}
             value={newTerm}
             onChange={setNewTerm}
           >
-            <Label>词条</Label>
+            <Label>{t("vocab.termLabel")}</Label>
             <Input
-              placeholder="Python / 配森=Python"
+              placeholder={t("vocab.termPlaceholder")}
               onKeyDown={(e) => {
                 if (e.key === "Enter") addTerm();
               }}
@@ -65,13 +75,13 @@ export function VocabularyPage({ embedded = false }: { embedded?: boolean } = {}
             onPress={addTerm}
           >
             <Plus size={16} />
-            添加
+            {t("vocab.add")}
           </Button>
         </div>
       </SoftCollapse>
 
       {terms.length === 0 ? (
-        <EmptyState title="还没有词条" icon={<BookOpen size={18} />} />
+        <EmptyState title={t("vocab.emptyTitle")} icon={<BookOpen size={18} />} />
       ) : (
         <div className="flex min-h-[200px] flex-wrap content-start gap-2">
           {terms.map((term, i) => (
@@ -79,7 +89,7 @@ export function VocabularyPage({ embedded = false }: { embedded?: boolean } = {}
               <Button
                 variant="ghost"
                 className="group h-auto min-h-0 p-0 shadow-none"
-                aria-label={`删除 ${term}`}
+                aria-label={t("vocab.deleteAria", { term })}
                 onPress={() =>
                   void saveVocabulary(terms.filter((t) => t !== term))
                 }

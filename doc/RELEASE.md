@@ -1,4 +1,4 @@
-# Release checklist (言落 / Yanluo)
+# Release checklist (QuietType / 言落)
 
 ## Version source of truth
 
@@ -15,7 +15,7 @@ package.json version
                  └─ In-app「设置 → 更新」shows this version + checks newer tags
 ```
 
-**Bundle name:** `tauri.conf.json` `productName` must stay ASCII **`Yanluo`** (WiX / installer filenames). Window title + `CFBundleDisplayName` / menu stay **言落**. Do not put CJK in `productName` — CI WiX `light.exe` and asset names break.
+**Bundle name:** `tauri.conf.json` `productName` must stay ASCII **`QuietType`** (WiX / installer filenames). Window title + `CFBundleDisplayName` / menu are **QuietType**（中文名「言落」走 zh locale 文案）. Do not put CJK in `productName` — CI WiX `light.exe` and asset names break.
 
 1. Bump `package.json` version.
 2. Run `pnpm version:sync` (keeps Cargo / tauri.conf in lockstep).
@@ -76,7 +76,7 @@ make install-local
 
 ## In-app updates
 - **检查更新** calls the GitHub Releases API off the UI thread (async + short timeout).
-- **下载并安装** saves under `~/Downloads/言落 Updates/` and opens the installer.
+- **下载并安装** saves under `~/Downloads/QuietType Updates/` and opens the installer.
 - macOS: open the `.dmg`, drag into Applications, relaunch.
 - Menu: **Check for Updates…** → **设置 → 更新**.
 

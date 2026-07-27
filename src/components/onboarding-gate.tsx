@@ -7,6 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { CheckCircle2, CircleAlert, Download, Keyboard, Mic, Shield } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 import { duration, easeOut, springBounce } from "@/lib/motion";
 import { useApp } from "@/app-context";
 import { ONBOARD_STORAGE_KEY } from "@/lib/first-run";
@@ -46,6 +47,7 @@ type OnboardStep = "perms" | "engine";
  */
 export function OnboardingGate() {
   const { config, updateConfig, loadModel, saveConfig } = useApp();
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<OnboardStep>("perms");
   const [perms, setPerms] = useState<MiniPerms | null>(null);
@@ -123,12 +125,18 @@ export function OnboardingGate() {
     }
   };
 
+  const [showDone, setShowDone] = useState(false);
+
   const finish = () => {
     markOnboarded();
-    setOpen(false);
-    if (!readTourDone()) {
-      window.setTimeout(() => requestStartTour(), 280);
-    }
+    setShowDone(true);
+    window.setTimeout(() => {
+      setShowDone(false);
+      setOpen(false);
+      if (!readTourDone()) {
+        window.setTimeout(() => requestStartTour(), 280);
+      }
+    }, 400);
   };
 
   const goEngineOrFinish = () => {
@@ -157,13 +165,15 @@ export function OnboardingGate() {
       updateConfig("asr_provider", "qwen");
       updateConfig("asr_model_dir", path);
       updateConfig("asr_model_id", modelId);
-      toast.success("模型已就绪");
+      toast.success(t("onboarding.modelReadyToast"));
       await loadModel(path);
       await refreshModel();
       finish();
     } catch (error) {
       toast.danger(
-        `下载失败: ${error instanceof Error ? error.message : String(error)}`,
+        t("onboarding.downloadFailed", {
+          msg: error instanceof Error ? error.message : String(error),
+        }),
       );
     } finally {
       setDownloading(false);
@@ -198,31 +208,40 @@ export function OnboardingGate() {
             key={`onboard-panel-${step}`}
             role="dialog"
             aria-modal="true"
-            aria-label={step === "perms" ? "开始之前" : "选择识别"}
+            aria-label={
+              step === "perms"
+                ? t("onboarding.permsTitle")
+                : t("onboarding.engineAria")
+            }
             className="flex w-full max-w-md flex-col overflow-hidden rounded-2xl bg-surface p-6 shadow-2xl"
             initial={{ opacity: 0, scale: 0.95, y: 16 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
             transition={springBounce}
           >
-            {step === "perms" ? (
+            {showDone ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-8">
+                <CheckCircle2 size={36} className="text-accent-fg" />
+                <span className="type-section">{t("onboarding.ready")}</span>
+              </div>
+            ) : step === "perms" ? (
               <>
-                <h2 className="type-section">开始之前</h2>
-                <p className="mt-1 type-meta">授权后开口出稿</p>
+                <h2 className="type-section">{t("onboarding.permsTitle")}</h2>
+                <p className="mt-1 type-meta">{t("onboarding.permsSubtitle")}</p>
 
                 <div className="mt-4">
                   <PermRow
                     icon={Mic}
-                    title="麦克风权限"
-                    desc="录制你的声音"
+                    title={t("onboarding.micTitle")}
+                    desc={t("onboarding.micDesc")}
                     granted={perms?.microphone ?? false}
                     busy={busy === "microphone"}
                     onAuthorize={() => void requestPerm("microphone")}
                   />
                   <PermRow
                     icon={Shield}
-                    title="辅助功能"
-                    desc="粘贴识别结果需要"
+                    title={t("onboarding.axTitle")}
+                    desc={t("onboarding.axDesc")}
                     granted={perms?.accessibility ?? false}
                     busy={busy === "accessibility"}
                     onAuthorize={() => void requestPerm("accessibility")}
@@ -232,13 +251,16 @@ export function OnboardingGate() {
                       <Keyboard size={16} />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="type-ui">确认热键</div>
+                      <div className="type-ui">{t("onboarding.hotkeysTitle")}</div>
                       <div className="mt-0.5 type-meta">
-                        <b className="text-foreground">{config.hotkey_transcribe.label}</b> 出稿
+                        <b className="text-foreground">{config.hotkey_transcribe.label}</b>{" "}
+                        {t("onboarding.slotTranscribe")}
                         {" · "}
-                        <b className="text-foreground">{config.hotkey_translate.label}</b> 翻译
+                        <b className="text-foreground">{config.hotkey_translate.label}</b>{" "}
+                        {t("onboarding.slotTranslate")}
                         {" · "}
-                        <b className="text-foreground">{config.hotkey_agent?.label ?? "Fn+Space"}</b> 派活
+                        <b className="text-foreground">{config.hotkey_agent?.label ?? "Fn+Space"}</b>{" "}
+                        {t("onboarding.slotAgent")}
                       </div>
                     </div>
                     <Link
@@ -246,7 +268,7 @@ export function OnboardingGate() {
                       className="shrink-0 font-medium text-[13px] text-muted transition-colors hover:text-foreground"
                       onClick={finish}
                     >
-                      修改
+                      {t("onboarding.change")}
                     </Link>
                   </div>
                 </div>
@@ -257,17 +279,17 @@ export function OnboardingGate() {
                     className="text-[13px] text-muted transition-colors hover:text-foreground"
                     onClick={goEngineOrFinish}
                   >
-                    跳过
+                    {t("onboarding.skip")}
                   </button>
                   <Button variant="primary" className="btn-press" onPress={goEngineOrFinish}>
-                    继续
+                    {t("onboarding.continue")}
                   </Button>
                 </div>
               </>
             ) : (
               <>
-                <h2 className="type-section">怎么识别</h2>
-                <p className="mt-1 type-meta">选一个就能开口</p>
+                <h2 className="type-section">{t("onboarding.engineTitle")}</h2>
+                <p className="mt-1 type-meta">{t("onboarding.engineSubtitle")}</p>
 
                 <div className="mt-4 flex flex-col gap-3">
                   <button
@@ -276,8 +298,8 @@ export function OnboardingGate() {
                     disabled={downloading}
                     onClick={useApple}
                   >
-                    <div className="type-ui">系统识别</div>
-                    <div className="mt-0.5 type-meta">无需下载 · 马上能用</div>
+                    <div className="type-ui">{t("onboarding.appleTitle")}</div>
+                    <div className="mt-0.5 type-meta">{t("onboarding.appleDesc")}</div>
                   </button>
 
                   {modelReady ? (
@@ -287,14 +309,14 @@ export function OnboardingGate() {
                       disabled={downloading}
                       onClick={() => void useExistingQwen()}
                     >
-                      <div className="type-ui">本机 Qwen</div>
-                      <div className="mt-0.5 type-meta">已安装 · 点一下加载</div>
+                      <div className="type-ui">{t("onboarding.qwenTitle")}</div>
+                      <div className="mt-0.5 type-meta">{t("onboarding.qwenInstalledDesc")}</div>
                     </button>
                   ) : (
                     <div className="onboard-choice onboard-choice-accent flex flex-col gap-3">
                       <div>
-                        <div className="type-ui">本机 Qwen</div>
-                        <div className="mt-0.5 type-meta">约 2GB · 权重与 tokenizer 一次下完</div>
+                        <div className="type-ui">{t("onboarding.qwenTitle")}</div>
+                        <div className="mt-0.5 type-meta">{t("onboarding.qwenDownloadDesc")}</div>
                       </div>
                       {downloading && progress ? (
                         <div className="type-meta">{progressLabel(progress)}</div>
@@ -321,7 +343,9 @@ export function OnboardingGate() {
                         onPress={() => void downloadQwen()}
                       >
                         <Download size={14} />
-                        {downloading ? "下载中…" : "下载并启用"}
+                        {downloading
+                          ? t("onboarding.downloading")
+                          : t("onboarding.downloadAndEnable")}
                       </Button>
                     </div>
                   )}
@@ -334,7 +358,7 @@ export function OnboardingGate() {
                     disabled={downloading}
                     onClick={() => setStep("perms")}
                   >
-                    上一步
+                    {t("onboarding.back")}
                   </button>
                   <button
                     type="button"
@@ -342,7 +366,7 @@ export function OnboardingGate() {
                     disabled={downloading}
                     onClick={useApple}
                   >
-                    先用系统识别
+                    {t("onboarding.useAppleForNow")}
                   </button>
                 </div>
               </>
@@ -370,6 +394,7 @@ function PermRow({
   busy: boolean;
   onAuthorize: () => void;
 }) {
+  const t = useT();
   return (
     <div className="perm-row">
       <div
@@ -389,11 +414,11 @@ function PermRow({
       <div className="flex shrink-0 items-center gap-2">
         <span className={cn("perm-status", granted ? "perm-status-ok" : "perm-status-off")}>
           {granted ? <CheckCircle2 size={12} /> : <CircleAlert size={12} />}
-          {granted ? "已授权" : "未授权"}
+          {granted ? t("onboarding.granted") : t("onboarding.notGranted")}
         </span>
         {!granted ? (
           <Button size="sm" variant="secondary" isDisabled={busy} onPress={onAuthorize}>
-            去授权
+            {t("onboarding.authorize")}
           </Button>
         ) : null}
       </div>

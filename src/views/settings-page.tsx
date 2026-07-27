@@ -57,6 +57,7 @@ import {
   SoftCollapse,
 } from "@/components/shared/page-shell";
 import { cn } from "@/lib/cn";
+import { useI18n, useT, tStatic } from "@/lib/i18n";
 import { useApp } from "@/app-context";
 import { requestStartTour } from "@/components/spotlight-tour";
 import {
@@ -228,34 +229,34 @@ type DownloadInstallResult = {
   message: string;
 };
 
-const TABS: { id: SettingsTab; label: string; icon: typeof Shield }[] = [
-  { id: "general", label: "常规", icon: SlidersHorizontal },
-  { id: "asr", label: "识别", icon: Mic },
-  { id: "polish", label: "润色", icon: Wand2 },
-  { id: "agent", label: "派活", icon: Bot },
-  { id: "system", label: "系统", icon: Cpu },
-  { id: "updates", label: "更新", icon: Download },
+const TABS: { id: SettingsTab; labelKey: string; icon: typeof Shield }[] = [
+  { id: "general", labelKey: "settings.tab.general", icon: SlidersHorizontal },
+  { id: "asr", labelKey: "settings.tab.asr", icon: Mic },
+  { id: "polish", labelKey: "settings.tab.polish", icon: Wand2 },
+  { id: "agent", labelKey: "settings.tab.agent", icon: Bot },
+  { id: "system", labelKey: "settings.tab.system", icon: Cpu },
+  { id: "updates", labelKey: "settings.tab.updates", icon: Download },
 ];
 
-const POLISH_SUBS: { id: PolishSub; label: string }[] = [
-  { id: "config", label: "配置" },
-  { id: "refine", label: "纠错学习" },
-  { id: "vocab", label: "词库" },
+const POLISH_SUBS: { id: PolishSub; labelKey: string }[] = [
+  { id: "config", labelKey: "settings.sub.config" },
+  { id: "refine", labelKey: "settings.sub.refine" },
+  { id: "vocab", labelKey: "settings.sub.vocab" },
 ];
 
-const SYSTEM_SUBS: { id: SystemSub; label: string }[] = [
-  { id: "hotkeys", label: "快捷键" },
-  { id: "permissions", label: "权限" },
+const SYSTEM_SUBS: { id: SystemSub; labelKey: string }[] = [
+  { id: "hotkeys", labelKey: "settings.sub.hotkeys" },
+  { id: "permissions", labelKey: "settings.sub.permissions" },
 ];
 
 /** One muted 13px description line under the serif section head (v3.1). */
-const TAB_DESC: Record<SettingsTab, string> = {
-  general: "语言、录音源与外观。各页自行保存。",
-  asr: "识别引擎、型号与逐字对齐。",
-  polish: "服务商配置、纠错学习与词库。",
-  agent: "内置 Claude · Codex · Pi，选一个作为默认派活 Agent。",
-  system: "全局快捷键与 macOS 权限。",
-  updates: "当前版本、检查更新与更新说明。",
+const TAB_DESC_KEYS: Record<SettingsTab, string> = {
+  general: "settings.tabDesc.general",
+  asr: "settings.tabDesc.asr",
+  polish: "settings.tabDesc.polish",
+  agent: "settings.tabDesc.agent",
+  system: "settings.tabDesc.system",
+  updates: "settings.tabDesc.updates",
 };
 
 /**
@@ -302,38 +303,38 @@ function QSwitch<T extends string>({
 
 const PERMS: {
   kind: PermKind;
-  title: string;
-  blurb: string;
+  titleKey: string;
+  blurbKey: string;
   icon: typeof Shield;
 }[] = [
   {
     kind: "accessibility",
-    title: "辅助功能",
-    blurb: "粘贴识别结果到其他应用",
+    titleKey: "settings.perm.accessibility",
+    blurbKey: "settings.perm.accessibilityBlurb",
     icon: Shield,
   },
   {
     kind: "input_monitoring",
-    title: "输入监视",
-    blurb: "全局快捷键（含 Fn）",
+    titleKey: "settings.perm.inputMonitoring",
+    blurbKey: "settings.perm.inputMonitoringBlurb",
     icon: Keyboard,
   },
   {
     kind: "microphone",
-    title: "麦克风",
-    blurb: "录制外部声音",
+    titleKey: "settings.perm.microphone",
+    blurbKey: "settings.perm.microphoneBlurb",
     icon: Mic,
   },
   {
     kind: "speech_recognition",
-    title: "语音识别",
-    blurb: "Apple Speech 引擎",
+    titleKey: "settings.perm.speechRecognition",
+    blurbKey: "settings.perm.speechRecognitionBlurb",
     icon: Ear,
   },
   {
     kind: "screen_recording",
-    title: "屏幕录制",
-    blurb: "采集系统播放音频",
+    titleKey: "settings.perm.screenRecording",
+    blurbKey: "settings.perm.screenRecordingBlurb",
     icon: Monitor,
   },
 ];
@@ -350,10 +351,11 @@ function SubTabs<T extends string>({
   active,
   onSelect,
 }: {
-  items: { id: T; label: string }[];
+  items: { id: T; labelKey: string }[];
   active: T;
   onSelect: (id: T) => void;
 }) {
+  const t = useT();
   return (
     <div className="set-subtabs" role="tablist">
       {items.map((item) => {
@@ -368,7 +370,7 @@ function SubTabs<T extends string>({
             className={cn("set-subtab", isActive && "is-active")}
             onClick={() => onSelect(item.id)}
           >
-            {item.label}
+            {t(item.labelKey)}
           </button>
         );
       })}
@@ -507,16 +509,18 @@ export function SettingsPage() {
   };
 
   const fade = useFade();
+  const t = useT();
 
-  const activeLabel = TABS.find((t) => t.id === tab)?.label ?? "设置";
+  const activeTabDef = TABS.find((item) => item.id === tab);
+  const activeLabel = activeTabDef ? t(activeTabDef.labelKey) : t("settings.title");
 
   return (
     <PageShell className="max-w-none! set-page pt-8 -mb-15 gap-7! h-full min-h-0">
-      <PageHeader title="设置" />
+      <PageHeader title={t("settings.title")} />
 
       {/* macOS System-Settings-style two-pane: left source list, right detail. */}
       <div className="set">
-        <nav className="setnav" aria-label="设置分类">
+        <nav className="setnav" aria-label={t("settings.navAria")}>
           {TABS.map((item) => {
             const active = tab === item.id;
             const Icon = item.icon;
@@ -536,7 +540,7 @@ export function SettingsPage() {
                 onClick={() => selectTab(item.id)}
               >
                 <Icon size={14} className="setnav-icon" aria-hidden />
-                <span className="relative z-10">{item.label}</span>
+                <span className="relative z-10">{t(item.labelKey)}</span>
               </button>
             );
           })}
@@ -545,7 +549,7 @@ export function SettingsPage() {
         <div className="setbody">
           <div>
             <h2 className="set-sechead">{activeLabel}</h2>
-            <p className="set-secdesc">{TAB_DESC[tab]}</p>
+            <p className="set-secdesc">{t(TAB_DESC_KEYS[tab])}</p>
           </div>
           <motion.div
             key={tab}
@@ -587,10 +591,11 @@ function PolishPanel({
   onSelectSub: (id: string) => void;
 }) {
   const fade = useFade();
+  const t = useT();
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <div className="set-group-t">润色 · 服务商</div>
+        <div className="set-group-t">{t("settings.polish.groupTitle")}</div>
         <div className="mt-2">
           <SubTabs
             items={POLISH_SUBS}
@@ -651,6 +656,7 @@ function SystemPanel({
 function AsrProviderPanel() {
   const { config, updateConfig, saveConfig, chooseModelDir, loadModel, modelLoaded, modelLoading } =
     useApp();
+  const t = useT();
   const [appleAvailable, setAppleAvailable] = useState(true);
   const [qwenLocal, setQwenLocal] = useState(false);
   const [status, setStatus] = useState<ModelStatus | null>(null);
@@ -658,6 +664,10 @@ function AsrProviderPanel() {
   const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
   const [downloadAligner, setDownloadAligner] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // Dirty detection: snapshot config on mount and after save
+  const configSnapshotRef = useRef(JSON.stringify(config));
+  const isDirty = JSON.stringify(config) !== configSnapshotRef.current;
 
   useEffect(() => {
     void invoke<AppInfo>("get_app_info")
@@ -717,12 +727,14 @@ function AsrProviderPanel() {
       });
       updateConfig("asr_model_dir", path);
       updateConfig("asr_model_id", modelId);
-      toast.success("模型已下载，正在加载…");
+      toast.success(t("settings.asr.modelDownloadedLoading"));
       await refreshStatus();
       await loadModel(path);
     } catch (error) {
       toast.danger(
-        `下载失败: ${error instanceof Error ? error.message : String(error)}`,
+        t("settings.asr.downloadFailed", {
+          msg: error instanceof Error ? error.message : String(error),
+        }),
       );
     } finally {
       setDownloading(false);
@@ -746,7 +758,7 @@ function AsrProviderPanel() {
             selectProvider(String(key) as AsrProvider);
           }}
         >
-          <Label>识别引擎</Label>
+          <Label>{t("settings.asr.engine")}</Label>
           <Select.Trigger className="flex items-center justify-between p-4">
             <Select.Value />
             <Select.Indicator />
@@ -761,10 +773,11 @@ function AsrProviderPanel() {
               ) : null}
               <ListBox.Item
                 id="qwen"
-                textValue="Qwen 本地"
+                textValue={t("settings.asr.qwenLocal")}
                 isDisabled={!qwenLocal}
               >
-                Qwen 本地{!qwenLocal ? "（当前构建未启用）" : ""}
+                {t("settings.asr.qwenLocal")}
+                {!qwenLocal ? t("settings.asr.qwenNotBuilt") : ""}
                 <ListBox.ItemIndicator />
               </ListBox.Item>
             </ListBox>
@@ -772,9 +785,7 @@ function AsrProviderPanel() {
         </Select>
 
         {config.asr_provider === "apple" ? (
-          <p className="type-meta">
-            系统语音识别，录音时实时出字。需在「系统 → 权限」打开语音识别。
-          </p>
+          <p className="type-meta">{t("settings.asr.appleBlurb")}</p>
         ) : null}
 
         {isQwen ? (
@@ -787,7 +798,7 @@ function AsrProviderPanel() {
                 updateConfig("asr_model_id", String(key));
               }}
             >
-              <Label>型号</Label>
+              <Label>{t("settings.asr.model")}</Label>
               <Select.Trigger className="flex items-center justify-between p-4">
                 <Select.Value />
                 <Select.Indicator />
@@ -806,7 +817,7 @@ function AsrProviderPanel() {
             {status?.installed && !status.needs_download ? (
               <p className="-mt-2 truncate type-meta">
                 <span className="badge-soft" data-tone="success">
-                  已安装
+                  {t("settings.asr.installed")}
                 </span>{" "}
                 {status.path}
               </p>
@@ -815,9 +826,9 @@ function AsrProviderPanel() {
             {needsDownload ? (
               <div className="flex flex-col gap-3 rounded-xl bg-default/40 p-4">
                 <div>
-                  <div className="type-ui">下载模型才能用</div>
+                  <div className="type-ui">{t("settings.asr.needDownloadTitle")}</div>
                   <div className="mt-0.5 type-meta">
-                    约 2GB · 权重与 tokenizer 一次下完 · 下完自动加载
+                    {t("settings.asr.needDownloadBlurb")}
                   </div>
                 </div>
                 {downloading && progress ? (
@@ -847,7 +858,9 @@ function AsrProviderPanel() {
                   onPress={() => void startDownload()}
                 >
                   <Download size={14} />
-                  {downloading ? "下载中…" : "开始下载"}
+                  {downloading
+                    ? t("settings.asr.downloading")
+                    : t("settings.asr.startDownload")}
                 </Button>
               </div>
             ) : null}
@@ -860,11 +873,11 @@ function AsrProviderPanel() {
               >
                 <Switch.Content className="w-full justify-between gap-2 p-3">
                   <div className="min-w-0 pr-2">
-                    <div className="type-ui">逐字对齐</div>
+                    <div className="type-ui">{t("settings.asr.align")}</div>
                     <div className="mt-0.5 type-meta">
                       {alignReady
-                        ? "字级时间戳 · 已配置"
-                        : "在下方高级设置配置对齐模型目录后可用"}
+                        ? t("settings.asr.alignReady")
+                        : t("settings.asr.alignNotReady")}
                     </div>
                   </div>
                   <Switch.Control>
@@ -885,12 +898,10 @@ function AsrProviderPanel() {
             open={advancedOpen}
             onToggle={() => setAdvancedOpen((v) => !v)}
           >
-            模型目录与高级参数
+            {t("settings.asr.advancedTitle")}
           </CollapseTrigger>
           {!advancedOpen ? (
-            <p className="-mt-1 type-meta">
-              模型 / 对齐目录、VAD 后端与分段参数收在此处 · 多数用户无需调整。
-            </p>
+            <p className="-mt-1 type-meta">{t("settings.asr.advancedBlurb")}</p>
           ) : null}
           <SoftCollapse open={advancedOpen}>
             <div className="flex flex-col gap-5 pt-1">
@@ -930,7 +941,7 @@ function AsrProviderPanel() {
                 value={config.asr_model_dir}
                 onChange={(value) => updateConfig("asr_model_dir", value)}
               >
-                <Label>模型目录</Label>
+                <Label>{t("settings.asr.modelDir")}</Label>
                 <InputGroup className="w-full">
                   <InputGroup.Input className="min-w-0 font-mono text-[13px]" />
                   <InputGroup.Suffix className="pr-1">
@@ -940,7 +951,7 @@ function AsrProviderPanel() {
                       onPress={() => void chooseModelDir()}
                     >
                       <FolderOpen size={16} />
-                      浏览
+                      {t("settings.asr.browse")}
                     </Button>
                   </InputGroup.Suffix>
                 </InputGroup>
@@ -954,7 +965,7 @@ function AsrProviderPanel() {
                   <Checkbox.Control>
                     <Checkbox.Indicator />
                   </Checkbox.Control>
-                  下载时一并获取逐字对齐模型（ForcedAligner）
+                  {t("settings.asr.downloadAligner")}
                 </Checkbox.Content>
               </Checkbox>
 
@@ -964,7 +975,7 @@ function AsrProviderPanel() {
                 value={config.align_model_dir ?? ""}
                 onChange={(value) => updateConfig("align_model_dir", value)}
               >
-                <Label>对齐模型目录</Label>
+                <Label>{t("settings.asr.alignModelDir")}</Label>
                 <Input className="min-w-0 font-mono text-[13px]" />
               </TextField>
 
@@ -980,42 +991,42 @@ function AsrProviderPanel() {
           <div className="form-actions-secondary flex gap-2">
             <Button
               size="sm"
-              variant="secondary"
+              variant="ghost"
               isPending={downloading}
               onPress={() => void startDownload()}
             >
               <Download size={14} />
-              重新下载
+              {t("settings.asr.redownload")}
             </Button>
             <Button
               size="sm"
-              variant="secondary"
+              variant={modelLoaded ? "secondary" : "primary"}
               isPending={modelLoading}
               isDisabled={!config.asr_model_dir?.trim()}
               onPress={() => void loadModel()}
             >
-              {modelLoaded ? "重新加载" : "加载模型"}
+              {modelLoaded ? t("settings.asr.reload") : t("settings.asr.loadModel")}
             </Button>
           </div>
         ) : null}
         <Button
           className="form-actions-primary btn-press"
           fullWidth
-          variant="primary"
+          variant={isQwen && !needsDownload && !modelLoaded ? "secondary" : "primary"}
+          isDisabled={!isDirty}
           onPress={() => {
-            void saveConfig(config, { silent: true }).then(() =>
-              toast.success("已保存"),
-            );
+            void saveConfig(config, { silent: true }).then(() => {
+              configSnapshotRef.current = JSON.stringify(config);
+              toast.success(t("common.saved"));
+            });
           }}
         >
           <Save size={16} />
-          保存
+          {t("common.save")}
         </Button>
       </div>
       {isQwen && !needsDownload && !modelLoaded ? (
-        <p className="type-meta text-warning">
-          模型未加载 — 点「加载模型」后才能用 Fn 录音识别。
-        </p>
+        <p className="type-meta text-warning">{t("settings.asr.notLoadedWarning")}</p>
       ) : null}
     </div>
   );
@@ -1124,32 +1135,33 @@ function VadAdvancedFields({
 }) {
   const aggression = config.vad_aggression ?? 2;
   const scene = vadSceneFor(aggression);
+  const t = useT();
 
   return (
     <div className="flex flex-col gap-3 pt-1">
       <div className="flex flex-col gap-1.5">
-        <span className="type-meta">场景</span>
+        <span className="type-meta">{t("settings.vad.scene")}</span>
         <QSwitch
-          ariaLabel="VAD 场景预设"
+          ariaLabel={t("settings.vad.scenePresetAria")}
           value={scene}
           onChange={(id) => {
             if (id === "custom") return;
             updateConfig("vad_aggression", VAD_SCENE_AGGRESSION[id]);
           }}
           options={[
-            { id: "dictate" as const, label: "口述" },
-            { id: "meeting" as const, label: "会议" },
-            { id: "interview" as const, label: "采访" },
+            { id: "dictate" as const, label: t("settings.vad.sceneDictate") },
+            { id: "meeting" as const, label: t("settings.vad.sceneMeeting") },
+            { id: "interview" as const, label: t("settings.vad.sceneInterview") },
           ]}
         />
         {aggression >= 3 ? (
-          <p className="type-meta">切得太碎可调低灵敏度</p>
+          <p className="type-meta">{t("settings.vad.tooChoppyHint")}</p>
         ) : null}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <ConfigNumberField
-          label="分片秒数"
+          label={t("settings.vad.chunkSizeSec")}
           value={config.chunk_size_sec ?? 1.5}
           min={0.2}
           max={5}
@@ -1157,7 +1169,7 @@ function VadAdvancedFields({
           onCommit={(n) => updateConfig("chunk_size_sec", n)}
         />
         <ConfigNumberField
-          label="未固定 token"
+          label={t("settings.vad.unfixedTokens")}
           value={config.unfixed_token_num ?? 5}
           min={1}
           max={32}
@@ -1181,7 +1193,7 @@ function VadAdvancedFields({
             updateConfig("vad_backend", String(key));
           }}
         >
-          <Label>VAD 后端</Label>
+          <Label>{t("settings.vad.backend")}</Label>
           <Select.Trigger className="flex items-center justify-between p-3">
             <Select.Value />
             <Select.Indicator />
@@ -1204,7 +1216,7 @@ function VadAdvancedFields({
           </Select.Popover>
         </Select>
         <ConfigNumberField
-          label="灵敏度"
+          label={t("settings.vad.aggression")}
           value={config.vad_aggression ?? 2}
           min={0}
           max={3}
@@ -1215,14 +1227,14 @@ function VadAdvancedFields({
 
       <div className="grid grid-cols-2 gap-3">
         <ConfigNumberField
-          label="最短静音 ms"
+          label={t("settings.vad.minSilenceMs")}
           value={config.vad_min_silence_ms ?? 900}
           min={400}
           step={50}
           onCommit={(n) => updateConfig("vad_min_silence_ms", Math.round(n))}
         />
         <ConfigNumberField
-          label="提交等待 ms"
+          label={t("settings.vad.commitHoldMs")}
           value={config.vad_commit_hold_ms ?? 500}
           min={200}
           step={50}
@@ -1232,14 +1244,14 @@ function VadAdvancedFields({
 
       <div className="grid grid-cols-2 gap-3">
         <ConfigNumberField
-          label="最短段 ms"
+          label={t("settings.vad.minSegmentMs")}
           value={config.vad_min_segment_ms ?? 2500}
           min={1000}
           step={100}
           onCommit={(n) => updateConfig("vad_min_segment_ms", Math.round(n))}
         />
         <ConfigNumberField
-          label="最长段 秒"
+          label={t("settings.vad.maxSegmentSec")}
           value={config.vad_max_segment_sec ?? 90}
           min={10}
           max={180}
@@ -1250,14 +1262,14 @@ function VadAdvancedFields({
 
       <div className="grid grid-cols-2 gap-3">
         <ConfigNumberField
-          label="重叠 ms"
+          label={t("settings.vad.overlapMs")}
           value={config.vad_overlap_ms ?? 500}
           min={200}
           step={50}
           onCommit={(n) => updateConfig("vad_overlap_ms", Math.round(n))}
         />
         <ConfigNumberField
-          label="跨段前缀"
+          label={t("settings.vad.crossSegmentPrefix")}
           value={config.cross_segment_prefix_tokens ?? 64}
           min={0}
           max={256}
@@ -1270,7 +1282,7 @@ function VadAdvancedFields({
 
       {config.vad_backend === "energy" ? (
         <ConfigNumberField
-          label="能量阈值"
+          label={t("settings.vad.energyThreshold")}
           value={config.vad_energy_threshold ?? 0.01}
           min={0.001}
           max={0.05}
@@ -1285,6 +1297,7 @@ function VadAdvancedFields({
 
 function LlmProviderPanel() {
   const { config, updateConfig, saveConfig } = useApp();
+  const t = useT();
   // Which provider's editor is open. null = collapsed list (no flat form).
   const [openId, setOpenId] = useState<LlmProvider | null>(null);
 
@@ -1326,7 +1339,11 @@ function LlmProviderPanel() {
       },
       { silent: true },
     );
-    toast.success(`已设为当前 · ${llmProviderLabel(config, provider)}`);
+    toast.success(
+      t("settings.llm.setCurrentToast", {
+        label: llmProviderLabel(config, provider),
+      }),
+    );
   };
 
   const resetBuiltin = (provider: LlmProvider) => {
@@ -1334,7 +1351,7 @@ function LlmProviderPanel() {
     delete rest[provider];
     updateConfig("llm_credentials", rest);
     void saveConfig({ ...config, llm_credentials: rest }, { silent: true });
-    toast.success("已重置该服务商");
+    toast.success(t("settings.llm.resetToast"));
   };
 
   const deleteCustom = (provider: LlmProvider) => {
@@ -1354,21 +1371,26 @@ function LlmProviderPanel() {
       updateConfig("llm_model", next.llm_model);
     }
     if (openId === provider) setOpenId(null);
-    toast.success("已删除");
+    toast.success(t("common.deleted"));
   };
 
   const addProvider = () => {
     const id = newCustomProviderId();
     updateConfig("llm_credentials", {
       ...config.llm_credentials,
-      [id]: { api_base_url: "", api_key: "", model: "", label: "新服务商" },
+      [id]: {
+        api_base_url: "",
+        api_key: "",
+        model: "",
+        label: t("settings.llm.newProviderName"),
+      },
     });
     setOpenId(id);
   };
 
   const save = () => {
     void saveConfig();
-    toast.success("已保存");
+    toast.success(t("common.saved"));
   };
 
   return (
@@ -1376,12 +1398,12 @@ function LlmProviderPanel() {
       <div className="set-lines">
         <div className="set-row-line">
           <div className="set-row-line-lab">
-            启用纠错
-            <small>用所选服务商润色识别稿 · 关闭则出原始识别文字</small>
+            {t("settings.llm.enableRefine")}
+            <small>{t("settings.llm.enableRefineBlurb")}</small>
           </div>
           <div className="set-row-line-ctl">
             <Switch
-              aria-label="启用纠错"
+              aria-label={t("settings.llm.enableRefine")}
               isSelected={config.llm_enabled}
               onChange={(value) => updateConfig("llm_enabled", value)}
             >
@@ -1405,12 +1427,12 @@ function LlmProviderPanel() {
             const hasKey = Boolean(stored?.api_key?.trim());
             const rc = resolveLlmCreds(config, p.id);
             const badge = isCur
-              ? "当前"
+              ? t("settings.llm.badgeCurrent")
               : local
-                ? "本地"
+                ? t("settings.llm.badgeLocal")
                 : hasKey
-                  ? "有 Key"
-                  : "未配";
+                  ? t("settings.llm.badgeHasKey")
+                  : t("settings.llm.badgeUnset");
             const toggle = () => setOpenId(isOpen ? null : p.id);
             return (
               <div key={p.id} className={cn("set-prov-wrap", isOpen && "is-open")}>
@@ -1441,7 +1463,7 @@ function LlmProviderPanel() {
                     </div>
                     <div className="set-prov-meta">
                       {rc.model ? `${rc.model} · ` : ""}
-                      {rc.api_base_url || "未设置地址"}
+                      {rc.api_base_url || t("settings.llm.noBaseUrl")}
                     </div>
                   </div>
                   <button
@@ -1452,7 +1474,16 @@ function LlmProviderPanel() {
                       toggle();
                     }}
                   >
-                    {isOpen ? "收起" : "编辑"}
+                    {isOpen ? t("common.collapse") : t("common.edit")}
+                    <ChevronDown
+                      size={12}
+                      style={{
+                        display: "inline-block",
+                        marginLeft: 2,
+                        transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+                        transition: "transform 150ms ease",
+                      }}
+                    />
                   </button>
                   {!isCur ? (
                     <button
@@ -1463,7 +1494,7 @@ function LlmProviderPanel() {
                         activate(p.id);
                       }}
                     >
-                      设为当前
+                      {t("settings.llm.setCurrent")}
                     </button>
                   ) : null}
                 </div>
@@ -1498,9 +1529,11 @@ function LlmProviderPanel() {
             }}
           >
             <div className="set-prov-grow">
-              <span className="set-prov-name text-muted">自定义服务商…</span>
+              <span className="set-prov-name text-muted">
+                {t("settings.llm.customProviderEllipsis")}
+              </span>
             </div>
-            <span className="set-prov-ghost">＋ 添加</span>
+            <span className="set-prov-ghost">{t("settings.llm.addProvider")}</span>
           </div>
         </div>
       </div>
@@ -1513,15 +1546,16 @@ function LlmProviderPanel() {
 /** 翻译 Prompt — 从出稿-翻译 tab 收敛至此 (v3.1: 使用处只留选择, 编辑在设置). */
 function TranslatePromptSection() {
   const { config, updateConfig, saveConfig } = useApp();
+  const t = useT();
   const translateValue =
     config.llm_translate_prompt || DEFAULT_LLM_TRANSLATE_PROMPT;
 
   return (
     <section className="flex flex-col gap-3">
       <div>
-        <div className="set-group-t">翻译 Prompt</div>
+        <div className="set-group-t">{t("settings.translatePrompt.title")}</div>
         <p className="mt-1 type-meta">
-          出稿-翻译 tab 使用此 Prompt · {"{target}"} 会替换为目标语言名
+          {t("settings.translatePrompt.blurb", { placeholder: "{target}" })}
         </p>
       </div>
       <TextField
@@ -1530,11 +1564,13 @@ function TranslatePromptSection() {
         value={translateValue}
         onChange={(value) => updateConfig("llm_translate_prompt", value)}
       >
-        <Label className="sr-only">翻译 Prompt</Label>
+        <Label className="sr-only">{t("settings.translatePrompt.title")}</Label>
         <TextArea
           rows={8}
           className="min-h-[10rem] font-mono type-meta !text-[12px]"
-          placeholder={"{target} → 目标语言名"}
+          placeholder={t("settings.translatePrompt.placeholder", {
+            placeholder: "{target}",
+          })}
         />
       </TextField>
       <div className="flex items-center justify-end gap-2">
@@ -1544,7 +1580,7 @@ function TranslatePromptSection() {
           onPress={() => updateConfig("llm_translate_prompt", "")}
         >
           <RotateCcw size={14} />
-          恢复默认
+          {t("common.restoreDefault")}
         </Button>
         <Button
           size="sm"
@@ -1552,11 +1588,11 @@ function TranslatePromptSection() {
           className="btn-press"
           onPress={() => {
             void saveConfig();
-            toast.success("已保存");
+            toast.success(t("common.saved"));
           }}
         >
           <Save size={14} />
-          保存
+          {t("common.save")}
         </Button>
       </div>
     </section>
@@ -1586,6 +1622,7 @@ function ProviderEditor({
 }) {
   const creds = resolveLlmCreds(config, provider);
   const preset = llmPreset(provider);
+  const t = useT();
   // Two-step inline confirm for delete: first press arms (确认删除？), second executes.
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const confirmTimer = useRef<number | null>(null);
@@ -1629,8 +1666,8 @@ function ProviderEditor({
           value={creds.label ?? ""}
           onChange={(value) => onPatch({ label: value })}
         >
-          <Label>名称</Label>
-          <Input placeholder="自定义服务商名称" />
+          <Label>{t("settings.llm.name")}</Label>
+          <Input placeholder={t("settings.llm.namePlaceholder")} />
         </TextField>
       ) : null}
 
@@ -1652,7 +1689,7 @@ function ProviderEditor({
         onChange={(value) => onPatch({ api_key: value })}
       >
         <Label>API Key</Label>
-        <Input placeholder="可留空（Ollama 等本地服务）" />
+        <Input placeholder={t("settings.llm.apiKeyPlaceholder")} />
       </TextField>
 
       <TextField
@@ -1661,9 +1698,9 @@ function ProviderEditor({
         value={creds.model}
         onChange={(value) => onPatch({ model: value })}
       >
-        <Label>模型</Label>
+        <Label>{t("settings.llm.model")}</Label>
         <Input
-          placeholder={preset.models[0] ?? "模型名称"}
+          placeholder={preset.models[0] ?? t("settings.llm.modelPlaceholder")}
           className="font-mono text-[13px]"
         />
       </TextField>
@@ -1684,7 +1721,7 @@ function ProviderEditor({
 
       <div className="-mt-1 flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="type-meta">推荐</span>
+          <span className="type-meta">{t("settings.llm.recommended")}</span>
           {RECOMMENDED_REFINE_MODELS.map((rec) => (
             <button
               key={rec.model}
@@ -1696,14 +1733,14 @@ function ProviderEditor({
             </button>
           ))}
         </div>
-        <p className="type-meta">小模型勿开 few-shot（已自动）</p>
+        <p className="type-meta">{t("settings.llm.fewShotHint")}</p>
       </div>
 
       <div className="form-actions">
         <div className="form-actions-secondary flex gap-2">
           {!isCurrent ? (
             <Button size="sm" variant="secondary" onPress={onActivate}>
-              设为当前
+              {t("settings.llm.setCurrent")}
             </Button>
           ) : null}
           <Button
@@ -1717,7 +1754,11 @@ function ProviderEditor({
             onPress={pressDestructive}
           >
             <Trash2 size={14} />
-            {builtin ? "重置" : confirmingDelete ? "确认删除？" : "删除"}
+            {builtin
+              ? t("common.reset")
+              : confirmingDelete
+                ? t("common.confirmDelete")
+                : t("common.delete")}
           </Button>
         </div>
         <Button
@@ -1727,7 +1768,7 @@ function ProviderEditor({
           onPress={onSave}
         >
           <Save size={16} />
-          保存
+          {t("common.save")}
         </Button>
       </div>
     </div>
@@ -1736,6 +1777,7 @@ function ProviderEditor({
 
 function GeneralPanel() {
   const { config, updateConfig, theme, setTheme, saveConfig } = useApp();
+  const { locale, setLocale, t } = useI18n();
   const langOptions = asrLanguageOptions(config.extra_languages);
   const addable = addableLanguageCatalog(config.extra_languages);
   const [pendingAdd, setPendingAdd] = useState<string>(addable[0]?.[0] ?? "");
@@ -1766,17 +1808,81 @@ function GeneralPanel() {
     }
   };
 
+  const switchTheme = (mode: "dark" | "light") => {
+    const skipOverlay =
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (skipOverlay) {
+      setTheme(mode);
+      return;
+    }
+    const overlay = document.createElement("div");
+    Object.assign(overlay.style, {
+      position: "fixed",
+      inset: "0",
+      zIndex: "99999",
+      background: "var(--background)",
+      pointerEvents: "none",
+      opacity: "1",
+      transition: "opacity 120ms ease-out",
+    });
+    document.body.appendChild(overlay);
+    setTheme(mode);
+    // Force a reflow so transition triggers
+    void overlay.offsetHeight;
+    overlay.style.opacity = "0";
+    overlay.addEventListener("transitionend", () => overlay.remove(), {
+      once: true,
+    });
+    // Fallback removal in case transitionend doesn't fire
+    setTimeout(() => overlay.remove(), 200);
+  };
+
   return (
     <div className="set-lines">
-      {/* 识别语言 — quiet mono ▾ 触发器, 无盒 */}
+      {/* 语言 / Language — interface locale, applies immediately (not persisted in config) */}
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          识别语言
-          <small>自动检测优先匹配系统语言</small>
+          {t("settings.general.uiLanguage")}
+          <small>{t("settings.general.uiLanguageBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
           <Select
-            aria-label="识别语言"
+            aria-label={t("settings.general.uiLanguage")}
+            selectedKey={locale}
+            onSelectionChange={(key) => {
+              if (key !== "en" && key !== "zh") return;
+              setLocale(key);
+            }}
+          >
+            <Select.Trigger className="qsel">
+              <Select.Value />
+              <Select.Indicator className="qsel-chev" />
+            </Select.Trigger>
+            <Select.Popover>
+              <ListBox>
+                <ListBox.Item id="en" textValue="English">
+                  English
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+                <ListBox.Item id="zh" textValue="中文">
+                  中文
+                  <ListBox.ItemIndicator />
+                </ListBox.Item>
+              </ListBox>
+            </Select.Popover>
+          </Select>
+        </div>
+      </div>
+
+      {/* 识别语言 — quiet mono ▾ 触发器, 无盒 */}
+      <div className="set-row-line">
+        <div className="set-row-line-lab">
+          {t("settings.general.asrLanguage")}
+          <small>{t("settings.general.asrLanguageBlurb")}</small>
+        </div>
+        <div className="set-row-line-ctl">
+          <Select
+            aria-label={t("settings.general.asrLanguage")}
             selectedKey={config.language}
             onSelectionChange={(key) => {
               if (key == null) return;
@@ -1803,8 +1909,8 @@ function GeneralPanel() {
 
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          添加语言
-          <small>扩充「识别语言」列表；翻译目标已含 Qwen 全目录</small>
+          {t("settings.general.addLanguage")}
+          <small>{t("settings.general.addLanguageBlurb")}</small>
         </div>
         <div className="set-row-line-ctl flex flex-col items-end gap-2">
           {(config.extra_languages?.length ?? 0) > 0 ? (
@@ -1818,7 +1924,9 @@ function GeneralPanel() {
                   <button
                     type="button"
                     className="text-muted transition-colors hover:text-danger"
-                    aria-label={`移除 ${e.label}`}
+                    aria-label={t("settings.general.removeLanguageAria", {
+                      label: e.label,
+                    })}
                     onClick={() => removeLanguage(e.id)}
                   >
                     ×
@@ -1830,7 +1938,7 @@ function GeneralPanel() {
           {addable.length > 0 ? (
             <div className="flex items-center gap-2">
               <Select
-                aria-label="待添加语言"
+                aria-label={t("settings.general.pendingLanguageAria")}
                 selectedKey={pendingAdd || undefined}
                 onSelectionChange={(key) => {
                   if (key == null) return;
@@ -1859,11 +1967,11 @@ function GeneralPanel() {
                 isDisabled={!pendingAdd}
                 onPress={() => pendingAdd && addLanguage(pendingAdd)}
               >
-                添加
+                {t("common.add")}
               </Button>
             </div>
           ) : (
-            <span className="type-meta">目录语言已全部添加</span>
+            <span className="type-meta">{t("settings.general.allLanguagesAdded")}</span>
           )}
         </div>
       </div>
@@ -1871,18 +1979,18 @@ function GeneralPanel() {
       {/* 录音源 — quiet 文字开关, 无盒 */}
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          录音源
-          <small>系统声音需要屏幕录制权限</small>
+          {t("settings.general.audioSource")}
+          <small>{t("settings.general.audioSourceBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
           <QSwitch
-            ariaLabel="录音源"
+            ariaLabel={t("settings.general.audioSource")}
             value={config.audio_capture_mode ?? "external"}
             onChange={(mode) => updateConfig("audio_capture_mode", mode)}
             options={[
-              { id: "external" as const, label: "只录外部" },
-              { id: "system" as const, label: "只录系统" },
-              { id: "both" as const, label: "两者都录" },
+              { id: "external" as const, label: t("settings.general.audioExternal") },
+              { id: "system" as const, label: t("settings.general.audioSystem") },
+              { id: "both" as const, label: t("settings.general.audioBoth") },
             ]}
           />
         </div>
@@ -1891,17 +1999,17 @@ function GeneralPanel() {
       {/* 外观 — quiet 文字开关 (即时生效, 不写 config) */}
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          外观
-          <small>界面颜色主题 · 即时生效</small>
+          {t("settings.general.appearance")}
+          <small>{t("settings.general.appearanceBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
           <QSwitch
-            ariaLabel="外观"
+            ariaLabel={t("settings.general.appearance")}
             value={theme}
-            onChange={(mode) => setTheme(mode)}
+            onChange={(mode) => switchTheme(mode)}
             options={[
-              { id: "dark" as const, label: "深色" },
-              { id: "light" as const, label: "浅色" },
+              { id: "dark" as const, label: t("settings.general.themeDark") },
+              { id: "light" as const, label: t("settings.general.themeLight") },
             ]}
           />
         </div>
@@ -1909,12 +2017,12 @@ function GeneralPanel() {
 
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          产品引导
-          <small>再走一遍出稿 / 派活 / 设置要点</small>
+          {t("settings.general.tour")}
+          <small>{t("settings.general.tourBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
           <Button size="sm" variant="secondary" onPress={() => requestStartTour()}>
-            再看一遍引导
+            {t("settings.general.tourButton")}
           </Button>
         </div>
       </div>
@@ -1926,24 +2034,114 @@ function GeneralPanel() {
           variant="primary"
           onPress={() => {
             void saveConfig(config, { silent: true }).then(() =>
-              toast.success("已保存"),
+              toast.success(t("common.saved")),
             );
           }}
         >
           <Save size={16} />
-          保存
+          {t("common.save")}
         </Button>
       </div>
     </div>
   );
 }
 
+type HotkeySlot = "transcribe" | "translate" | "cancel" | "agent";
+
+const HOTKEY_SLOT_KEYS: Record<HotkeySlot, string> = {
+  transcribe: "settings.hotkeys.slotTranscribe",
+  translate: "settings.hotkeys.slotTranslate",
+  cancel: "settings.hotkeys.slotCancel",
+  agent: "settings.hotkeys.slotAgent",
+};
+
 function HotkeysPanel() {
   const { config, updateConfig, saveConfig } = useApp();
-  const [listening, setListening] = useState<
-    null | "transcribe" | "translate" | "cancel" | "agent"
-  >(null);
+  const t = useT();
+  const [listening, setListening] = useState<null | HotkeySlot>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<{
+    slot: HotkeySlot;
+    conflictSlot: HotkeySlot;
+    binding: HotkeyBinding;
+  } | null>(null);
+
+  /** Find a conflicting slot that already uses the same binding label. */
+  const findConflict = (
+    targetSlot: HotkeySlot,
+    binding: HotkeyBinding,
+  ): HotkeySlot | null => {
+    const slots: { slot: HotkeySlot; binding: HotkeyBinding }[] = [
+      { slot: "transcribe", binding: config.hotkey_transcribe },
+      { slot: "translate", binding: config.hotkey_translate },
+      { slot: "cancel", binding: config.hotkey_cancel },
+      {
+        slot: "agent",
+        binding: config.hotkey_agent ?? {
+          key: "49",
+          modifiers: ["fn"],
+          label: "Fn+Space",
+        },
+      },
+    ];
+    for (const s of slots) {
+      if (s.slot === targetSlot) continue;
+      if (s.binding.label === binding.label) return s.slot;
+    }
+    return null;
+  };
+
+  const applyBinding = (slot: HotkeySlot, binding: HotkeyBinding, clearSlot?: HotkeySlot) => {
+    const patch: Partial<typeof config> = {};
+    if (slot === "transcribe") {
+      updateConfig("hotkey_transcribe", binding);
+      (patch as Record<string, unknown>).hotkey_transcribe = binding;
+    }
+    if (slot === "translate") {
+      updateConfig("hotkey_translate", binding);
+      (patch as Record<string, unknown>).hotkey_translate = binding;
+    }
+    if (slot === "cancel") {
+      updateConfig("hotkey_cancel", binding);
+      (patch as Record<string, unknown>).hotkey_cancel = binding;
+    }
+    if (slot === "agent") {
+      updateConfig("hotkey_agent", binding);
+      (patch as Record<string, unknown>).hotkey_agent = binding;
+    }
+    // Clear the conflicting slot if user chose override
+    if (clearSlot) {
+      const emptyBinding: HotkeyBinding = {
+        key: "",
+        modifiers: [],
+        label: tStatic("settings.hotkeys.notSet"),
+      };
+      if (clearSlot === "transcribe") {
+        updateConfig("hotkey_transcribe", emptyBinding);
+        (patch as Record<string, unknown>).hotkey_transcribe = emptyBinding;
+      }
+      if (clearSlot === "translate") {
+        updateConfig("hotkey_translate", emptyBinding);
+        (patch as Record<string, unknown>).hotkey_translate = emptyBinding;
+      }
+      if (clearSlot === "cancel") {
+        updateConfig("hotkey_cancel", emptyBinding);
+        (patch as Record<string, unknown>).hotkey_cancel = emptyBinding;
+      }
+      if (clearSlot === "agent") {
+        updateConfig("hotkey_agent", emptyBinding);
+        (patch as Record<string, unknown>).hotkey_agent = emptyBinding;
+      }
+    }
+    void saveConfig({ ...config, ...patch }, { silent: true }).then(() =>
+      toast.success(t("settings.hotkeys.boundToast", { label: binding.label })),
+    );
+  };
+
+  const applyBindingRef = useRef(applyBinding);
+  applyBindingRef.current = applyBinding;
+  const findConflictRef = useRef(findConflict);
+  findConflictRef.current = findConflict;
 
   useEffect(() => {
     let disposed = false;
@@ -1954,23 +2152,18 @@ function HotkeysPanel() {
         binding: HotkeyBinding;
       }>("hotkey-captured", (event) => {
         const { slot, binding } = event.payload;
-        if (slot === "transcribe") updateConfig("hotkey_transcribe", binding);
-        if (slot === "translate") updateConfig("hotkey_translate", binding);
-        if (slot === "cancel") updateConfig("hotkey_cancel", binding);
-        if (slot === "agent") updateConfig("hotkey_agent", binding);
+        const typedSlot = slot as HotkeySlot;
         setListening(null);
         setPreview(null);
-        const patch =
-          slot === "transcribe"
-            ? { hotkey_transcribe: binding }
-            : slot === "translate"
-              ? { hotkey_translate: binding }
-              : slot === "cancel"
-                ? { hotkey_cancel: binding }
-                : { hotkey_agent: binding };
-        void saveConfig({ ...config, ...patch }, { silent: true }).then(() =>
-          toast.success(`已设置：${binding.label}`),
-        );
+
+        // Check for conflict
+        const conflictSlot = findConflictRef.current(typedSlot, binding);
+        if (conflictSlot) {
+          setConflict({ slot: typedSlot, conflictSlot, binding });
+          return;
+        }
+
+        applyBindingRef.current(typedSlot, binding);
       }),
       listen("hotkey-capture-cancelled", () => {
         setListening(null);
@@ -1991,7 +2184,8 @@ function HotkeysPanel() {
       unlisteners.forEach((u) => u());
       void invoke("cancel_hotkey_capture").catch(() => {});
     };
-  }, [updateConfig, saveConfig, config]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const startCapture = async (
     slot: "transcribe" | "translate" | "cancel" | "agent",
@@ -2001,7 +2195,9 @@ function HotkeysPanel() {
       await invoke("begin_hotkey_capture", { slot });
       setListening(slot);
     } catch (error) {
-      toast.danger(`无法开始录制快捷键: ${error}`);
+      toast.danger(
+        t("settings.hotkeys.captureStartFailed", { msg: String(error) }),
+      );
     }
   };
 
@@ -2016,23 +2212,23 @@ function HotkeysPanel() {
   };
 
   const rows: {
-    slot: "transcribe" | "translate" | "cancel" | "agent";
+    slot: HotkeySlot;
     title: string;
     binding: HotkeyBinding;
   }[] = [
     {
       slot: "transcribe",
-      title: "出稿",
+      title: t(HOTKEY_SLOT_KEYS.transcribe),
       binding: config.hotkey_transcribe,
     },
     {
       slot: "translate",
-      title: "翻译",
+      title: t(HOTKEY_SLOT_KEYS.translate),
       binding: config.hotkey_translate,
     },
     {
       slot: "agent",
-      title: "派活",
+      title: t(HOTKEY_SLOT_KEYS.agent),
       binding: config.hotkey_agent ?? {
         key: "49",
         modifiers: ["fn"],
@@ -2041,7 +2237,7 @@ function HotkeysPanel() {
     },
     {
       slot: "cancel",
-      title: "取消",
+      title: t(HOTKEY_SLOT_KEYS.cancel),
       binding: config.hotkey_cancel,
     },
   ];
@@ -2051,10 +2247,14 @@ function HotkeysPanel() {
       <div>
         {rows.map((row) => {
           const active = listening === row.slot;
+          const isConflicting = conflict?.conflictSlot === row.slot;
           return (
             <div
               key={row.slot}
-              className="set-linerow flex-wrap"
+              className={cn(
+                "set-linerow flex-wrap",
+                isConflicting && "rounded-lg ring-2 ring-warning/40 bg-warning/5",
+              )}
             >
               <div className="min-w-0 type-ui">
                 {row.title}
@@ -2063,10 +2263,12 @@ function HotkeysPanel() {
                 {active ? (
                   <>
                     <span className="type-meta text-accent-soft-foreground!">
-                      {preview ? `松键确认：${preview}` : "按下组合键…"}
+                      {preview
+                        ? t("settings.hotkeys.releaseToConfirm", { label: preview })
+                        : t("settings.hotkeys.pressCombo")}
                     </span>
                     <Button size="sm" variant="secondary" onPress={() => void abortCapture()}>
-                      取消
+                      {t("common.cancel")}
                     </Button>
                   </>
                 ) : (
@@ -2074,7 +2276,7 @@ function HotkeysPanel() {
                     size="sm"
                     variant="secondary"
                     className="inline-flex h-auto min-h-0 items-center gap-1.5 rounded-lg bg-surface px-2.5 py-1.5 text-foreground shadow-none transition hover:bg-default data-[hovered=true]:bg-default"
-                    aria-label={`修改快捷键：${row.title}`}
+                    aria-label={t("settings.hotkeys.changeAria", { title: row.title })}
                     onPress={() => void startCapture(row.slot)}
                   >
                     {hotkeySegments(row.binding.label).map((part, i) => (
@@ -2091,11 +2293,45 @@ function HotkeysPanel() {
         })}
       </div>
 
+      {conflict ? (
+        <div className="rounded-xl border border-warning/40 bg-warning/5 p-3 flex flex-col gap-2">
+          <div className="type-ui text-warning">
+            <CircleAlert size={14} className="inline -mt-0.5 mr-1" />
+            {t("settings.hotkeys.conflictTitle")}
+          </div>
+          <p className="type-meta">
+            {t("settings.hotkeys.conflictBody", {
+              label: conflict.binding.label,
+              slot: t(HOTKEY_SLOT_KEYS[conflict.conflictSlot]),
+            })}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onPress={() => {
+                applyBinding(conflict.slot, conflict.binding, conflict.conflictSlot);
+                setConflict(null);
+              }}
+            >
+              {t("settings.hotkeys.conflictOverride", {
+                slot: t(HOTKEY_SLOT_KEYS[conflict.conflictSlot]),
+              })}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={() => setConflict(null)}
+            >
+              {t("common.cancel")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <div className="rounded-xl bg-default/40 p-3">
-        <div className="type-ui mb-1">Fn 键说明</div>
-        <p className="type-meta">
-          若按 Fn 无反应：系统设置 → 键盘 →「按下 🌐 键」选「用作修饰键」（不要选表情 / 听写 / 输入法）。
-        </p>
+        <div className="type-ui mb-1">{t("settings.hotkeys.fnNoteTitle")}</div>
+        <p className="type-meta">{t("settings.hotkeys.fnNoteBody")}</p>
         <Button
           size="sm"
           variant="secondary"
@@ -2110,7 +2346,7 @@ function HotkeysPanel() {
             );
           }}
         >
-          打开键盘设置
+          {t("settings.hotkeys.openKeyboardSettings")}
         </Button>
       </div>
 
@@ -2121,12 +2357,12 @@ function HotkeysPanel() {
           variant="primary"
           onPress={() => {
             void saveConfig(config, { silent: true }).then(() =>
-              toast.success("已保存"),
+              toast.success(t("common.saved")),
             );
           }}
         >
           <Save size={16} />
-          保存
+          {t("common.save")}
         </Button>
       </div>
     </SectionCard>
@@ -2134,6 +2370,7 @@ function HotkeysPanel() {
 }
 
 function PermissionsPanel() {
+  const t = useT();
   const [perms, setPerms] = useState<PermissionStatus | null>(null);
   const [busy, setBusy] = useState<PermKind | null>(null);
   const [hint, setHint] = useState<string | null>(null);
@@ -2165,7 +2402,7 @@ function PermissionsPanel() {
     const prev = lastOpenAt.current[kind] ?? 0;
     // Avoid stacking System Settings activations from rapid clicks.
     if (now - prev < 4000) {
-      setHint("系统设置已打开，请在对应开关中开启本应用。");
+      setHint(t("settings.perm.settingsAlreadyOpen"));
       return;
     }
     lastOpenAt.current[kind] = now;
@@ -2202,7 +2439,7 @@ function PermissionsPanel() {
   if (!isMac) {
     return (
       <SectionCard>
-        <p className="type-meta">当前平台无需 macOS 隐私权限。</p>
+        <p className="type-meta">{t("settings.perm.notMac")}</p>
       </SectionCard>
     );
   }
@@ -2228,8 +2465,8 @@ function PermissionsPanel() {
                   <Icon size={16} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="type-ui">{item.title}</div>
-                  <div className="mt-0.5 type-meta">{item.blurb}</div>
+                  <div className="type-ui">{t(item.titleKey)}</div>
+                  <div className="mt-0.5 type-meta">{t(item.blurbKey)}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <span
@@ -2243,7 +2480,9 @@ function PermissionsPanel() {
                     ) : (
                       <CircleAlert size={12} />
                     )}
-                    {granted ? "已授权" : "未授权"}
+                    {granted
+                      ? t("settings.perm.granted")
+                      : t("settings.perm.notGranted")}
                   </span>
                   {!granted ? (
                     <Button
@@ -2253,7 +2492,7 @@ function PermissionsPanel() {
                       isDisabled={busy !== null}
                       onPress={() => void authorize(item.kind)}
                     >
-                      去授权
+                      {t("settings.perm.authorize")}
                     </Button>
                   ) : null}
                 </div>
@@ -2271,13 +2510,13 @@ function PermissionsPanel() {
           open={helpOpen}
           onToggle={() => setHelpOpen((v) => !v)}
         >
-          说明
+          {t("settings.perm.helpTitle")}
         </CollapseTrigger>
         <SoftCollapse open={helpOpen}>
           <div className="px-1 pb-3 pt-2">
             <ul className="flex flex-col gap-2 type-meta">
-              <li>· 签名安装包权限随 Bundle ID 保留</li>
-              <li>· 辅助功能 / 输入监视按可执行路径</li>
+              <li>{t("settings.perm.helpLine1")}</li>
+              <li>{t("settings.perm.helpLine2")}</li>
             </ul>
             {exePath ? (
               <p className="mt-3 break-all rounded-xl bg-default/40 px-3 py-2 font-mono type-micro !normal-case !tracking-normal text-foreground">
@@ -2295,7 +2534,7 @@ function PermissionsPanel() {
               }
             >
               <ExternalLink size={14} />
-              打开系统设置
+              {t("settings.perm.openSystemSettings")}
             </Button>
           </div>
         </SoftCollapse>
@@ -2305,6 +2544,7 @@ function PermissionsPanel() {
 }
 
 function UpdatesPanel() {
+  const t = useT();
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [check, setCheck] = useState<UpdateCheckResult | null>(null);
   const [checking, setChecking] = useState(false);
@@ -2316,7 +2556,7 @@ function UpdatesPanel() {
   useEffect(() => {
     void invoke<AppInfo>("get_app_info")
       .then(setInfo)
-      .catch(() => setInfo({ version: "0.1.0", name: "言落" }));
+      .catch(() => setInfo({ version: "0.1.0", name: tStatic("common.appName") }));
   }, []);
 
   useEffect(() => {
@@ -2372,7 +2612,7 @@ function UpdatesPanel() {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       setInstallMessage(msg);
-      toast.danger(`下载失败: ${msg}`);
+      toast.danger(t("settings.updates.downloadFailed", { msg }));
     } finally {
       setDownloading(false);
     }
@@ -2388,7 +2628,7 @@ function UpdatesPanel() {
       ? check.releases.map((r) => ({
           version: r.tag_name.replace(/^v/i, ""),
           date: r.published_at ? r.published_at.slice(0, 10) : "",
-          notes: (r.body || r.name || "无说明")
+          notes: (r.body || r.name || t("settings.updates.noNotes"))
             .split("\n")
             .map((line) => line.replace(/^[-*#\s]+/, "").trim())
             .filter(Boolean)
@@ -2397,33 +2637,41 @@ function UpdatesPanel() {
       : CHANGELOG;
 
   const percent = progress?.percent ?? null;
+  const fade = useFade();
 
   return (
     <motion.div
-    className="flex flex-col gap-4"
-     initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
-      <SectionCard className="flex flex-col gap-4" title="当前版本">
+      className="flex flex-col gap-4"
+      initial={fade.initial}
+      animate={fade.animate}
+      transition={fade.transition}
+    >
+      <SectionCard className="flex flex-col gap-4" title={t("settings.updates.currentVersion")}>
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
             <div className="type-ui">
-              {info?.name ?? "言落"}{" "}
+              {info?.name ?? t("common.appName")}{" "}
               <span className="text-muted">v{current}</span>
             </div>
             <p className="mt-1 type-meta">
               {updateAvailable
-                ? `发现新版本 ${latest?.tag_name}${asset ? ` · ${asset.name}` : ""}`
+                ? t("settings.updates.newVersionFound", {
+                    tag: latest?.tag_name ?? "",
+                  }) + (asset ? ` · ${asset.name}` : "")
                 : checking
-                  ? "正在检查更新…"
-                  : "已是最新，或尚未发布远程版本。"}
+                  ? t("settings.updates.checking")
+                  : t("settings.updates.upToDate")}
             </p>
             {asset && updateAvailable ? (
               <p className="mt-1 type-meta">
-                安装包约 {formatBytes(asset.size)}
+                {t("settings.updates.packageSize", {
+                  size: formatBytes(asset.size),
+                })}
               </p>
             ) : null}
             {checkError ? (
               <p className="mt-1 text-[12px] text-danger">
-                检查失败：{checkError}（仍显示本地更新说明）
+                {t("settings.updates.checkFailed", { msg: checkError })}
               </p>
             ) : null}
             {installMessage ? (
@@ -2437,14 +2685,14 @@ function UpdatesPanel() {
             onPress={() => void checkUpdates()}
           >
             <RefreshCw size={14} className={checking ? "animate-spin" : ""} />
-            检查更新
+            {t("settings.updates.checkButton")}
           </Button>
         </div>
 
         {downloading ? (
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between type-meta">
-              <span>正在下载安装包…</span>
+              <span>{t("settings.updates.downloadingPackage")}</span>
               <span>
                 {percent != null
                   ? `${percent.toFixed(0)}%`
@@ -2479,7 +2727,11 @@ function UpdatesPanel() {
               onPress={() => void downloadAndInstall()}
             >
               <Download size={14} />
-              {downloading ? "下载中…" : `下载并安装 ${latest?.tag_name}`}
+              {downloading
+                ? t("settings.updates.downloading")
+                : t("settings.updates.downloadAndInstall", {
+                    tag: latest?.tag_name ?? "",
+                  })}
             </Button>
           ) : null}
           {updateAvailable && latest && !asset ? (
@@ -2489,7 +2741,7 @@ function UpdatesPanel() {
               onPress={() => void open(latest.html_url)}
             >
               <ExternalLink size={14} />
-              打开 Release 页下载
+              {t("settings.updates.openReleasePage")}
             </Button>
           ) : null}
         </div>
@@ -2502,12 +2754,14 @@ function UpdatesPanel() {
             onClick={() =>
               void invoke("open_update_download_dir").catch((error) => {
                 toast.danger(
-                  `无法打开下载目录: ${error instanceof Error ? error.message : String(error)}`,
+                  t("settings.updates.openDownloadDirFailed", {
+                    msg: error instanceof Error ? error.message : String(error),
+                  }),
                 );
               })
             }
           >
-            下载目录
+            {t("settings.updates.downloadDir")}
           </button>
           <button
             type="button"
@@ -2521,12 +2775,12 @@ function UpdatesPanel() {
             className="dlink muted"
             onClick={() => void open(APP_REPO_URL)}
           >
-            仓库
+            {t("settings.updates.repo")}
           </button>
         </div>
       </SectionCard>
 
-      <SectionCard title="更新说明">
+      <SectionCard title={t("settings.updates.releaseNotes")}>
         <div className="flex flex-col gap-5">
           {logEntries.map((entry) => (
             <article key={`${entry.version}-${entry.date}`} className="release-entry">
@@ -2572,7 +2826,7 @@ function detectedForKind(
 }
 
 function shortBin(path: string): string {
-  if (!path) return "未设置";
+  if (!path) return tStatic("settings.agent.notSet");
   const parts = path.split("/").filter(Boolean);
   if (parts.length <= 3) return path;
   return `…/${parts.slice(-3).join("/")}`;
@@ -2587,6 +2841,7 @@ const BUILTIN_AGENTS: { kind: AgentKind; name: string; desc: string }[] = [
 function AgentPanel() {
   const { config, updateConfig, saveConfig, agentModels, refreshAgentModels } =
     useApp();
+  const t = useT();
   const [detected, setDetected] = useState<DetectedBins>({
     claude: null,
     codex: null,
@@ -2625,10 +2880,10 @@ function AgentPanel() {
       if (hit) {
         patchProfile(id, { bin: hit });
       } else {
-        toast.warning(`未找到 ${kind}`);
+        toast.warning(t("settings.agent.binNotFound", { kind }));
       }
     } catch (e) {
-      toast.danger(`which 失败: ${e}`);
+      toast.danger(t("settings.agent.whichFailed", { msg: String(e) }));
     } finally {
       setDetecting(false);
     }
@@ -2638,9 +2893,9 @@ function AgentPanel() {
     setModelsRefreshing(true);
     try {
       await refreshAgentModels(true);
-      toast.success("模型列表已刷新");
+      toast.success(t("settings.agent.modelsRefreshed"));
     } catch (e) {
-      toast.danger(`刷新失败: ${e}`);
+      toast.danger(t("settings.agent.refreshFailed", { msg: String(e) }));
     } finally {
       setModelsRefreshing(false);
     }
@@ -2666,9 +2921,7 @@ function AgentPanel() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="-mb-1 type-meta">
-        言落内置支持 Claude · Codex · Pi 三种 CLI。填好路径与默认模型，选一个作为默认派活 Agent。
-      </p>
+      <p className="-mb-1 type-meta">{t("settings.agent.intro")}</p>
 
       {BUILTIN_AGENTS.map((meta, idx) => {
         const p =
@@ -2696,10 +2949,10 @@ function AgentPanel() {
                   {" · "}
                   {configured ? (
                     <span className="text-success-soft-foreground">
-                      已检测到路径
+                      {t("settings.agent.pathDetected")}
                     </span>
                   ) : (
-                    <span>未检测到路径</span>
+                    <span>{t("settings.agent.pathNotDetected")}</span>
                   )}
                 </div>
               </div>
@@ -2709,7 +2962,9 @@ function AgentPanel() {
                 isDisabled={isDefault}
                 onPress={() => setDefaultAgent(p)}
               >
-                {isDefault ? "默认" : "设为默认"}
+                {isDefault
+                  ? t("settings.agent.isDefault")
+                  : t("settings.agent.setDefault")}
               </Button>
             </div>
 
@@ -2725,7 +2980,7 @@ function AgentPanel() {
                     patchProfile(p.id, { model });
                   }}
                 >
-                  <Label>默认模型</Label>
+                  <Label>{t("settings.agent.defaultModel")}</Label>
                   <Select.Trigger className="flex items-center justify-between">
                     <Select.Value>
                       {() => {
@@ -2733,7 +2988,7 @@ function AgentPanel() {
                         const opt = models.find((m) => m.id === cur);
                         return (
                           <span className="truncate">
-                            {opt?.label ?? (cur || "默认")}
+                            {opt?.label ?? (cur || t("settings.agent.defaultOption"))}
                           </span>
                         );
                       }}
@@ -2765,7 +3020,7 @@ function AgentPanel() {
                   isIconOnly
                   variant="secondary"
                   className="mb-0.5 h-8 w-8 min-h-8 min-w-8 shrink-0"
-                  aria-label="刷新模型列表"
+                  aria-label={t("settings.agent.refreshModelsAria")}
                   isDisabled={modelsRefreshing}
                   onPress={() => void refreshModels()}
                 >
@@ -2780,7 +3035,7 @@ function AgentPanel() {
                 value={p.bin ?? ""}
                 onChange={(v) => patchProfile(p.id, { bin: v })}
               >
-                <Label>路径</Label>
+                <Label>{t("settings.agent.binPath")}</Label>
                 <InputGroup>
                   <InputGroup.Prefix className="pl-0">
                     <Button
@@ -2817,7 +3072,10 @@ function AgentPanel() {
 
       {config.agent_trusted_dirs.length > 0 ? (
         <Reveal index={2}>
-        <SectionCard className="flex flex-col gap-2" title="Codex 信任目录">
+        <SectionCard
+          className="flex flex-col gap-2"
+          title={t("settings.agent.trustedDirs")}
+        >
           <div>
             {config.agent_trusted_dirs.map((dir) => (
               <div
@@ -2832,7 +3090,7 @@ function AgentPanel() {
                   size="sm"
                   variant="ghost"
                   className="h-auto min-h-0 rounded-md p-1 text-muted shadow-none hover:bg-default/50 hover:text-danger data-[hovered=true]:bg-default/50 data-[hovered=true]:text-danger"
-                  aria-label={`移除信任目录 ${dir}`}
+                  aria-label={t("settings.agent.removeTrustedDirAria", { dir })}
                   onPress={() =>
                     updateConfig(
                       "agent_trusted_dirs",
@@ -2858,7 +3116,7 @@ function AgentPanel() {
           onPress={() => void saveConfig()}
         >
           <Save size={16} />
-          保存
+          {t("common.save")}
         </Button>
       </div>
       </Reveal>

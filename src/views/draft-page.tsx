@@ -5,8 +5,9 @@ import { AsrPage } from "@/views/asr-page";
 import { TranscribePage } from "@/views/transcribe-page";
 import { HistoryPage } from "@/views/history-page";
 import { TranslatePage } from "@/views/translate-page";
-import { providerLabel } from "@/lib/constants";
+import { asrLanguageOptions, providerLabel } from "@/lib/constants";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 import { useApp } from "@/app-context";
 import { useTabScroll } from "@/hooks/use-tab-scroll";
 import {
@@ -16,12 +17,7 @@ import {
   type DraftMode,
 } from "@/lib/ui-session";
 
-const MODES: { id: DraftMode; label: string }[] = [
-  { id: "file", label: "文件" },
-  { id: "live", label: "实时" },
-  { id: "translate", label: "翻译" },
-  { id: "history", label: "历史" },
-];
+const MODES: DraftMode[] = ["file", "live", "translate", "history"];
 
 function resolveInitialMode(param: string | null): {
   mode: DraftMode;
@@ -49,7 +45,12 @@ function resolveInitialMode(param: string | null): {
  * URL `?mode=` wins and writes back to sessionStorage.
  */
 export function DraftPage() {
+  const t = useT();
   const { config, modelLoaded } = useApp();
+  const languageLabel =
+    asrLanguageOptions(config.extra_languages).find(
+      ([id]) => id === config.language,
+    )?.[1] ?? t("draft.langAuto");
   const [searchParams, setSearchParams] = useSearchParams();
   const seeded = useRef(resolveInitialMode(searchParams.get("mode")));
   const [mode, setMode] = useState<DraftMode>(seeded.current.mode);
@@ -173,73 +174,73 @@ export function DraftPage() {
         <div className="dmast-top">
           <span className="dmast-kicker">
             {providerLabel(config.asr_provider)} ·{" "}
-            {modelLoaded ? "已就绪" : "未就绪"}
+            {modelLoaded ? t("draft.ready") : t("draft.notReady")}
           </span>
           <div className="dmast-action" ref={setActionEl} />
         </div>
         <div className="dmast-row">
-          <h1 className="dmast-title">出稿</h1>
-          <nav className="dmodes" role="tablist" aria-label="出稿模式">
-            {MODES.map((item) => {
-              const active = mode === item.id;
+          <h1 className="dmast-title">{t("draft.title")}</h1>
+          <nav className="dmodes" role="tablist" aria-label={t("draft.modesAria")}>
+            {MODES.map((id) => {
+              const active = mode === id;
               return (
                 <button
-                  key={item.id}
+                  key={id}
                   type="button"
                   role="tab"
                   aria-selected={active}
                   className={cn("dmode", active && "is-active")}
-                  onClick={() => selectMode(item.id)}
+                  onClick={() => selectMode(id)}
                 >
-                  {item.label}
+                  {t(`draft.mode.${id}`)}
                 </button>
               );
             })}
           </nav>
         </div>
-        {/* <div className="dmast-sub" data-tour="draft-hotkeys">
+        <div className="dmast-sub" data-tour="draft-hotkeys">
           <span>
-            <b>{config.hotkey_transcribe.label}</b> 出稿
+            <b>{config.hotkey_transcribe.label}</b> {t("draft.hotkeyDraft")}
           </span>
           <span className="dot" />
           <span>
-            <b>{config.hotkey_translate.label}</b> 翻译
+            <b>{config.hotkey_translate.label}</b> {t("draft.hotkeyTranslate")}
           </span>
           <span className="dot" />
           <span>{languageLabel}</span>
-        </div> */}
+        </div>
       </div>
 
-      {MODES.map((item) =>
-        visited.has(item.id) ? (
+      {MODES.map((id) =>
+        visited.has(id) ? (
           <div
-            key={item.id}
+            key={id}
             className={cn(
-              mode === item.id ? "dpanel contents" : "hidden",
-              mode === item.id &&
-                !enteredModes.has(item.id) &&
+              mode === id ? "dpanel contents" : "hidden",
+              mode === id &&
+                !enteredModes.has(id) &&
                 "is-enter",
             )}
-            aria-hidden={mode !== item.id}
+            aria-hidden={mode !== id}
           >
-            {item.id === "file" ? (
+            {id === "file" ? (
               <TranscribePage
                 embedded
                 active={mode === "file"}
                 actionSlot={actionEl}
               />
             ) : null}
-            {item.id === "live" ? (
+            {id === "live" ? (
               <AsrPage embedded active={mode === "live"} actionSlot={actionEl} />
             ) : null}
-            {item.id === "translate" ? (
+            {id === "translate" ? (
               <TranslatePage
                 embedded
                 active={mode === "translate"}
                 actionSlot={actionEl}
               />
             ) : null}
-            {item.id === "history" ? (
+            {id === "history" ? (
               <HistoryPage
                 embedded
                 active={mode === "history"}

@@ -36,22 +36,23 @@ export const defaultHotkeyAgent: HotkeyBinding = {
 
 /** Built-in refine prompt — tuned for small local chat models (esp. qwen3:1.7b). */
 export const DEFAULT_LLM_REFINE_PROMPT = `\
-任务：修正语音识别(ASR)文本里的明显错误。
+任务：修正语音识别(ASR)文本中的错误并补充标点。
 
 规则：
-1. 只改识别错：谐音、同音、英文术语被听成汉字。
-2. 中英混写保持原样；英文术语不要译成中文；正确中文不要改成英文。
-3. 不润色、不扩写、不删正确内容、不总结。
-4. 看不出错误 → 原样输出输入。
-5. 只输出纠错后全文；不要解释、不要引号、不要 <think>。
+1. 修正识别错误：谐音字、同音字、英文术语被错误听写为汉字。
+2. 补充缺失的标点符号（逗号、句号、问号），断句自然。
+3. 中英文之间加一个空格（如「用 Python 写」）；英文术语不要译成中文；正确中文不要改成英文。
+4. 保留口语原意：不润色、不扩写、不删内容、不总结、不改语序。
+5. 看不出错误且标点完整 → 原样输出输入。
+6. 只输出纠错后全文；不要解释、不要引号、不要 <think>。
 
 示例：
-输入：我用配森写了个杰森接口
-输出：我用Python写了个JSON接口
-输入：打开麦赛口数据库
-输出：打开MySQL数据库
+输入：我用配森写了个杰森接口然后部署到了服务器上
+输出：我用 Python 写了个 JSON 接口，然后部署到了服务器上。
+输入：打开麦赛口数据库看一下那个表的数据对不对
+输出：打开 MySQL 数据库，看一下那个表的数据对不对。
 输入：今天开会讨论进度
-输出：今天开会讨论进度`;
+输出：今天开会讨论进度。`;
 
 /** Built-in translate system prompt; `{target}` → language name. */
 export const DEFAULT_LLM_TRANSLATE_PROMPT =

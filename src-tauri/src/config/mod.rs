@@ -276,6 +276,9 @@ pub(crate) struct AppConfig {
     /// Overlap into next segment after a cut (ms).
     #[serde(default = "default_vad_overlap_ms")]
     pub(crate) vad_overlap_ms: u64,
+    /// VAD speed preset: "default" or "fast" (shorter silence/hold for rapid dictation).
+    #[serde(default = "default_vad_speed_preset")]
+    pub(crate) vad_speed_preset: String,
     /// Max tokens of committed text injected as cross-segment context (0 = off).
     #[serde(default = "default_cross_segment_prefix_tokens")]
     pub(crate) cross_segment_prefix_tokens: usize,
@@ -384,6 +387,10 @@ pub(crate) fn default_vad_overlap_ms() -> u64 {
     500
 }
 
+pub(crate) fn default_vad_speed_preset() -> String {
+    "default".into()
+}
+
 pub(crate) fn default_cross_segment_prefix_tokens() -> usize {
     64
 }
@@ -446,6 +453,7 @@ impl Default for AppConfig {
             vad_min_segment_ms: default_vad_min_segment_ms(),
             vad_max_segment_sec: default_vad_max_segment_sec(),
             vad_overlap_ms: default_vad_overlap_ms(),
+            vad_speed_preset: default_vad_speed_preset(),
             cross_segment_prefix_tokens: default_cross_segment_prefix_tokens(),
             hotkey_transcribe: default_hotkey_transcribe(),
             hotkey_translate: default_hotkey_translate(),

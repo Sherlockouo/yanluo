@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Put Gatekeeper-fix .command next to Yanluo.app and inside the DMG volume.
+ * Put Gatekeeper-fix .command next to QuietType.app and inside the DMG volume.
  *
  * Usage (after `pnpm tauri build --bundles app,dmg`):
  *   node scripts/embed-gatekeeper-fix.mjs
@@ -41,7 +41,7 @@ function findApps() {
     const dir = path.join(root, "release", "bundle", "macos");
     if (!fs.existsSync(dir)) continue;
     for (const name of fs.readdirSync(dir)) {
-      if (name === "Yanluo.app") apps.push(path.join(dir, name));
+      if (name === "QuietType.app") apps.push(path.join(dir, name));
     }
   }
   return apps;
@@ -54,7 +54,7 @@ function findDmgs() {
     if (!fs.existsSync(dir)) continue;
     for (const name of fs.readdirSync(dir)) {
       if (!name.endsWith(".dmg") || name.startsWith("rw.")) continue;
-      if (!name.startsWith("Yanluo_")) continue;
+      if (!name.startsWith("QuietType_")) continue;
       dmgs.push(path.join(dir, name));
     }
   }

@@ -178,7 +178,7 @@ fn download_file(
 
     let mut response = client
         .get(url)
-        .header("User-Agent", "Yanluo")
+        .header("User-Agent", "QuietType")
         .send()
         .map_err(|e| format!("下载失败 {file_label}: {e}"))?;
 

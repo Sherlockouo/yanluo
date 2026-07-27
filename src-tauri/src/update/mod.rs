@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Emitter};
 
 const REPO: &str = "Sherlockouo/yanluo";
-const USER_AGENT: &str = "Yanluo-Updater";
+const USER_AGENT: &str = "QuietType-Updater";
 
 static DOWNLOAD_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 
@@ -223,7 +223,7 @@ fn downloads_dir() -> PathBuf {
     dirs::download_dir()
         .or_else(dirs::home_dir)
         .unwrap_or_else(std::env::temp_dir)
-        .join("言落 Updates")
+        .join("QuietType Updates")
 }
 
 fn open_installer(path: &std::path::Path) -> Result<(), String> {
@@ -449,17 +449,17 @@ mod tests {
     fn picks_platform_dmg() {
         let assets = vec![
             ReleaseAsset {
-                name: "Yanluo_0.2.0_x64.dmg".into(),
+                name: "QuietType_0.2.0_x64.dmg".into(),
                 browser_download_url: "https://example.com/x64.dmg".into(),
                 size: 1,
             },
             ReleaseAsset {
-                name: "Yanluo_0.2.0_aarch64.dmg".into(),
+                name: "QuietType_0.2.0_aarch64.dmg".into(),
                 browser_download_url: "https://example.com/arm.dmg".into(),
                 size: 2,
             },
             ReleaseAsset {
-                name: "Yanluo_0.2.0_x64_en-US.msi".into(),
+                name: "QuietType_0.2.0_x64_en-US.msi".into(),
                 browser_download_url: "https://example.com/x.msi".into(),
                 size: 3,
             },

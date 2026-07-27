@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to 言落 (Yanluo) are documented in this file.
+All notable changes to QuietType（言落）are documented in this file.
 
 ## [0.10.5] — 2026-07-23
 

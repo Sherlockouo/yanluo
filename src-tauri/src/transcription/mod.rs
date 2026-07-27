@@ -97,22 +97,23 @@ fn llm_post_json_abortable(
 /// (src/lib/constants.ts) so the Settings preview matches what actually runs.
 /// Guarded by `refine_prompt_sync_tests`.
 pub(crate) const DEFAULT_REFINE: &str = "\
-任务：修正语音识别(ASR)文本里的明显错误。\n\
+任务：修正语音识别(ASR)文本中的错误并补充标点。\n\
 \n\
 规则：\n\
-1. 只改识别错：谐音、同音、英文术语被听成汉字。\n\
-2. 中英混写保持原样；英文术语不要译成中文；正确中文不要改成英文。\n\
-3. 不润色、不扩写、不删正确内容、不总结。\n\
-4. 看不出错误 → 原样输出输入。\n\
-5. 只输出纠错后全文；不要解释、不要引号、不要 <think>。\n\
+1. 修正识别错误：谐音字、同音字、英文术语被错误听写为汉字。\n\
+2. 补充缺失的标点符号（逗号、句号、问号），断句自然。\n\
+3. 中英文之间加一个空格（如「用 Python 写」）；英文术语不要译成中文；正确中文不要改成英文。\n\
+4. 保留口语原意：不润色、不扩写、不删内容、不总结、不改语序。\n\
+5. 看不出错误且标点完整 → 原样输出输入。\n\
+6. 只输出纠错后全文；不要解释、不要引号、不要 <think>。\n\
 \n\
 示例：\n\
-输入：我用配森写了个杰森接口\n\
-输出：我用Python写了个JSON接口\n\
-输入：打开麦赛口数据库\n\
-输出：打开MySQL数据库\n\
+输入：我用配森写了个杰森接口然后部署到了服务器上\n\
+输出：我用 Python 写了个 JSON 接口，然后部署到了服务器上。\n\
+输入：打开麦赛口数据库看一下那个表的数据对不对\n\
+输出：打开 MySQL 数据库，看一下那个表的数据对不对。\n\
 输入：今天开会讨论进度\n\
-输出：今天开会讨论进度";
+输出：今天开会讨论进度。";
 
 /// Refine char budget: above this, split on sentence boundaries so a small
 /// local model doesn't drop the tail of a long transcript (see `split_for_refine`).
@@ -313,7 +314,8 @@ fn refine_one_chunk(
             if should_abort() {
                 return Err("aborted".into());
             }
-            std::thread::sleep(Duration::from_millis(400));
+            // Single retry after 100ms (was 400ms flat).
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
     let response_body = response_body.ok_or(last_err)?;
@@ -387,7 +389,14 @@ pub(crate) fn model_allows_fewshot(model: &str) -> bool {
 /// refine model learns the user's recurring fixes. Mirrors the frontend
 /// `formatFewShotBlock` (learn-cases.ts): cap 8, drop no-ops and oversized.
 pub(crate) fn build_refine_fewshot(cases: &[FewShotCase]) -> String {
-    let mut lines: Vec<String> = Vec::new();
+    if cases.is_empty() {
+        return String::new();
+    }
+
+    // Separate short pairs (≤MAX_SIDE chars each side) from sentence-level cases
+    let mut pair_lines: Vec<String> = Vec::new();
+    let mut sentence_lines: Vec<String> = Vec::new();
+
     for c in cases {
         let asr = c.asr.split_whitespace().collect::<Vec<_>>().join(" ");
         let gold = c.gold.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -401,16 +410,36 @@ pub(crate) fn build_refine_fewshot(cases: &[FewShotCase]) -> String {
         {
             continue;
         }
-        lines.push(format!("输入：{asr}"));
-        lines.push(format!("输出：{gold}"));
-        if lines.len() / 2 >= FEWSHOT_MAX {
+
+        // Short pairs (both sides ≤ MAX_SIDE) get compact format
+        let is_short_pair =
+            asr.chars().count() <= FEWSHOT_MAX_SIDE && gold.chars().count() <= FEWSHOT_MAX_SIDE;
+        if is_short_pair && pair_lines.len() < 12 {
+            pair_lines.push(format!("{asr} → {gold}"));
+        } else if sentence_lines.len() / 2 < 3 {
+            sentence_lines.push(format!("输入：{asr}"));
+            sentence_lines.push(format!("输出：{gold}"));
+        }
+
+        if pair_lines.len() >= 12 && sentence_lines.len() / 2 >= 3 {
             break;
         }
     }
-    if lines.is_empty() {
-        return String::new();
+
+    let mut parts: Vec<String> = Vec::new();
+    if !pair_lines.is_empty() {
+        parts.push(format!(
+            "纠错习惯（按此修正）：\n{}",
+            pair_lines.join("\n")
+        ));
     }
-    format!("学到的纠错习惯（优先按此改回）：\n{}", lines.join("\n"))
+    if !sentence_lines.is_empty() {
+        parts.push(format!(
+            "学到的纠错习惯（优先按此改回）：\n{}",
+            sentence_lines.join("\n")
+        ));
+    }
+    parts.join("\n\n")
 }
 
 /// Split long refine input on sentence terminators so a small model doesn't
@@ -589,7 +618,10 @@ pub(crate) fn guard_refine(input: &str, refined: &str) -> bool {
         let delta = (nb as i64 - na as i64).abs();
         delta <= 6 && ratio <= 3.0
     } else {
-        (0.65..=1.35).contains(&ratio)
+        // Punctuation + CJK/Latin spacing can legitimately grow text ~40-50%
+        // (e.g. 45 chars → 62 after commas and spaces), so the band is wider
+        // than a pure-correction guard would need.
+        (0.55..=1.50).contains(&ratio)
     };
     if !ratio_ok {
         return false;
@@ -601,12 +633,21 @@ pub(crate) fn guard_refine(input: &str, refined: &str) -> bool {
     let ta = count_term(a);
     let tb = count_term(b);
     let term_drift = (ta - tb).abs();
-    // Allow ±2 always; beyond that require it scale with input, not explode.
-    if term_drift > 2 && term_drift > (ta.max(1) / 2) {
-        return false;
-    }
-    if tb > ta + 3 {
-        return false;
+    if ta == 0 {
+        // Unpunctuated ASR input: adding terminators is the *expected* refine
+        // behavior — cap only against runaway splitting (≈ one per 15 chars).
+        let max_new = ((na / 15) as i64 + 2).max(4);
+        if tb > max_new {
+            return false;
+        }
+    } else {
+        // Allow ±2 always; beyond that require it scale with input, not explode.
+        if term_drift > 2 && term_drift > (ta.max(1) / 2) {
+            return false;
+        }
+        if tb > ta + 3 {
+            return false;
+        }
     }
 
     true
@@ -1246,9 +1287,11 @@ pub(crate) fn finalize_successful_result(
     // File-tab 逐字稿 keeps ForcedAligner timings — don't rewrite text that
     // would desync from character alignment.
     let has_timed = !result.segments.is_empty() || result.alignment.is_some();
+    // Merge learn knowledge deterministic pairs with config vocabulary
+    let merged_vocabulary = merge_vocab_with_learn(app, &config.vocabulary);
     if !(is_transcribe && has_timed) {
         let before_vocab = result.text.clone();
-        result.text = apply_vocabulary(&result.text, &config.vocabulary);
+        result.text = apply_vocabulary_with_learn(app, &result.text, &merged_vocabulary);
         if result.text != before_vocab {
             result.refined = true;
         }
@@ -1277,17 +1320,29 @@ pub(crate) fn finalize_successful_result(
     {
         emit_floating_status(app, true, "refining", &result.text, 0.0);
         let before_llm = result.text.clone();
-        let fewshot = collect_fewshot_from_history(app);
-        match refine_transcript_with_cases_abortable(&config, &before_llm, &fewshot, || {
-            AsrEngine::finalize_aborted(app, gen)
-        }) {
-            Ok(out) => {
+        let fewshot = collect_fewshot_with_learn(app, &before_llm);
+
+        // P0-10: Wrap refine in a 5s total timeout via mpsc channel.
+        // On timeout or non-abort failure, keep original text and mark refine_failed.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cfg_clone = config.clone();
+        let blm = before_llm.clone();
+        let app_handle = app.clone();
+        std::thread::spawn(move || {
+            let r = refine_transcript_with_cases_abortable(&cfg_clone, &blm, &fewshot, || {
+                AsrEngine::finalize_aborted(&app_handle, gen)
+            });
+            let _ = tx.send(r);
+        });
+
+        match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(Ok(out)) => {
                 if out != before_llm {
                     result.llm_text = Some(out.clone());
                     result.text = out;
                     result.refined = true;
                     // Deterministic pairs win over LLM drift.
-                    result.text = apply_vocabulary(&result.text, &config.vocabulary);
+                    result.text = apply_vocabulary_with_learn(app, &result.text, &merged_vocabulary);
                     eprintln!(
                         "[llm] fn refine applied chars={}→{}",
                         before_llm.chars().count(),
@@ -1297,12 +1352,17 @@ pub(crate) fn finalize_successful_result(
                     eprintln!("[llm] fn refine unchanged");
                 }
             }
-            Err(e) if e == "aborted" => {
+            Ok(Err(e)) if e == "aborted" => {
                 eprintln!("[llm] fn refine aborted (gen={gen})");
                 return None;
             }
-            Err(e) => {
-                eprintln!("[llm] fn refine skipped: {e}");
+            Ok(Err(e)) => {
+                eprintln!("[llm] fn refine failed (degraded): {e}");
+                result.refine_failed = true;
+            }
+            Err(_timeout) => {
+                eprintln!("[llm] fn refine timed out (5s), using original text");
+                result.refine_failed = true;
             }
         }
         if AsrEngine::finalize_aborted(app, gen) {
@@ -1355,6 +1415,9 @@ pub(crate) fn finalize_successful_result(
         eprintln!("[asr] finalize aborted after prepare (gen={gen})");
         return None;
     }
+
+    // Flush learn hit counts accumulated during vocabulary application.
+    flush_learn_hits(app);
 
     // File-tab transcribe: save + history, no HUD paste.
     if is_transcribe {
@@ -1442,6 +1505,7 @@ pub(crate) fn finalize_successful_result(
             "mode": source,
             "asr_text": result.raw_text,
             "text": result.text,
+            "refine_failed": result.refine_failed,
         }),
     );
     let _ = app.emit_to(
@@ -1451,6 +1515,7 @@ pub(crate) fn finalize_successful_result(
             "mode": source,
             "asr_text": result.raw_text,
             "text": result.text,
+            "refine_failed": result.refine_failed,
         }),
     );
     eprintln!(
@@ -1560,6 +1625,7 @@ pub(crate) fn transcribe_with_elevenlabs(config: &AppConfig, samples: &[f32]) ->
             .unwrap_or_else(|| config.language.clone()),
         duration_seconds: samples.len() as f64 / 16_000.0,
         refined: false,
+        refine_failed: false,
         error: None,
         segments,
         alignment,
@@ -1795,8 +1861,24 @@ pub(crate) mod apple_speech_ffi {
                     if let Err(e) = stream_append(&chunk) {
                         eprintln!("[asr] apple stream append: {e}");
                     }
+                    // After stream_append succeeds, notify so stop-side can wake early
+                    {
+                        let (lock, cvar) = &**crate::audio::audio_chunk_notify();
+                        if let Ok(mut ready) = lock.lock() {
+                            *ready = true;
+                        }
+                        cvar.notify_one();
+                    }
                 }
                 std::thread::sleep(std::time::Duration::from_millis(40));
+            }
+            // Notify stop thread that pump has exited
+            {
+                let (lock, cvar) = &**crate::audio::audio_chunk_notify();
+                if let Ok(mut ready) = lock.lock() {
+                    *ready = true;
+                }
+                cvar.notify_one();
             }
             eprintln!("[asr] apple stream pump exit (await finish from stop)");
         });
@@ -1826,6 +1908,7 @@ pub(crate) fn transcribe_with_apple_speech(
         language: config.language.clone(),
         duration_seconds: samples.len() as f64 / 16_000.0,
         refined: false,
+        refine_failed: false,
         error: None,
         segments: Vec::new(),
         alignment: None,
@@ -1928,6 +2011,7 @@ pub(crate) fn transcribe_file_samples(
                     language: r.language,
                     duration_seconds: r.duration_seconds,
                     refined: false,
+                    refine_failed: false,
                     error: None,
                     segments: Vec::new(),
                     alignment: None,
@@ -1942,6 +2026,7 @@ pub(crate) fn transcribe_file_samples(
                 language: fallback_language.to_string(),
                 duration_seconds: duration,
                 refined: false,
+                refine_failed: false,
                 error: Some(format!("{e}")),
                 segments: Vec::new(),
                 alignment: None,
@@ -2028,6 +2113,7 @@ pub(crate) fn transcribe_file_samples(
                     language,
                     duration_seconds: duration,
                     refined: false,
+                    refine_failed: false,
                     error: Some(format!("chunk {chunk_i} failed: {e}")),
                     segments: Vec::new(),
                     alignment: None,
@@ -2053,6 +2139,7 @@ pub(crate) fn transcribe_file_samples(
         language,
         duration_seconds: duration,
         refined: false,
+        refine_failed: false,
         error: None,
         segments: Vec::new(),
         alignment: None,
@@ -2332,13 +2419,18 @@ fn is_cjk_char(c: char) -> bool {
 /// hypothesis for ~1 extra `chunk_sec` and felt like slow 吐字. Filler-only
 /// text is still stripped before emit. Raising `unfixed_chunk_num` still
 /// delays HUD by at most one fewer chunk than before.
+///
+/// Lowered segment_secs threshold from 1.5→0.5 to minimise TTFT: the encoder
+/// produces valid tokens at 0.5s (BOOTSTRAP_SAMPLES=8000) so the very first
+/// decode can surface on HUD immediately. Early hypotheses may revise on the
+/// next tick — that's acceptable for "一有字就显示" UX.
 pub(crate) fn streaming_hypothesis_warm(
     chunk_id: usize,
     unfixed_chunk_num: usize,
     segment_secs: f64,
 ) -> bool {
     let min_chunks = unfixed_chunk_num.saturating_sub(1).max(1);
-    chunk_id >= min_chunks || segment_secs >= 1.5
+    chunk_id >= min_chunks || segment_secs >= 0.5
 }
 
 pub(crate) fn language_for_apple(language: &str) -> String {
@@ -2424,6 +2516,121 @@ pub(crate) fn apply_vocabulary(text: &str, vocabulary: &[String]) -> String {
     }
 
     out
+}
+
+// ---------------------------------------------------------------------------
+// Learn-integrated vocabulary + few-shot helpers
+// ---------------------------------------------------------------------------
+
+/// Merge config.vocabulary with learn knowledge deterministic pairs.
+/// Returns a combined Vec<String> suitable for apply_vocabulary.
+pub(crate) fn merge_vocab_with_learn(app: &AppHandle, config_vocab: &[String]) -> Vec<String> {
+    let Some(engine) = app.try_state::<AsrEngine>() else {
+        return config_vocab.to_vec();
+    };
+    let learn_pairs = engine.inner().learn_state.deterministic_pairs();
+    if learn_pairs.is_empty() {
+        return config_vocab.to_vec();
+    }
+    let mut merged = config_vocab.to_vec();
+    // Add learn pairs as "wrong=right" entries, dedup against existing
+    let existing: std::collections::HashSet<String> = config_vocab
+        .iter()
+        .map(|s| s.trim().to_lowercase())
+        .collect();
+    for (wrong, right) in learn_pairs {
+        let entry = format!("{}={}", wrong, right);
+        if !existing.contains(&entry.to_lowercase()) {
+            merged.push(entry);
+        }
+    }
+    merged
+}
+
+/// Apply vocabulary and track hits for learn pairs.
+pub(crate) fn apply_vocabulary_with_learn(
+    app: &AppHandle,
+    text: &str,
+    vocabulary: &[String],
+) -> String {
+    if vocabulary.is_empty() || text.is_empty() {
+        return text.to_string();
+    }
+    let result = apply_vocabulary(text, vocabulary);
+
+    // Track hits: check which learn pairs actually matched
+    if result != text {
+        if let Some(engine) = app.try_state::<AsrEngine>() {
+            let learn_pairs = engine.inner().learn_state.deterministic_pairs();
+            for (wrong, right) in &learn_pairs {
+                // If 'wrong' was in original text but not in result, it was replaced
+                if text.contains(wrong.as_str()) && !result.contains(wrong.as_str()) {
+                    engine.inner().learn_state.record_hit(wrong, right);
+                }
+            }
+        }
+    }
+    result
+}
+
+/// Flush accumulated learn hit counts to disk (call after transcription pipeline).
+pub(crate) fn flush_learn_hits(app: &AppHandle) {
+    if let Some(engine) = app.try_state::<AsrEngine>() {
+        engine.inner().learn_state.flush_hits();
+    }
+}
+
+/// Collect few-shot for refine: relevance-based pair list + sentence-level supplement.
+/// Replaces blind `collect_fewshot_from_history` with targeted selection.
+pub(crate) fn collect_fewshot_with_learn(app: &AppHandle, current_text: &str) -> Vec<FewShotCase> {
+    let Some(engine) = app.try_state::<AsrEngine>() else {
+        return Vec::new();
+    };
+
+    // Get model for gate check
+    let model = engine
+        .inner()
+        .config
+        .lock()
+        .map(|c| c.llm_model.clone())
+        .unwrap_or_default();
+
+    // 1. Collect relevant learn pairs (always inject — they're short)
+    let all_pairs = engine.inner().learn_state.all_enabled_pairs();
+    let relevant_pairs =
+        crate::learn::select_relevant_pairs(current_text, &all_pairs, 12);
+
+    // Build pair-based few-shot cases (formatted as synthetic FewShotCase for compatibility)
+    let mut cases: Vec<FewShotCase> = Vec::new();
+
+    // Convert relevant pairs into the compact pair list format
+    // These go into the fewshot block as:
+    //   输入：配森
+    //   输出：Python
+    for pair in &relevant_pairs {
+        cases.push(FewShotCase {
+            asr: pair.wrong.clone(),
+            gold: pair.right.clone(),
+        });
+    }
+
+    // 2. Supplement with sentence-level cases only if model allows and pairs < budget
+    let max_sentence_supplement = 3usize;
+    if model_allows_fewshot(&model) && cases.len() < 12 {
+        let history_cases = collect_fewshot_from_history(app);
+        let relevant_sentences = crate::learn::select_relevant_sentence_cases(
+            current_text,
+            &history_cases,
+            max_sentence_supplement,
+        );
+        for case in relevant_sentences {
+            cases.push(case.clone());
+        }
+    }
+
+    // Total budget: pair ≤12 + sentence ≤3
+    cases.truncate(15);
+    cases
 }
 
 // ---------------------------------------------------------------------------
@@ -2584,7 +2791,8 @@ pub(crate) fn mlx_worker(
                             cfg.vad_min_segment_ms,
                             cfg.vad_max_segment_sec,
                             cfg.vad_overlap_ms,
-                        ),
+                        )
+                        .apply_speed_preset(&cfg.vad_speed_preset),
                         cfg.cross_segment_prefix_tokens,
                         cfg.vad_backend,
                         cfg.vad_aggression.min(3),
@@ -2793,6 +3001,7 @@ pub(crate) fn mlx_worker(
                     };
 
                 // --- Self-paced segmented streaming loop ---
+                let audio_notify = crate::audio::audio_chunk_notify();
                 loop {
                     if !recording.load(Ordering::Acquire)
                         || cancel_requested.load(Ordering::Acquire)
@@ -2800,7 +3009,23 @@ pub(crate) fn mlx_worker(
                         break;
                     }
 
-                    std::thread::sleep(Duration::from_millis(50));
+                    // Event-driven: wake on new audio chunk or 50ms timeout fallback.
+                    {
+                        let (lock, cvar) = &**audio_notify;
+                        if let Ok(mut ready) = lock.lock() {
+                            if !*ready {
+                                // wait_timeout consumes the guard; recover it on poison too
+                                ready = match cvar.wait_timeout(ready, Duration::from_millis(50)) {
+                                    Ok((guard, _)) => guard,
+                                    Err(poisoned) => poisoned.into_inner().0,
+                                };
+                            }
+                            *ready = false;
+                        } else {
+                            // Poisoned mutex — avoid busy-loop
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                    }
                     tick_translate_stable(&app);
 
                     // Hot path: copy from near the VAD cursor / segment start, not the
@@ -2993,10 +3218,9 @@ pub(crate) fn mlx_worker(
                         continue;
                     }
                     let new_in_seg = session_len.saturating_sub(last_partial_abs);
-                    // First tick in segment: bootstrap at 1.0s (encoder min /
-                    // worker floor) so first char is not stuck behind full
-                    // chunk_sec (default 1.5). Later ticks keep chunk_sec.
-                    const BOOTSTRAP_SAMPLES: usize = 16_000;
+                    // 0.5s @ 16kHz. Encoder conv2d stride=2 ×3 yields 6 tokens for 48
+                    // mel frames (8000 samples) — verified safe (no min-length assert).
+                    const BOOTSTRAP_SAMPLES: usize = 8_000;
                     let first_tick = last_partial_abs <= start;
                     let gate_samples = if first_tick {
                         BOOTSTRAP_SAMPLES.min(chunk_samples)
@@ -3234,6 +3458,7 @@ pub(crate) fn mlx_worker(
                                     language: String::new(),
                                     duration_seconds: 0.0,
                                     refined: false,
+                                    refine_failed: false,
                                     error: Some("Recorder not found".into()),
                                     segments: Vec::new(),
                                     alignment: None,
@@ -3298,6 +3523,7 @@ pub(crate) fn mlx_worker(
                     language: last_language.clone(),
                     duration_seconds: duration,
                     refined: false,
+                    refine_failed: false,
                     error: None,
                     segments: Vec::new(),
                     alignment: None,
@@ -3396,6 +3622,7 @@ pub(crate) fn mlx_worker(
                         language: String::new(),
                         duration_seconds: 0.0,
                         refined: false,
+                        refine_failed: false,
                         error: Some(e),
                         segments: Vec::new(),
                         alignment: None,
@@ -3416,6 +3643,7 @@ pub(crate) fn mlx_worker(
                         language: String::new(),
                         duration_seconds: 0.0,
                         refined: false,
+                        refine_failed: false,
                         error: Some(e),
                         segments: Vec::new(),
                         alignment: None,
@@ -3454,6 +3682,7 @@ pub(crate) fn mlx_worker(
                         language: String::new(),
                         duration_seconds: duration,
                         refined: false,
+                        refine_failed: false,
                         error: Some("Model not loaded".into()),
                         segments: Vec::new(),
                         alignment: None,
@@ -3504,6 +3733,7 @@ pub(crate) fn mlx_worker(
                         language: String::new(),
                         duration_seconds: 0.0,
                         refined: false,
+                        refine_failed: false,
                         error: Some("Local Qwen backend disabled".into()),
                         segments: Vec::new(),
                         alignment: None,
@@ -3520,6 +3750,7 @@ pub(crate) fn mlx_worker(
                         language: String::new(),
                         duration_seconds: 0.0,
                         refined: false,
+                        refine_failed: false,
                         error: Some("Local Qwen backend disabled".into()),
                         segments: Vec::new(),
                         alignment: None,
@@ -3568,6 +3799,9 @@ pub(crate) struct TranscriptionResult {
     pub(crate) language: String,
     pub(crate) duration_seconds: f64,
     pub(crate) refined: bool,
+    /// P0-10: LLM refine timed out or failed; FE can show degraded indicator.
+    #[serde(default)]
+    pub(crate) refine_failed: bool,
     pub(crate) error: Option<String>,
     #[serde(default)]
     pub(crate) segments: Vec<TranscriptSegment>,
@@ -3801,8 +4035,12 @@ mod fewshot_tests {
     #[test]
     fn formats_input_output_pairs() {
         let out = build_refine_fewshot(&[case("我用配森写代码", "我用Python写代码")]);
-        assert!(out.contains("输入：我用配森写代码"));
-        assert!(out.contains("输出：我用Python写代码"));
+        // Short pairs use compact format: "wrong → right"
+        assert!(
+            out.contains("我用配森写代码 → 我用Python写代码"),
+            "expected compact pair format, got: {out}"
+        );
+        assert!(out.contains("纠错习惯（按此修正）"), "missing header");
     }
 
     #[test]
@@ -3811,8 +4049,9 @@ mod fewshot_tests {
             .map(|i| case(&format!("错{i}"), &format!("对{i}")))
             .collect();
         let out = build_refine_fewshot(&many);
-        let n = out.matches("输入：").count();
-        assert!(n <= 8, "few-shot must cap at 8, got {n}");
+        // Short pairs are capped at 12 in compact format
+        let n = out.matches(" → ").count();
+        assert!(n <= 12, "compact pairs must cap at 12, got {n}");
     }
 
     #[test]
@@ -4107,14 +4346,18 @@ mod streaming_lang_tests {
     }
 
     #[test]
-    fn warm_after_first_decode_or_one_point_five_seconds() {
-        assert!(!streaming_hypothesis_warm(0, 2, 0.5));
+    fn warm_after_first_decode_or_half_second() {
+        // With 0.5s threshold: first decode at ~0.5s is immediately warm.
+        assert!(streaming_hypothesis_warm(0, 2, 0.5));
         assert!(streaming_hypothesis_warm(1, 2, 0.5));
         assert!(streaming_hypothesis_warm(0, 2, 1.5));
         assert!(streaming_hypothesis_warm(2, 2, 0.5));
-        // unfixed=3 → need chunk_id>=2 unless time escape
-        assert!(!streaming_hypothesis_warm(1, 3, 1.0));
+        // unfixed=3 → need chunk_id>=2 unless time escape (0.5s)
+        assert!(streaming_hypothesis_warm(1, 3, 1.0));
         assert!(streaming_hypothesis_warm(2, 3, 0.5));
         assert!(streaming_hypothesis_warm(1, 3, 1.5));
+        // Only suppressed when both chunk_id too low AND seg_secs < 0.5
+        assert!(!streaming_hypothesis_warm(0, 3, 0.3));
+        assert!(!streaming_hypothesis_warm(0, 5, 0.4));
     }
 }

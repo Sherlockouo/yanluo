@@ -1,4 +1,4 @@
-/* Theme tokens: @theme + light/dark semantic vars — 言落 (Yanluo) brand */
+/* Theme tokens: @theme + light/dark semantic vars — QuietType (言落) brand */
 
 @theme {
   /* UI: Satoshi (Latin) + Noto Sans SC (CJK). Display: Instrument + Noto Serif SC. */
@@ -35,7 +35,7 @@
 }
 
 /*
-  言落 (Yanluo) brand themes. Dark is the default brand face; light is a
+  QuietType (言落) brand themes. Dark is the default brand face; light is a
   first-class alternate. Override AFTER @heroui/styles so HeroUI components
   pick up the same semantic tokens (including calculated hover/soft vars).
 

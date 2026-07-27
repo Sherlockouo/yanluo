@@ -51,6 +51,9 @@ import type {
   AgentPathInfo,
 } from "@/types";
 import { useApp } from "@/app-context";
+import { useT } from "@/lib/i18n";
+
+type TFunc = ReturnType<typeof useT>;
 
 type Attachment = AgentPathInfo & { at: boolean };
 
@@ -66,18 +69,19 @@ async function loadPathInfo(path: string, at: boolean): Promise<Attachment> {
   return { ...info, at: at || info.kind === "dir" };
 }
 
-function jobStatusLabel(status: AgentJob["status"]): string {
+/** i18n key for a job status; unknown statuses fall through t() as-is. */
+function jobStatusKey(status: AgentJob["status"]): string {
   switch (status) {
     case "queued":
-      return "排队";
+      return "agent.status.queued";
     case "running":
-      return "运行中";
+      return "agent.status.running";
     case "done":
-      return "完成";
+      return "agent.status.done";
     case "error":
-      return "失败";
+      return "agent.status.error";
     case "cancelled":
-      return "已取消";
+      return "agent.status.cancelled";
     default:
       return status;
   }
@@ -112,10 +116,13 @@ function fmtDuration(start?: string | null, end?: string | null): string {
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m`;
 }
 
-function copyText(text: string) {
+function copyText(text: string, t: TFunc) {
   void navigator.clipboard
     .writeText(text)
-    .then(() => toast.success("已复制"), () => toast.danger("复制失败"));
+    .then(
+      () => toast.success(t("agent.copied")),
+      () => toast.danger(t("agent.copyFailed")),
+    );
 }
 
 /** Drop duplicate assistant/result rows that show the same body (fig1 issue). */
@@ -217,6 +224,7 @@ function EventRowContent({
   streaming?: boolean;
   jobActive?: boolean;
 }) {
+  const t = useT();
   const body = eventBodyMarkdown(event);
   const kind = event.kind;
   const isUser = kind === "user";
@@ -254,11 +262,11 @@ function EventRowContent({
               <button
                 type="button"
                 className="agent-msg-copy"
-                aria-label="复制"
-                onClick={() => copyText(event.text)}
+                aria-label={t("agent.copy")}
+                onClick={() => copyText(event.text, t)}
               >
                 <Clipboard size={12} />
-                <span>复制</span>
+                <span>{t("agent.copy")}</span>
               </button>
             ) : null}
             {clock ? <span className="agent-chat-ts">{clock}</span> : null}
@@ -316,7 +324,7 @@ function EventRowContent({
             onPress={() => setFoldOpen((v) => !v)}
           >
             <FileText size={13} strokeWidth={2} className="shrink-0 opacity-50" />
-            <span className="agent-tool-card-name">结果</span>
+            <span className="agent-tool-card-name">{t("agent.result")}</span>
             {clock ? (
               <span className="agent-chat-ts ml-auto">{clock}</span>
             ) : null}
@@ -366,11 +374,11 @@ function EventRowContent({
               <button
                 type="button"
                 className="agent-msg-copy"
-                aria-label="复制"
-                onClick={() => copyText(event.text)}
+                aria-label={t("agent.copy")}
+                onClick={() => copyText(event.text, t)}
               >
                 <Clipboard size={12} />
-                <span>复制</span>
+                <span>{t("agent.copy")}</span>
               </button>
             ) : null}
             {clock ? <span className="agent-chat-ts">{clock}</span> : null}
@@ -381,22 +389,30 @@ function EventRowContent({
   );
 }
 
-/** Row enter owned by framer (opacity + y, springUI) — CSS agent-row-in stays as reference. */
+/** Row enter owned by framer (opacity + y, springUI) — CSS agent-row-in stays as reference.
+ * `isNew` = true → enter animation with stagger (capped first 4 × 40ms).
+ * `isNew` = false → skip enter animation (initial={false}). */
 const EventRow = memo(function EventRow({
   event,
   streaming,
   jobActive,
+  isNew = false,
+  staggerIndex = 0,
 }: {
   event: AgentJobEvent;
   streaming?: boolean;
   jobActive?: boolean;
+  isNew?: boolean;
+  staggerIndex?: number;
 }) {
   const reduce = useReducedMotion();
+  const shouldAnimate = isNew && !reduce;
+  const delay = shouldAnimate ? Math.min(staggerIndex, 3) * 0.04 : 0;
   return (
     <motion.div
-      initial={reduce ? false : { opacity: 0, y: 10 }}
+      initial={shouldAnimate ? { opacity: 0, y: 10 } : false}
       animate={{ opacity: 1, y: 0 }}
-      transition={springUI}
+      transition={{ ...springUI, delay }}
     >
       <EventRowContent
         event={event}
@@ -408,6 +424,7 @@ const EventRow = memo(function EventRow({
 }, (prev, next) => {
   if (prev.streaming !== next.streaming) return false;
   if (prev.jobActive !== next.jobActive) return false;
+  if (prev.isNew !== next.isNew) return false;
   const a = prev.event, b = next.event;
   return (
     a.seq === b.seq &&
@@ -425,6 +442,7 @@ function AttachPreview({
   item: Attachment | AgentPathInfo;
   onClose: () => void;
 }) {
+  const t = useT();
   const isDir =
     "at" in item ? item.at || item.kind === "dir" : item.kind === "dir";
   const isImage = item.kind === "image";
@@ -446,7 +464,7 @@ function AttachPreview({
           isIconOnly
           size="sm"
           variant="ghost"
-          aria-label="关闭预览"
+          aria-label={t("agent.closePreview")}
           className="rounded p-1 text-muted"
           onPress={onClose}
         >
@@ -476,6 +494,7 @@ function AttachPreview({
 export function AgentJobPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const t = useT();
   const {
     config,
     updateConfig,
@@ -571,6 +590,13 @@ export function AgentJobPage() {
       : [];
 
   const events = useMemo(() => dedupeEvents(rawEvents), [rawEvents]);
+  // Track previous event count to identify newly-added rows for enter animation.
+  const prevEventCountRef = useRef(events.length);
+  const newEventStartIndex = prevEventCountRef.current;
+  useEffect(() => {
+    prevEventCountRef.current = events.length;
+  }, [events.length]);
+
   const [showAllEvents, setShowAllEvents] = useState(false);
   const MAX_VISIBLE_EVENTS = 50;
   const visibleEvents = showAllEvents
@@ -736,7 +762,7 @@ export function AgentJobPage() {
       : currentModel || "__default__";
   const modelLabel =
     modelOptions.find((m) => m.id === currentModel)?.label ??
-    (currentModel || "默认");
+    (currentModel || t("agent.modelDefault"));
 
   const sendContinue = async () => {
     if (!job || !canSend) return;
@@ -769,7 +795,7 @@ export function AgentJobPage() {
       } else {
         await invoke("dispatch_agent", {
           agent: job.agent,
-          prompt: reply.trim() || "（见附件）",
+          prompt: reply.trim() || t("agent.seeAttachments"),
           cwd: job.cwd,
           attachments: replyAttach.map((a) => a.path),
         });
@@ -828,17 +854,20 @@ export function AgentJobPage() {
     return (
       <PageShell>
         <PageHeader
-          title="任务"
+          title={t("agent.task")}
           action={
             <Link
               to="/dispatch"
               className="text-sm text-muted hover:text-foreground"
             >
-              返回列表
+              {t("agent.backList")}
             </Link>
           }
         />
-        <EmptyState title="任务不存在" description="可能已被删除。" />
+        <EmptyState
+          title={t("agent.notFound")}
+          description={t("agent.notFoundDesc")}
+        />
       </PageShell>
     );
   }
@@ -858,7 +887,7 @@ export function AgentJobPage() {
           className="dlink muted self-start"
           onClick={() => navigate("/dispatch")}
         >
-          ← 派活
+          {t("agent.backToList")}
         </button>
         <div className="flex w-full items-end justify-between gap-4">
           <div className="min-w-0">
@@ -878,7 +907,7 @@ export function AgentJobPage() {
                         : "neutral"
                 }
               >
-                {jobStatusLabel(job.status)}
+                {t(jobStatusKey(job.status))}
               </span>
             </div>
             <div className="agent-job-meta">
@@ -901,7 +930,7 @@ export function AgentJobPage() {
               isIconOnly
               size="sm"
               variant="ghost"
-              aria-label={sideOpen ? "收起文件栏" : "文件栏"}
+              aria-label={sideOpen ? t("agent.closeSide") : t("agent.openSide")}
               onPress={toggleSide}
             >
               {sideOpen ? (
@@ -924,7 +953,7 @@ export function AgentJobPage() {
                   active ? "text-accent agent-live-pulse" : "text-muted",
                 )}
               />
-              <span className="text-sm font-medium">对话</span>
+              <span className="text-sm font-medium">{t("agent.conversation")}</span>
               <span className="type-meta">{events.length}</span>
               {job.progress && active ? (
                 <span className="truncate type-meta">{job.progress}</span>
@@ -943,11 +972,11 @@ export function AgentJobPage() {
                       active && "is-active",
                     )}
                   />
-                  <p className="agent-chat-empty-title">开口派活</p>
+                  <p className="agent-chat-empty-title">{t("agent.chatEmpty")}</p>
                   <p className="agent-chat-empty-hint">
                     {active
-                      ? "说一声或打字，回复会出现在这里"
-                      : "这次还没有对话"}
+                      ? t("agent.chatActiveHint")
+                      : t("agent.chatIdleHint")}
                   </p>
                 </div>
               ) : (
@@ -959,21 +988,28 @@ export function AgentJobPage() {
                       whileTap={{ scale: 0.97 }}
                       onClick={() => setShowAllEvents(true)}
                     >
-                      ↑ 还有 {hiddenEventCount} 条更早的消息
+                      {t("agent.olderMessages", { n: hiddenEventCount })}
                     </motion.button>
                   ) : null}
-                  {visibleEvents.map((e, i) => (
-                    <EventRow
-                      key={`${e.seq}-${e.ts}-${e.kind}`}
-                      event={e}
-                      jobActive={active}
-                      streaming={
-                        active &&
-                        i === visibleEvents.length - 1 &&
-                        e.kind === "assistant"
-                      }
-                    />
-                  ))}
+                  {visibleEvents.map((e, i) => {
+                    const globalIdx = hiddenEventCount + i;
+                    const isNew = globalIdx >= newEventStartIndex;
+                    const staggerIdx = isNew ? globalIdx - newEventStartIndex : 0;
+                    return (
+                      <EventRow
+                        key={`${e.seq}-${e.ts}-${e.kind}`}
+                        event={e}
+                        jobActive={active}
+                        isNew={isNew}
+                        staggerIndex={staggerIdx}
+                        streaming={
+                          active &&
+                          i === visibleEvents.length - 1 &&
+                          e.kind === "assistant"
+                        }
+                      />
+                    );
+                  })}
                 </>
               )}
               </div>
@@ -1026,7 +1062,7 @@ export function AgentJobPage() {
                           <Button
                             isIconOnly
                             variant="ghost"
-                            aria-label="移除附件"
+                            aria-label={t("agent.removeAttach")}
                             className="h-auto min-h-0 min-w-0 rounded p-0.5 opacity-50 shadow-none hover:bg-default/50 hover:opacity-100 data-[hovered=true]:bg-default/50 data-[hovered=true]:opacity-100 data-[pressed=true]:scale-100"
                             onPress={() => {
                               setReplyAttach((prev) =>
@@ -1067,10 +1103,10 @@ export function AgentJobPage() {
                       fullWidth
                       aria-label={
                         active
-                          ? "打断并纠正"
+                          ? t("agent.interrupt")
                           : canContinue
-                            ? "继续对话"
-                            : "开新任务"
+                            ? t("agent.continue")
+                            : t("agent.newTask")
                       }
                       value={reply}
                       onChange={setReply}
@@ -1081,10 +1117,10 @@ export function AgentJobPage() {
                         rows={2}
                         placeholder={
                           active
-                            ? "打断并纠正…"
+                            ? t("agent.interruptPlaceholder")
                             : canContinue
-                              ? "继续对话…"
-                              : "开新任务…"
+                              ? t("agent.continuePlaceholder")
+                              : t("agent.newTaskPlaceholder")
                         }
                         className="agent-composer-input"
                         onKeyDown={(e) => {
@@ -1109,7 +1145,7 @@ export function AgentJobPage() {
                       <Button
                         isIconOnly
                         variant="ghost"
-                        aria-label="添加"
+                        aria-label={t("agent.add")}
                         aria-expanded={addMenu}
                         data-add-menu-trigger
                         className={cn(
@@ -1126,7 +1162,7 @@ export function AgentJobPage() {
                           <motion.div
                             key="add-menu"
                             role="menu"
-                            aria-label="添加附件"
+                            aria-label={t("agent.addAttachment")}
                             data-add-menu
                             className="agent-add-menu absolute bottom-full left-2 z-50 mb-1.5 flex min-w-[220px] flex-col gap-0.5 rounded-xl border border-border bg-surface p-1 shadow-lg"
                             initial={{ opacity: 0, y: 6, scale: 0.98 }}
@@ -1140,7 +1176,7 @@ export function AgentJobPage() {
                               onPress={() => void addReplyAttach(false)}
                             >
                               <Paperclip size={14} className="opacity-60" />
-                              文件和文件夹
+                              {t("agent.filesAndFolders")}
                             </Button>
                             <Button
                               variant="ghost"
@@ -1148,7 +1184,7 @@ export function AgentJobPage() {
                               onPress={() => void addReplyAttach(true)}
                             >
                               <FolderOpen size={14} className="opacity-60" />
-                              仅文件夹
+                              {t("agent.foldersOnly")}
                             </Button>
                           </motion.div>
                         ) : null}
@@ -1156,7 +1192,7 @@ export function AgentJobPage() {
 
                       <Select
                         className="inline-flex w-auto"
-                        aria-label="模型"
+                        aria-label={t("agent.model")}
                         selectedKey={modelKey}
                         onSelectionChange={(key) => {
                           if (key == null) return;
@@ -1208,33 +1244,38 @@ export function AgentJobPage() {
 
                       <Button
                         isIconOnly
-                        variant="primary"
+                        variant={hasPayload ? "primary" : "ghost"}
                         aria-label={
-                          active
-                            ? hasPayload && hasSession
-                              ? "打断并纠正 Enter"
-                              : "暂停"
-                            : "发送 Enter"
+                          hasPayload
+                            ? active
+                              ? t("agent.interruptSend")
+                              : t("agent.sendEnter")
+                            : t("agent.pause")
                         }
                         className={cn(
                           "agent-composer-send h-7 w-7 min-h-7 min-w-7 p-0",
-                          active && "is-pause",
+                          !hasPayload && active && "is-pause",
                         )}
                         isDisabled={!canSend}
                         onPress={() => void sendContinue()}
                       >
-                        {active ? (
-                          <Pause size={13} fill="currentColor" strokeWidth={0} />
-                        ) : (
-                          <Send size={13} strokeWidth={2.4} />
-                        )}
+                        <span
+                          className="agent-composer-send-icon"
+                          data-mode={hasPayload ? "send" : "pause"}
+                        >
+                          {hasPayload ? (
+                            <Send size={13} strokeWidth={2.4} />
+                          ) : (
+                            <Pause size={13} fill="currentColor" strokeWidth={0} />
+                          )}
+                        </span>
                       </Button>
                     </div>
                   </div>
                 </div>
               ) : (
                 <p className="type-meta">
-                  无 session id，无法续聊（需 Claude 新任务或 Codex 回报会话）
+                  {t("agent.noSession")}
                 </p>
               )}
             </div>
@@ -1254,21 +1295,21 @@ export function AgentJobPage() {
             <div className="agent-side-files">
               <div className="mb-2 flex items-center justify-between">
                 <span className="type-meta font-medium text-foreground">
-                  文件
+                  {t("agent.files")}
                 </span>
                 <Button
                   isIconOnly
                   size="sm"
                   variant="ghost"
                   className="rounded p-1 text-muted lg:hidden"
-                  aria-label="收起侧栏"
+                  aria-label={t("agent.closeSide")}
                   onPress={toggleSide}
                 >
                   <PanelRightClose size={14} />
                 </Button>
               </div>
               {verifiedPaths.length === 0 ? (
-                <p className="type-meta">附件与结果路径会出现在这里</p>
+                <p className="type-meta">{t("agent.filesHint")}</p>
               ) : (
                 <ul className="flex flex-col gap-0.5">
                   {verifiedPaths.map((p) => {
@@ -1306,7 +1347,7 @@ export function AgentJobPage() {
                           isIconOnly
                           size="sm"
                           variant="ghost"
-                          aria-label={`系统打开 ${name}`}
+                          aria-label={t("agent.systemOpen", { name })}
                           isDisabled={previewBusy}
                           className="agent-side-file-open h-7 w-7 shrink-0 rounded-md text-muted opacity-55 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 data-[hovered=true]:bg-default/50 data-[hovered=true]:opacity-100"
                           onPress={() => void openPathInSystem(p)}

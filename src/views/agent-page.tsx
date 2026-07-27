@@ -28,19 +28,21 @@ import { takePendingDispatchPrompt } from "@/lib/ui-session";
 import { friendlyAgentError } from "@/lib/agent-errors";
 import type { AgentJob, AgentKind, AgentProfile } from "@/types";
 import { useApp } from "@/app-context";
+import { useT } from "@/lib/i18n";
 
-function jobStatusLabel(status: AgentJob["status"]): string {
+/** i18n key for a job status; unknown statuses fall through t() as-is. */
+function jobStatusKey(status: AgentJob["status"]): string {
   switch (status) {
     case "queued":
-      return "排队";
+      return "agent.status.queued";
     case "running":
-      return "运行中";
+      return "agent.status.running";
     case "done":
-      return "完成";
+      return "agent.status.done";
     case "error":
-      return "失败";
+      return "agent.status.error";
     case "cancelled":
-      return "已取消";
+      return "agent.status.cancelled";
     default:
       return status;
   }
@@ -92,6 +94,7 @@ function AgentJobCard({
   onDelete: () => void;
   onCopy: () => void;
 }) {
+  const t = useT();
   const active = isActive(job.status);
   const attachCount = job.attachments?.length ?? 0;
   const clock = fmtClock(job.started_at);
@@ -123,7 +126,7 @@ function AgentJobCard({
           "h-auto min-h-0 min-w-0 flex-1 items-start justify-start rounded-none",
           "bg-transparent px-0 py-0 text-left font-normal shadow-none",
           "hover:bg-transparent data-[hovered=true]:bg-transparent",
-          "data-[pressed=true]:bg-transparent data-[pressed=true]:scale-100",
+          "data-[pressed=true]:bg-transparent data-[pressed=true]:scale-[0.99]",
         )}
         onPress={onOpen}
       >
@@ -137,7 +140,7 @@ function AgentJobCard({
                 job.status === "done" && "is-status-done",
               )}
             >
-              {jobStatusLabel(job.status)}
+              {t(jobStatusKey(job.status))}
             </span>
             {clock || duration ? (
               <span>
@@ -146,7 +149,9 @@ function AgentJobCard({
                 {duration}
               </span>
             ) : null}
-            {attachCount > 0 ? <span>{attachCount} 附件</span> : null}
+            {attachCount > 0 ? (
+              <span>{t("agent.attachCount", { n: attachCount })}</span>
+            ) : null}
           </div>
           <div className="agent-job-prompt select-text line-clamp-2">
             {job.prompt}
@@ -166,7 +171,7 @@ function AgentJobCard({
             isIconOnly
             variant="ghost"
             className="btn-press text-muted"
-            aria-label="取消"
+            aria-label={t("agent.cancel")}
             onPress={onCancel}
           >
             <Square size={12} fill="currentColor" />
@@ -178,7 +183,7 @@ function AgentJobCard({
             isIconOnly
             variant="ghost"
             className="btn-press text-muted"
-            aria-label="复制结果"
+            aria-label={t("agent.copyResult")}
             onPress={onCopy}
           >
             <Clipboard size={12} />
@@ -189,7 +194,7 @@ function AgentJobCard({
           isIconOnly
           variant="ghost"
           className="btn-press text-muted hover:text-danger data-[hovered=true]:text-danger"
-          aria-label="删除"
+          aria-label={t("agent.delete")}
           onPress={onDelete}
         >
           <Trash2 size={12} />
@@ -201,6 +206,7 @@ function AgentJobCard({
 
 export function AgentPage() {
   const navigate = useNavigate();
+  const t = useT();
   const {
     config,
     updateConfig,
@@ -282,7 +288,7 @@ export function AgentPage() {
       : "__default__";
   const modelLabel =
     modelOptions.find((m) => m.id === currentModel)?.label ??
-    (currentModel || "默认");
+    (currentModel || t("agent.modelDefault"));
 
   const dispatch = async () => {
     const text = prompt.trim();
@@ -310,9 +316,9 @@ export function AgentPage() {
     if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
-      toast.success("已复制");
+      toast.success(t("agent.copied"));
     } catch {
-      toast.danger("复制失败");
+      toast.danger(t("agent.copyFailed"));
     }
   };
 
@@ -320,15 +326,15 @@ export function AgentPage() {
     try {
       await deleteAgentJob(id);
     } catch (e) {
-      toast.danger(`删除失败: ${e}`);
+      toast.danger(t("agent.deleteFailed", { error: String(e) }));
     }
   };
 
   return (
-    <PageShell className="agent-list-shell max-w-3xl h-full min-h-0 gap-0 pb-0">
+    <PageShell className="agent-list-shell max-w-3xl gap-0 pb-0">
       <header className="amast">
         <div className="amast-top">
-          <span className="amast-kicker">派活 · agent jobs</span>
+          <span className="amast-kicker">{t("agent.pageKicker")}</span>
           <Button
             size="sm"
             variant="ghost"
@@ -336,27 +342,43 @@ export function AgentPage() {
             onPress={() => navigate("/settings?tab=agent")}
           >
             <Settings2 size={12} />
-            能力
+            {t("agent.capabilities")}
           </Button>
         </div>
-        <h1 className="amast-title">派活</h1>
+        <h1 className="amast-title">{t("agent.pageTitle")}</h1>
       </header>
 
-      <div className="agent-list-body min-h-0 flex-1 overflow-auto">
+      <div className="agent-list-body">
         {agentJobs.length === 0 ? (
           <div className="agent-list-empty">
-            <div className="dropzone">
-              <span className="dropzone-ic">
-                <Bot size={22} aria-hidden />
-              </span>
-              <span className="dropzone-t">开口派活</span>
-              <span className="dropzone-fmt">
-                Fn+Space 说一声，或下面打字 — 声音不出电脑
-              </span>
+            <div className="agent-empty-guide">
+              <ol className="agent-empty-steps">
+                <li>
+                  <span className="agent-empty-step-num">①</span>
+                  <span>
+                    {(() => {
+                      // Keep <kbd> markup: split template around the {hotkey} slot.
+                      const [before, after] = t("agent.emptyStep1", {
+                        hotkey: "\u0001",
+                      }).split("\u0001");
+                      return (
+                        <>
+                          {before}
+                          <kbd>Fn+Space</kbd>
+                          {after}
+                        </>
+                      );
+                    })()}
+                  </span>
+                </li>
+                <li><span className="agent-empty-step-num">②</span><span>{t("agent.emptyStep2")}</span></li>
+                <li><span className="agent-empty-step-num">③</span><span>{t("agent.emptyStep3")}</span></li>
+              </ol>
+              <p className="agent-empty-hint">{t("agent.emptyHint")}</p>
             </div>
           </div>
         ) : (
-          <div className="agent-job-list flex flex-col pb-2">
+          <div className="agent-job-list flex flex-col pb-20">
             {agentJobs.map((job, i) => (
               <Reveal key={job.id} index={i}>
                 <AgentJobCard
@@ -372,7 +394,7 @@ export function AgentPage() {
         )}
       </div>
 
-      <div className="agent-list-composer shrink-0 pt-1">
+      <div className="agent-list-composer sticky bottom-0 pt-1">
         <div className="agent-composer">
           {attachments.length > 0 ? (
             <div className="agent-attach-chips">
@@ -384,7 +406,7 @@ export function AgentPage() {
                   </span>
                   <button
                     type="button"
-                    aria-label={`移除 ${path}`}
+                    aria-label={t("agent.remove", { path })}
                     className="agent-attach-chip-x"
                     onClick={() => removeAttachment(path)}
                   >
@@ -396,7 +418,7 @@ export function AgentPage() {
           ) : null}
           <TextField
             fullWidth
-            aria-label="派活"
+            aria-label={t("agent.composerLabel")}
             value={prompt}
             onChange={setPrompt}
             isDisabled={sending}
@@ -404,7 +426,7 @@ export function AgentPage() {
           >
             <TextArea
               rows={2}
-              placeholder="派个活…"
+              placeholder={t("agent.composerPlaceholder")}
               className="agent-composer-input"
               onKeyDown={(e) => {
                 if (e.nativeEvent.isComposing || e.keyCode === 229) return;
@@ -419,7 +441,7 @@ export function AgentPage() {
             <Button
               isIconOnly
               variant="ghost"
-              aria-label="添加文件"
+              aria-label={t("agent.addFile")}
               className="agent-composer-icon btn-press h-7 w-7 min-h-7 min-w-7 p-0"
               onPress={() => void pickAttachments()}
             >
@@ -466,7 +488,7 @@ export function AgentPage() {
 
             <Select
               className="inline-flex w-auto"
-              aria-label="模型"
+              aria-label={t("agent.model")}
               selectedKey={modelKey}
               onSelectionChange={(key) => {
                 if (key == null) return;
@@ -503,7 +525,7 @@ export function AgentPage() {
             <Button
               isIconOnly
               variant="primary"
-              aria-label="发送 Enter"
+              aria-label={t("agent.sendEnter")}
               className="agent-composer-send btn-press h-7 w-7 min-h-7 min-w-7 p-0"
               isDisabled={!canSend}
               onPress={() => void dispatch()}

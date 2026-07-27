@@ -17,3 +17,55 @@
 @import "./styles/draft.css";
 @import "./styles/agent.css";
 @import "./styles/view-motion.css";
+
+/* ─── Press-feedback utilities (pointer-down, not release) ─── */
+.btn-press {
+  transition: transform 100ms ease-out;
+}
+.btn-press:active {
+  transform: scale(0.97);
+}
+.card-press {
+  transition: transform 100ms ease-out;
+}
+.card-press:active {
+  transform: scale(0.985);
+}
+.row-press {
+  transition: transform 100ms ease-out;
+}
+.row-press:active {
+  transform: scale(0.99);
+}
+.chip-press {
+  transition: transform 100ms ease-out;
+}
+.chip-press:active {
+  transform: scale(0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-press:active,
+  .card-press:active,
+  .row-press:active,
+  .chip-press:active {
+    transform: none;
+  }
+}
+
+/* P1-3 & P1-5: :active for draft-page (.dmode) and transcribe-page (.dropzone) */
+.dmode:active {
+  transform: scale(0.96);
+  transition: transform 100ms ease-out;
+}
+.dropzone:active {
+  transform: scale(0.985);
+  transition: transform 100ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dmode:active,
+  .dropzone:active {
+    transform: none;
+  }
+}

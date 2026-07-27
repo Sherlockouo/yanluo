@@ -1,4 +1,4 @@
-# Local-first 架构 — 言落 (Yanluo)
+# Local-first 架构 — QuietType（言落）
 
 > 源自 Linear 式 local-first（[skill](https://performance.dev/how-is-linear-so-fast-a-technical-breakdown)）。适配本仓库 **Tauri 桌面 + 本地 ASR/LLM**，非纯 Web SaaS。
 >

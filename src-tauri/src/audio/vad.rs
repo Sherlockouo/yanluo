@@ -84,6 +84,20 @@ impl SegmentConfig {
             overlap_samples: ms(overlap_ms),
         }
     }
+
+    /// Apply speed preset overrides (called after from_app_ms).
+    /// "fast" preset: silence=600ms, hold=200ms for rapid dictation.
+    pub(crate) fn apply_speed_preset(mut self, preset: &str) -> Self {
+        match preset {
+            "fast" => {
+                let ms = |ms: u64| (SAMPLE_RATE as u64 * ms / 1000) as usize;
+                self.min_silence_samples = ms(600).max(1);
+                self.commit_hold_samples = ms(200);
+            }
+            _ => {} // "default" — keep configured values
+        }
+        self
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

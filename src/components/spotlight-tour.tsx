@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Button } from "@heroui/react";
 import { duration, easeOut } from "@/lib/motion";
+import { useT } from "@/lib/i18n";
 import {
   ONBOARD_STORAGE_KEY,
   TOUR_START_EVENT,
@@ -49,8 +50,8 @@ type TourStep = {
   id: string;
   anchor: string;
   path?: string;
-  title: string;
-  body: string;
+  titleKey: string;
+  bodyKey: string;
 };
 
 const STEPS: TourStep[] = [
@@ -58,36 +59,36 @@ const STEPS: TourStep[] = [
     id: "draft",
     anchor: "rail-draft",
     path: "/draft",
-    title: "出稿",
-    body: "开口出稿。开会、口述、文件转写，说完桌上有稿。",
+    titleKey: "common.tour.draftTitle",
+    bodyKey: "common.tour.draftBody",
   },
   {
     id: "live",
     anchor: "draft-hotkeys",
     path: "/draft?mode=live",
-    title: "热键出稿",
-    body: "按住出稿键说话，松开关闭；翻译用旁边那组热键。",
+    titleKey: "common.tour.liveTitle",
+    bodyKey: "common.tour.liveBody",
   },
   {
     id: "dispatch",
     anchor: "rail-dispatch",
     path: "/dispatch",
-    title: "派活",
-    body: "开口派活。把事交给本机 Claude / Codex / Pi。",
+    titleKey: "common.tour.dispatchTitle",
+    bodyKey: "common.tour.dispatchBody",
   },
   {
     id: "asr",
     anchor: "settings-asr",
     path: "/settings?tab=asr",
-    title: "识别",
-    body: "模型目录与场景在这里。切得太碎就调低灵敏度。",
+    titleKey: "common.tour.asrTitle",
+    bodyKey: "common.tour.asrBody",
   },
   {
     id: "hotkeys",
     anchor: "settings-hotkeys",
     path: "/settings?tab=system&sub=hotkeys",
-    title: "快捷键",
-    body: "出稿、翻译、派活热键都可改。权限也在系统里。",
+    titleKey: "common.tour.hotkeysTitle",
+    bodyKey: "common.tour.hotkeysBody",
   },
 ];
 
@@ -112,6 +113,7 @@ function measureAnchor(anchor: string): Hole | null {
  */
 export function SpotlightTour() {
   const navigate = useNavigate();
+  const t = useT();
   const [active, setActive] = useState(false);
   const [index, setIndex] = useState(0);
   const [hole, setHole] = useState<Hole | null>(null);
@@ -237,19 +239,21 @@ export function SpotlightTour() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: duration.fast, ease: easeOut }}
           role="dialog"
-          aria-label={step.title}
+          aria-label={t(step.titleKey)}
         >
           <div className="spotlight-tip-kicker">
             {index + 1} / {STEPS.length}
           </div>
-          <div className="spotlight-tip-title">{step.title}</div>
-          <p className="spotlight-tip-body">{step.body}</p>
+          <div className="spotlight-tip-title">{t(step.titleKey)}</div>
+          <p className="spotlight-tip-body">{t(step.bodyKey)}</p>
           <div className="spotlight-tip-actions">
             <button type="button" className="spotlight-skip" onClick={finish}>
-              跳过
+              {t("common.tour.skip")}
             </button>
             <Button variant="primary" className="btn-press" onPress={next}>
-              {index + 1 >= STEPS.length ? "完成" : "下一步"}
+              {index + 1 >= STEPS.length
+                ? t("common.tour.done")
+                : t("common.tour.next")}
             </Button>
           </div>
         </motion.div>

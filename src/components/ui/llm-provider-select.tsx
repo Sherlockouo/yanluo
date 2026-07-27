@@ -12,6 +12,7 @@ import {
 } from "@/lib/constants";
 import { useApp } from "@/app-context";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 import type { LlmProvider } from "@/types";
 
 const CUSTOM = "__custom__";
@@ -54,6 +55,7 @@ export function LlmProviderSelect({
   triggerCls?: string;
 }) {
   const trigger = triggerCls ?? (quiet ? quietTriggerCls : boxedTriggerCls);
+  const t = useT();
   const { config, saveConfig } = useApp();
   const reduce = useReducedMotion();
   const provider = config.llm_provider;
@@ -143,7 +145,7 @@ export function LlmProviderSelect({
         >
           <Select.Trigger className={trigger}>
             <Select.Value>
-              {() => config.llm_model || "选择模型"}
+              {() => config.llm_model || t("common.llm.selectModel")}
             </Select.Value>
             <ChevronDown size={12} className="shrink-0 text-muted" />
           </Select.Trigger>
@@ -155,8 +157,8 @@ export function LlmProviderSelect({
                   <ListBox.ItemIndicator />
                 </ListBox.Item>
               ))}
-              <ListBox.Item id={CUSTOM} textValue="自定义">
-                自定义…
+              <ListBox.Item id={CUSTOM} textValue={t("common.llm.custom")}>
+                {t("common.llm.customEllipsis")}
                 <ListBox.ItemIndicator />
               </ListBox.Item>
             </ListBox>
@@ -164,16 +166,16 @@ export function LlmProviderSelect({
         </Select>
       ) : (
         <TextField
-          aria-label="自定义模型"
+          aria-label={t("common.llm.customModelAria")}
           className="inline-flex w-[9rem]"
           variant="secondary"
           value={config.llm_model}
           onChange={setModel}
         >
-          <Label className="sr-only">模型</Label>
+          <Label className="sr-only">{t("common.llm.model")}</Label>
           <Input
             className="h-7 !py-0 font-mono !text-[12px]"
-            placeholder="模型名"
+            placeholder={t("common.llm.modelPlaceholder")}
           />
         </TextField>
       )}
@@ -183,7 +185,7 @@ export function LlmProviderSelect({
           to="/settings?tab=llm"
           className="text-[12px] text-accent-soft-foreground hover:underline"
         >
-          配置
+          {t("common.llm.configure")}
         </Link>
       ) : null}
     </motion.div>

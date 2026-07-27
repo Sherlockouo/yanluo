@@ -6,6 +6,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::audio::*;
 use crate::config::*;
 use crate::history::*;
+use crate::learn::LearnState;
 use crate::transcription::*;
 
 fn panic_payload_str(payload: &Box<dyn std::any::Any + Send>) -> String {
@@ -78,6 +79,8 @@ pub struct AsrEngine {
     pub(crate) recording: Arc<AtomicBool>,
     /// Set by cancel_recording; mlx worker skips final transcription when true.
     pub(crate) cancel_requested: Arc<AtomicBool>,
+    /// 纠错学习知识库状态
+    pub(crate) learn_state: LearnState,
     /// Bumped on start/cancel. Finalize captures gen; stale gen = aborted mid-pipeline.
     pub(crate) finalize_gen: Arc<AtomicU64>,
     pub(crate) model_loaded: Arc<AtomicBool>,
@@ -133,6 +136,10 @@ impl AsrEngine {
         let config = load_config_from_disk();
         let history = load_history_from_disk();
 
+        // Initialize learn knowledge base + migrate existing vocab pairs
+        let learn_state = LearnState::new();
+        learn_state.migrate_from_vocabulary(&config.vocabulary);
+
         Self {
             model_dir: Mutex::new(config.asr_model_dir.clone()),
             recorder: Mutex::new(None),
@@ -147,6 +154,7 @@ impl AsrEngine {
             translate_stream: Mutex::new(TranslateStreamState::default()),
             pending_hud_confirm: Mutex::new(None),
             live_meter: Arc::new(LiveMeter::default()),
+            learn_state,
         }
     }
 

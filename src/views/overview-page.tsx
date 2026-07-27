@@ -1,23 +1,15 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Button, toast } from "@heroui/react";
+import { Fragment, useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
-import { Download } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { motion, useReducedMotion } from "framer-motion";
-import { PageShell, SectionCard } from "@/components/shared/page-shell";
+import { PageShell } from "@/components/shared/page-shell";
 import { WordCloud } from "@/components/home/word-cloud";
-import { duration, easeOut, springUI } from "@/lib/motion";
+import { duration, easeOut, springBounce } from "@/lib/motion";
 import {
   aggregateWordFreq,
   CLOUD_SOURCES,
   type CloudSource,
 } from "@/lib/word-freq";
-import {
-  type ModelDownloadProgress,
-  type ModelStatus,
-  progressLabel,
-} from "@/lib/model-download";
+import { useT } from "@/lib/i18n";
 import { useApp } from "@/app-context";
 
 const CLOUD_SOURCE_KEY = "yanluo:home-cloud-source";
@@ -33,11 +25,8 @@ function readCloudSource(): CloudSource {
 }
 
 export function OverviewPage() {
-  const { config, modelLoaded, updateConfig, loadModel, agentJobs, history } =
-    useApp();
-  const [status, setStatus] = useState<ModelStatus | null>(null);
-  const [downloading, setDownloading] = useState(false);
-  const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
+  const t = useT();
+  const { config, modelLoaded, agentJobs, history } = useApp();
   const [cloudSource, setCloudSource] = useState<CloudSource>(readCloudSource);
   const reduceMotion = useReducedMotion();
 
@@ -55,64 +44,10 @@ export function OverviewPage() {
     }
   };
 
-  const refreshStatus = useCallback(async () => {
-    if (config.asr_provider !== "qwen") {
-      setStatus(null);
-      return;
-    }
-    try {
-      const next = await invoke<ModelStatus>("get_model_status", {
-        modelId: config.asr_model_id || "Qwen3-ASR-0.6B",
-      });
-      setStatus(next);
-    } catch {
-      /* ignore */
-    }
-  }, [config.asr_provider, config.asr_model_id]);
-
-  useEffect(() => {
-    void refreshStatus();
-  }, [refreshStatus]);
-
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    void listen<ModelDownloadProgress>("model-download-progress", (event) => {
-      setProgress(event.payload);
-    }).then((fn) => {
-      unlisten = fn;
-    });
-    return () => {
-      unlisten?.();
-    };
-  }, []);
-
-  const startDownload = async () => {
-    const modelId = config.asr_model_id || "Qwen3-ASR-0.6B";
-    setDownloading(true);
-    setProgress(null);
-    try {
-      const path = await invoke<string>("download_qwen_asr_model", {
-        modelId,
-        downloadAligner: false,
-      });
-      updateConfig("asr_model_dir", path);
-      updateConfig("asr_model_id", modelId);
-      toast.success("模型已下载，正在加载…");
-      await refreshStatus();
-      await loadModel(path);
-    } catch (error) {
-      toast.danger(
-        `下载失败: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  // Missing weights/tokenizer, or empty dir before status arrives.
+  // Model not installed — gated state for draft card (not a wall).
   const needsInstall =
     config.asr_provider === "qwen" &&
-    (status?.needs_download ?? !config.asr_model_dir?.trim()) &&
+    !config.asr_model_dir?.trim() &&
     !modelLoaded;
 
   const activeAgents = agentJobs.filter(
@@ -121,10 +56,10 @@ export function OverviewPage() {
 
   const dispatchHint =
     activeAgents > 0
-      ? `${activeAgents} 运行中`
+      ? t("home.runningCount", { n: activeAgents })
       : agentJobs.length > 0
-        ? `${agentJobs.length} 任务`
-        : "Claude / Codex 都行";
+        ? t("home.jobCount", { n: agentJobs.length })
+        : t("home.dispatchDefault");
 
   const draftKey = config.hotkey_transcribe.label;
   const translateKey = config.hotkey_translate.label;
@@ -132,45 +67,37 @@ export function OverviewPage() {
 
   return (
     <PageShell className="page-fill mx-0 max-w-[1080px] gap-0 pb-0">
-      <span className="home-eyebrow">声音留在本机 · Mac</span>
-      <h1 className="home-headline mt-3.5">开口有结果</h1>
-
-      {needsInstall ? (
-        <SectionCard className="panel-static mt-8 flex flex-col gap-4">
-          <div>
-            <div className="type-section">先下载才能开口（约 2GB）</div>
-            <p className="mt-1 type-meta">只需下载一次 · 装好后即可出稿</p>
-          </div>
-          {downloading && progress ? (
-            <div className="type-meta">{progressLabel(progress)}</div>
-          ) : null}
-          <Button
-            fullWidth
-            variant="primary"
-            className="btn-press"
-            isPending={downloading}
-            onPress={() => void startDownload()}
-          >
-            <Download size={14} />
-            {downloading ? "下载中…" : "开始下载"}
-          </Button>
-        </SectionCard>
-      ) : null}
+      <span className="home-eyebrow">{t("home.eyebrow")}</span>
+      <h1 className="home-headline mt-3.5">{t("home.headline")}</h1>
 
       <div className="mt-9 grid gap-3.5 sm:grid-cols-2">
         <motion.div
-          initial={reduceMotion ? false : { opacity: 0.92, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={springUI}
+          initial={reduceMotion ? false : { opacity: 0.92, y: 14, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={springBounce}
         >
-          <NavLink to="/draft" className="dest-card dest-card-primary h-full">
+          <NavLink
+            to={needsInstall ? "#" : "/draft"}
+            className={`dest-card dest-card-primary card-press h-full${needsInstall ? " pointer-events-auto" : ""}`}
+            style={needsInstall ? { opacity: 0.7 } : undefined}
+            onClick={needsInstall ? (e) => e.preventDefault() : undefined}
+          >
             <div>
-              <div className="dest-label dest-label-primary">出稿</div>
+              <div className="dest-label dest-label-primary">{t("home.draftCard")}</div>
               <div className="dest-hint">
-                开会 · 口述 · 拖文件
+                {t("home.draftHintA")}
                 <br />
-                说完有稿
+                {t("home.draftHintB")}
               </div>
+              {needsInstall ? (
+                <NavLink
+                  to="/settings?tab=asr"
+                  className="mt-2 inline-block font-mono text-xs text-muted transition-colors hover:text-foreground"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {t("home.modelNotReady")}
+                </NavLink>
+              ) : null}
             </div>
             <div className="dest-foot">
               <span className="kbd-key">{draftKey}</span>
@@ -179,17 +106,17 @@ export function OverviewPage() {
         </motion.div>
 
         <motion.div
-          initial={reduceMotion ? false : { opacity: 0.92, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ ...springUI, delay: 0.07 }}
+          initial={reduceMotion ? false : { opacity: 0.92, y: 14, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ ...springBounce, delay: 0.07 }}
         >
-          <NavLink to="/dispatch" className="dest-card h-full">
+          <NavLink to="/dispatch" className="dest-card card-press h-full">
             <div>
-              <div className="dest-label">派活</div>
+              <div className="dest-label">{t("home.dispatchCard")}</div>
               <div className="dest-hint">
                 {dispatchHint}
                 <br />
-                开口派活
+                {t("home.dispatchHintB")}
               </div>
             </div>
             <div className="dest-foot">
@@ -201,8 +128,8 @@ export function OverviewPage() {
 
       <div className="home-cloud">
         <div className="home-cloud-head">
-          <span className="home-cloud-label">词云</span>
-          <div className="tswitch" role="tablist" aria-label="词云来源">
+          <span className="home-cloud-label">{t("home.wordCloud")}</span>
+          <div className="tswitch" role="tablist" aria-label={t("home.cloudSourceAria")}>
             {CLOUD_SOURCES.map((s, i) => (
               <Fragment key={s.id}>
                 {i > 0 ? (
@@ -214,16 +141,23 @@ export function OverviewPage() {
                   type="button"
                   role="tab"
                   aria-selected={cloudSource === s.id}
-                  className={`o${cloudSource === s.id ? " is-active" : ""}`}
+                  className={`chip-press o${cloudSource === s.id ? " is-active" : ""}`}
                   onClick={() => setSource(s.id)}
                 >
-                  {s.label}
+                  {t(`home.cloudSource.${s.id}`)}
                 </button>
               </Fragment>
             ))}
           </div>
         </div>
-        <WordCloud words={cloudWords} />
+        <motion.div
+          key={cloudSource}
+          initial={reduceMotion ? false : { opacity: 0.96 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.14, ease: easeOut }}
+        >
+          <WordCloud words={cloudWords} />
+        </motion.div>
       </div>
 
       <motion.div
@@ -237,15 +171,15 @@ export function OverviewPage() {
         }}
       >
         <span>
-          <b>{draftKey}</b> 出稿
+          <b>{draftKey}</b> {t("home.draftCard")}
         </span>
         <span>
-          <b>{translateKey}</b> 翻译
+          <b>{translateKey}</b> {t("home.legendTranslate")}
         </span>
         <span>
-          <b>{agentKey}</b> 派活
+          <b>{agentKey}</b> {t("home.dispatchCard")}
         </span>
-        <span>声音留在本机</span>
+        <span>{t("home.privacyNote")}</span>
       </motion.div>
     </PageShell>
   );

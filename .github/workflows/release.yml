@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # productName is ASCII "Yanluo" (WiX/filenames). UI title / CFBundleDisplayName stay 言落.
+          # productName is ASCII "QuietType" (WiX/filenames). UI title / CFBundleDisplayName are QuietType; 言落 stays for zh locale copy.
           - platform: macos-aarch64
             os: macos-14
             args: --features qwen-local --bundles app,dmg
@@ -152,7 +152,7 @@ jobs:
                       continue
               elif capture:
                   out.append(line)
-          body = "\n".join(out).strip() or f"言落 v{version}"
+          body = "\n".join(out).strip() or f"QuietType v{version}"
           Path("release-notes.md").write_text(body + "\n", encoding="utf-8")
           print(body)
           PY
@@ -172,7 +172,7 @@ jobs:
           LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH }}
         with:
           tagName: ${{ steps.ver.outputs.tag }}
-          releaseName: 言落 ${{ steps.ver.outputs.tag }}
+          releaseName: QuietType ${{ steps.ver.outputs.tag }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false

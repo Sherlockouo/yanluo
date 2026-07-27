@@ -7,6 +7,7 @@ import { PageHeader, PageShell, Reveal } from "@/components/shared/page-shell";
 import { SemanticPair } from "@/components/ui/refine-diff";
 import { LlmProviderSelect } from "@/components/ui/llm-provider-select";
 import { translateLanguageOptions, translateTargetLabel } from "@/lib/constants";
+import { useT } from "@/lib/i18n";
 import { useApp } from "@/app-context";
 
 /** 翻译 Prompt 编辑已收敛到 设置 → 润色 → 配置。 */
@@ -22,6 +23,7 @@ export function TranslatePage({
   active?: boolean;
   actionSlot?: HTMLElement | null;
 } = {}) {
+  const t = useT();
   const { config, updateConfig, saveConfig, history } = useApp();
 
   const entries = useMemo(
@@ -49,7 +51,7 @@ export function TranslatePage({
   const targetSelect = (
     <Select
       className="inline-flex w-auto"
-      aria-label="翻译到"
+      aria-label={t("translate.targetAria")}
       selectedKey={config.translate_target_language}
       onSelectionChange={(key) => {
         if (key == null) return;
@@ -94,7 +96,7 @@ export function TranslatePage({
   );
   const headerAction = (
     <Link to={PROMPT_SETTINGS_URL} className="dlink muted">
-      配置 ▾
+      {t("translate.configure")} ▾
     </Link>
   );
 
@@ -112,14 +114,14 @@ export function TranslatePage({
               {targetSelect}
               <LlmProviderSelect triggerCls="qsel-quiet" />
               <Link to={PROMPT_SETTINGS_URL} className="dlink muted">
-                配置 ▾
+                {t("translate.configure")} ▾
               </Link>
             </span>,
             actionSlot,
           )
         : null}
       {embedded ? null : (
-        <PageHeader title="翻译" status={header} action={headerAction} />
+        <PageHeader title={t("translate.title")} status={header} action={headerAction} />
       )}
 
       {entries.length === 0 ? (
@@ -127,9 +129,9 @@ export function TranslatePage({
           <span className="dropzone-ic">
             <Languages size={22} aria-hidden />
           </span>
-          <span className="dropzone-t">还没有翻译稿</span>
+          <span className="dropzone-t">{t("translate.emptyTitle")}</span>
           <span className="dropzone-fmt">
-            {config.hotkey_translate.label} 开口翻译
+            {t("translate.emptyHint", { lang: targetLabel })}
           </span>
         </div>
       ) : (
@@ -150,8 +152,8 @@ export function TranslatePage({
                 </div>
                 <div className="rec-pair">
                   <SemanticPair
-                    before={entry.raw_text || "（空）"}
-                    after={entry.text || "（空）"}
+                    before={entry.raw_text || t("translate.empty")}
+                    after={entry.text || t("translate.empty")}
                   />
                 </div>
               </article>

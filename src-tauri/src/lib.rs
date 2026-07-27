@@ -1,4 +1,4 @@
-//! 言落 (Yanluo) backend — Tauri application wiring.
+//! QuietType (言落) backend — Tauri application wiring.
 
 mod agent;
 mod agent_kit;
@@ -9,6 +9,7 @@ mod download;
 mod history;
 mod hotkey;
 mod hud;
+mod learn;
 mod menu;
 mod models;
 mod paste;
@@ -175,6 +176,11 @@ pub fn main() {
             update::check_for_update,
             update::download_and_install_update,
             update::open_update_download_dir,
+            commands::learn_from_edit,
+            commands::get_learn_knowledge,
+            commands::set_learn_pair_enabled,
+            commands::delete_learn_pair,
+            commands::get_learn_stats,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

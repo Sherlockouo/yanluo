@@ -11,10 +11,11 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Button, TextArea, TextField } from "@heroui/react";
 import {
   AtSign,
+  Check,
   ChevronUp,
   FileText,
   FolderOpen,
@@ -36,7 +37,9 @@ import { friendlyAgentError } from "@/lib/agent-errors";
 import { useSmoothedRms } from "@/hooks/useAudioBars";
 import { AudioBars } from "@/components/ui/audio-bars";
 import { cn } from "@/lib/cn";
-import { duration, easeOut, springBounce } from "@/lib/motion";
+import { easeOut, springBounce } from "@/lib/motion";
+import { useT } from "@/lib/i18n";
+import { lookupRustMsg } from "@/lib/i18n/rust-msg";
 
 const CAPSULE_W = 420;
 const CAPSULE_H = 56;
@@ -48,6 +51,9 @@ const AGENT_W = 520;
 const AGENT_BASE_H = 88;
 
 type Attachment = AgentPathInfo & { at: boolean };
+
+/** Right inset (px) so flowing text doesn't butt against timer/badge. */
+const FLOW_RIGHT_PAD = 10;
 
 /**
  * Water-slow flow: pin newest text to the right; older glyphs drift left via
@@ -110,9 +116,11 @@ function useFlowShift(
     const strip = stripRef.current;
     if (!vp || !strip) return;
 
-    const overflow = strip.scrollWidth > vp.clientWidth + 1;
+    // Reserve FLOW_RIGHT_PAD so newest text stays clear of the timer/badge
+    const usable = vp.clientWidth - FLOW_RIGHT_PAD;
+    const overflow = strip.scrollWidth > usable + 1;
     setOverflowing(overflow);
-    targetX.current = overflow ? vp.clientWidth - strip.scrollWidth : 0;
+    targetX.current = overflow ? usable - strip.scrollWidth : 0;
 
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduce) {
@@ -184,6 +192,7 @@ export function AsrHud() {
   const [pickerMode, setPickerMode] = useState<"" | "agent" | "cwd">("");
   const [profiles, setProfiles] = useState(defaultConfig.agent_profiles);
   const [profileId, setProfileId] = useState(defaultConfig.agent_profile_id);
+  const [refineFailed, setRefineFailed] = useState(false);
 
   const payloadRef = useRef(payload);
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -230,6 +239,7 @@ export function AsrHud() {
     setPickerMode("");
     setError(null);
     setBusy(false);
+    setRefineFailed(false);
     confirmingRef.current = false;
     dispatchingRef.current = false;
   }, []);
@@ -275,11 +285,13 @@ export function AsrHud() {
     void getCurrentWindow().setFocus().catch(() => {});
   }, [editing]);
 
+  const t = useT();
+
   const confirmTranscript = useCallback(async () => {
     if (confirmingRef.current) return;
     const text = editTextRef.current.trim();
     if (!text) {
-      setError("无内容");
+      setError(t("hud.noContent"));
       return;
     }
     confirmingRef.current = true;
@@ -373,7 +385,7 @@ export function AsrHud() {
     const voice = text.trim();
     const attachPaths = attachmentsRef.current.map((a) => a.path);
     if (!voice && attachPaths.length === 0) {
-      setError("无内容");
+      setError(t("hud.noContent"));
       return;
     }
     const workDir = cwdRef.current.trim();
@@ -383,7 +395,7 @@ export function AsrHud() {
     try {
       await invoke("dispatch_agent", {
         agent: agentRef.current,
-        prompt: voice || "（见附件）",
+        prompt: voice || t("hud.seeAttachments"),
         cwd: workDir,
         attachments: attachPaths,
       });
@@ -422,7 +434,7 @@ export function AsrHud() {
     try {
       const paths = await invoke<string[]>("read_clipboard_attachments");
       if (!paths.length) {
-        setError("剪贴板无文件/图片");
+        setError(t("hud.clipboardEmpty"));
         return;
       }
       setError(null);
@@ -636,14 +648,20 @@ export function AsrHud() {
       }),
     );
     add(
-      listen<{ text?: string; asr_text?: string }>("hud-edit-ready", (event) => {
+      listen<{ text?: string; asr_text?: string; refine_failed?: boolean }>("hud-edit-ready", (event) => {
         const t = event.payload?.text ?? event.payload?.asr_text ?? "";
         setEditText(t);
+        setRefineFailed(event.payload?.refine_failed ?? false);
         setError(null);
         requestAnimationFrame(() => {
           editRef.current?.focus();
           editRef.current?.select();
         });
+      }),
+    );
+    add(
+      listen<{ error: string }>("hud-confirm-error", (event) => {
+        setError(event.payload.error);
       }),
     );
     add(
@@ -825,6 +843,8 @@ export function AsrHud() {
     return () => window.removeEventListener("keydown", onKey);
   }, [isAgent, pasteClipboard, toggleMenu]);
 
+  const reducedMotion = useReducedMotion();
+
   const show =
     payload.visible &&
     payload.state !== "idle" &&
@@ -859,23 +879,16 @@ export function AsrHud() {
               "flex h-full w-full items-center justify-center",
               isAgent && "px-0",
             )}
-            initial={{ opacity: 0, scale: 0.35 }}
+            initial={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.35 }}
             animate={{
               opacity: 1,
               scale: 1,
-              transition: springBounce,
+              transition: reducedMotion ? { duration: 0.14 } : springBounce,
             }}
-            exit={{
-              // Scale-only — native NSWindow alpha fades opacity in lockstep
-              // (Rust fade_out_floating_hud @ duration.slow). Avoid double-fade.
-              opacity: 1,
-              scale: 0.35,
-              transition: {
-                type: "tween",
-                duration: duration.slow,
-                ease: easeOut,
-              },
-            }}
+            exit={reducedMotion
+              ? { opacity: 0, transition: { duration: 0.14 } }
+              : { opacity: 0, scale: 0.7, y: 8, transition: { type: "tween", duration: 0.15, ease: easeOut } }
+            }
           >
           {isAgent ? (
             <AgentCapsule
@@ -911,9 +924,12 @@ export function AsrHud() {
               editing={confirmEditing}
               busy={busy}
               error={error}
+              refineFailed={refineFailed}
               editRef={editRef}
               onEditChange={setEditText}
               onEditKey={onEditKey}
+              onConfirm={confirmTranscript}
+              onCancel={cancelTranscript}
             />
           )}
           </motion.div>
@@ -968,9 +984,12 @@ function AgentCapsule({
   onSelectAttach: (a: Attachment) => void;
   onRemoveAttach: (path: string) => void;
 }) {
+  const t = useT();
   const recording = payload.state === "recording";
   const processing = payload.state === "processing";
   const smoothed = useSmoothedRms(meter.rms, recording);
+  const agentVpRef = useRef<HTMLDivElement>(null);
+  const agentStripRef = useRef<HTMLSpanElement>(null);
 
   const committed = (payload.committed ?? "").trim();
   const active = (payload.active ?? "").trim();
@@ -979,19 +998,27 @@ function AgentCapsule({
       ? `${committed}${committed && active ? " " : ""}${active}`
       : payload.text;
 
+  const flowKey = live.trim();
+  const overflowing = useFlowShift(
+    agentVpRef,
+    agentStripRef,
+    flowKey,
+    !editing,
+  );
+
   const hint =
-    error ??
+    error ? lookupRustMsg(error, t) :
     (busy
-      ? "派发中…"
+      ? t("hud.dispatching")
       : recording
-        ? "说完再按 Fn+Space"
+        ? t("hud.speakThenFn")
         : processing
-          ? "识别中…"
-          : "编辑后 Enter 派发");
+          ? t("hud.transcribing")
+          : t("hud.editThenEnter"));
 
   return (
-    <div className="hud-agent" data-no-drag>
-      <div className="hud-agent-rail">
+    <div className="hud-agent">
+      <div className="hud-agent-rail hud-drag-handle">
         <div className="hud-agent-pills">
           <Button
             variant="ghost"
@@ -1002,7 +1029,7 @@ function AgentCapsule({
             )}
             aria-haspopup="listbox"
             aria-expanded={pickerMode === "agent"}
-            aria-label="选择 Agent · ⌘."
+            aria-label={t("hud.selectAgent")}
             onPress={onToggleAgent}
           >
             <span>{agentLabel}</span>
@@ -1017,11 +1044,11 @@ function AgentCapsule({
             )}
             aria-haspopup="listbox"
             aria-expanded={pickerMode === "cwd"}
-            aria-label={cwd ? `${cwd} · ⌘/` : "工作目录 · ⌘/"}
+            aria-label={cwd ? `${cwd} · ⌘/` : t("hud.workDirHint")}
             onPress={onToggleCwd}
           >
             <FolderOpen size={11} strokeWidth={2.2} className="shrink-0 opacity-75" />
-            <span className="truncate">{cwd ? cwdLabel(cwd) : "工作目录"}</span>
+            <span className="truncate">{cwd ? cwdLabel(cwd) : t("hud.workDir")}</span>
             <ChevronUp size={10} strokeWidth={2.4} className="opacity-70" />
           </Button>
         </div>
@@ -1029,7 +1056,7 @@ function AgentCapsule({
 
       <div className="hud-agent-main">
         {processing ? (
-          <span className="hud-spinner" aria-label="处理中" />
+          <span className="hud-spinner" aria-label={t("hud.processing")} />
         ) : recording ? (
           <AudioBars rms={smoothed} bands={meter.bands} active />
         ) : null}
@@ -1074,7 +1101,7 @@ function AgentCapsule({
                 <Button
                   isIconOnly
                   variant="ghost"
-                  aria-label="移除"
+                  aria-label={t("hud.remove")}
                   className="hud-agent-chip-x h-auto min-h-0 w-auto min-w-0 p-0 shadow-none"
                   onPress={() => onRemoveAttach(a.path)}
                 >
@@ -1102,8 +1129,14 @@ function AgentCapsule({
             />
           </TextField>
         ) : (
-          <div className="hud-text-viewport min-w-0 flex-1">
-            <span className="hud-text-scroll">
+          <div
+            ref={agentVpRef}
+            className={cn(
+              "hud-text-viewport min-w-0 flex-1",
+              overflowing && "hud-text-overflow",
+            )}
+          >
+            <span ref={agentStripRef} className="hud-text-scroll">
               {live.trim() || (
                 <span className="hud-agent-hint">{hint}</span>
               )}
@@ -1117,7 +1150,7 @@ function AgentCapsule({
             variant="ghost"
             size="sm"
             className="hud-agent-icon-btn"
-            aria-label="@ 目录"
+            aria-label={t("hud.atDir")}
             onPress={onAddDir}
           >
             <AtSign size={15} strokeWidth={2.25} />
@@ -1127,7 +1160,7 @@ function AgentCapsule({
             variant="ghost"
             size="sm"
             className="hud-agent-icon-btn"
-            aria-label="附件 · ⌘V 粘贴"
+            aria-label={t("hud.attachHint")}
             onPress={onAddFile}
           >
             <Paperclip size={15} strokeWidth={2.25} />
@@ -1138,7 +1171,7 @@ function AgentCapsule({
               variant="ghost"
               size="sm"
               className="hud-agent-icon-btn is-danger"
-              aria-label="停止"
+              aria-label={t("hud.stop")}
               onPress={onStop}
             >
               <Square size={12} fill="currentColor" />
@@ -1148,7 +1181,7 @@ function AgentCapsule({
             <Button
               isIconOnly
               className="hud-agent-send"
-              aria-label="派发 Enter"
+              aria-label={t("hud.dispatchEnter")}
               isDisabled={busy}
               onPress={onSend}
             >
@@ -1161,6 +1194,13 @@ function AgentCapsule({
   );
 }
 
+/** Format seconds as M:SS */
+function formatTimer(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 function FloatingCapsule({
   payload,
   meter,
@@ -1168,9 +1208,12 @@ function FloatingCapsule({
   editing,
   busy,
   error,
+  refineFailed,
   editRef,
   onEditChange,
   onEditKey,
+  onConfirm,
+  onCancel,
 }: {
   payload: FloatingPayload;
   meter: { rms: number; bands: number[] };
@@ -1178,10 +1221,14 @@ function FloatingCapsule({
   editing: boolean;
   busy: boolean;
   error: string | null;
+  refineFailed: boolean;
   editRef: RefObject<HTMLTextAreaElement | null>;
   onEditChange: (v: string) => void;
   onEditKey: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
 }) {
+  const t = useT();
   const refining = payload.state === "refining";
   const processing = payload.state === "processing";
   const recording = payload.state === "recording";
@@ -1189,13 +1236,114 @@ function FloatingCapsule({
   const translating = payload.intention === "translate";
   const smoothed = useSmoothedRms(meter.rms, recording);
   const lastTextRef = useRef("");
+  const prevRecordingRef = useRef(false);
   const textViewportRef = useRef<HTMLDivElement>(null);
   const textStripRef = useRef<HTMLSpanElement>(null);
   const sizedRef = useRef(false);
 
+  // B1: "正在听" hint after 200ms of recording with no text
+  const [listenHint, setListenHint] = useState(false);
+  const listenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // B4: Recording duration timer
+  const [recSec, setRecSec] = useState(0);
+  const recIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recStartRef = useRef(0);
+  // B5: Error flash overlay
+  const [errorFlash, setErrorFlash] = useState(false);
+  // B6: Confirm success flash
+  const [confirmSuccess, setConfirmSuccess] = useState(false);
+
+  // P1-13: 80s warning shake + 90s auto-submit hint
+  const [warnShake, setWarnShake] = useState(false);
+  const [timerBlink, setTimerBlink] = useState(false);
+  const [autoSubmitHint, setAutoSubmitHint] = useState(false);
+
+  useEffect(() => {
+    if (recSec === 80) {
+      setWarnShake(true);
+      setTimerBlink(true);
+      const t1 = setTimeout(() => setWarnShake(false), 150);
+      const t2 = setTimeout(() => setTimerBlink(false), 800);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
+    }
+  }, [recSec]);
+
+  useEffect(() => {
+    if (recSec >= 90 && recording) {
+      setAutoSubmitHint(true);
+    } else {
+      setAutoSubmitHint(false);
+    }
+  }, [recSec, recording]);
+
+  // B1: listen hint timer
+  useEffect(() => {
+    if (recording && !payload.text.trim()) {
+      listenTimerRef.current = setTimeout(() => setListenHint(true), 200);
+    } else {
+      if (listenTimerRef.current) clearTimeout(listenTimerRef.current);
+      setListenHint(false);
+    }
+    return () => {
+      if (listenTimerRef.current) clearTimeout(listenTimerRef.current);
+    };
+  }, [recording, payload.text]);
+
+  // B4: recording timer
+  useEffect(() => {
+    if (recording) {
+      recStartRef.current = Date.now();
+      setRecSec(0);
+      recIntervalRef.current = setInterval(() => {
+        setRecSec(Math.floor((Date.now() - recStartRef.current) / 1000));
+      }, 1000);
+    } else {
+      if (recIntervalRef.current) clearInterval(recIntervalRef.current);
+      recIntervalRef.current = null;
+      setRecSec(0);
+    }
+    return () => {
+      if (recIntervalRef.current) clearInterval(recIntervalRef.current);
+    };
+  }, [recording]);
+
+  // B5: Error flash + auto-clear
+  useEffect(() => {
+    if (!error) {
+      setErrorFlash(false);
+      return;
+    }
+    setErrorFlash(true);
+    const flashTimer = setTimeout(() => setErrorFlash(false), 200);
+    return () => clearTimeout(flashTimer);
+  }, [error]);
+
+  // B6: detect confirm success (editing→idle/processing means confirmed)
+  const prevStateRef = useRef(payload.state);
+  useEffect(() => {
+    if (prevStateRef.current === "editing" && payload.state !== "editing") {
+      setConfirmSuccess(true);
+      const t = setTimeout(() => setConfirmSuccess(false), 150);
+      return () => clearTimeout(t);
+    }
+    prevStateRef.current = payload.state;
+  }, [payload.state]);
+
+  // Clear stale text when a new recording session starts (false→true edge)
+  if (recording && !prevRecordingRef.current) {
+    lastTextRef.current = "";
+  }
+  prevRecordingRef.current = recording;
+
+  // B2: Preserve last text across recording→processing (don't flash blank).
+  // Only clear when a fresh recording session starts OR on language switch.
   if (payload.text.trim()) {
     lastTextRef.current = payload.text;
-  } else if (recording || switching) {
+  } else if (switching) {
+    lastTextRef.current = "";
+  }
+  // Clear only when recording starts fresh (no carry-over from previous session)
+  if (recording && !processing && !refining && !payload.text.trim() && !lastTextRef.current) {
     lastTextRef.current = "";
   }
 
@@ -1238,7 +1386,15 @@ function FloatingCapsule({
     }).catch(() => {});
   }, [editing]);
 
-  const hint = error ?? (busy ? "确认中…" : "");
+  // B3: Phase label for processing/refining
+  const phaseLabel = refining
+    ? t("hud.polishing")
+    : processing && !justRefined
+      ? t("hud.transcribing")
+      : translating
+        ? t("hud.translating")
+        : "";
+
   const capsuleH = editing ? CAPSULE_EDIT_H : CAPSULE_H;
 
   return (
@@ -1249,19 +1405,30 @@ function FloatingCapsule({
         loading && "hud-capsule-refining",
         switching && "hud-capsule-switching",
         justRefined && "hud-capsule-refined",
+        confirmSuccess && "hud-capsule-confirm-success",
+        error && "hud-capsule-error",
+        errorFlash && "hud-capsule-error-flash",
+        warnShake && "hud-capsule-warn-shake",
       )}
       style={{ width: "100%", height: capsuleH }}
     >
+      {/* B5: Danger flash overlay (opacity-only, no box-shadow per DESIGN.md) */}
+      {errorFlash ? (
+        <span className="hud-error-flash-overlay" aria-hidden />
+      ) : null}
       <div className="hud-inner">
-        {loading ? (
+        {/* B2: processing with preserved text → spinner + dimmed text */}
+        {justRefined ? (
+          <span className="hud-spinner" aria-label={t("hud.transcribing")} />
+        ) : loading ? (
           <span
             className="hud-spinner"
             aria-label={
-              switching ? "切换目标语言" : translating ? "翻译中" : "处理中"
+              switching ? t("hud.switchingTarget") : phaseLabel || t("hud.processing")
             }
           />
         ) : busy ? (
-          <span className="hud-spinner" aria-label="确认中" />
+          <span className="hud-spinner" aria-label={t("hud.confirming")} />
         ) : recording ? (
             <AudioBars
               rms={smoothed}
@@ -1282,19 +1449,42 @@ function FloatingCapsule({
           :
         </span>
         {editing ? (
-          <textarea
-            ref={editRef}
-            rows={3}
-            aria-label={hint || "确认或修改后按 Enter"}
-            placeholder={hint || "确认或修改后按 Enter"}
-            value={editText}
-            disabled={busy}
-            className="hud-agent-input hud-edit-input min-w-0 flex-1"
-            data-no-drag
-            onChange={(e) => onEditChange(e.target.value)}
-            onKeyDown={onEditKey}
-            onPointerDown={(e) => e.stopPropagation()}
-          />
+          <>
+            <textarea
+              ref={editRef}
+              rows={3}
+              aria-label={t("hud.confirmHint")}
+              placeholder={t("hud.confirmHint")}
+              value={editText}
+              disabled={busy}
+              className="hud-agent-input hud-edit-input min-w-0 flex-1"
+              data-no-drag
+              onChange={(e) => onEditChange(e.target.value)}
+              onKeyDown={onEditKey}
+              onPointerDown={(e) => e.stopPropagation()}
+            />
+            <div className="hud-edit-actions">
+              {refineFailed && <span className="hud-refine-failed-hint">{t("hud.raw")}</span>}
+              <button
+                className="hud-edit-btn hud-edit-btn-cancel"
+                aria-label={t("hud.cancelEsc")}
+                onClick={() => void onCancel()}
+                disabled={busy}
+                type="button"
+              >
+                <X size={14} strokeWidth={2.4} />
+              </button>
+              <button
+                className="hud-edit-btn hud-edit-btn-confirm"
+                aria-label={t("hud.confirmEnter")}
+                onClick={() => void onConfirm()}
+                disabled={busy}
+                type="button"
+              >
+                <Check size={14} strokeWidth={2.8} />
+              </button>
+            </div>
+          </>
         ) : (
           <div
             ref={textViewportRef}
@@ -1304,11 +1494,15 @@ function FloatingCapsule({
               loading && "hud-text-refining",
               switching && "hud-text-switching",
               justRefined && "hud-text-refined",
+              error && "hud-text-error",
             )}
           >
             <span ref={textStripRef} className="hud-text-scroll">
-              {switching ? (
-                "切换中"
+              {/* B5: Error text in danger color */}
+              {error ? (
+                <span className="hud-error-text">{error}</span>
+              ) : switching ? (
+                t("hud.switching")
               ) : hasSplit && recording && !loading ? (
                 <>
                   {committed ? (
@@ -1321,7 +1515,11 @@ function FloatingCapsule({
                 </>
               ) : (
                 displayText ||
-                (loading ? (translating ? "翻译中" : "处理中") : "")
+                (loading ? phaseLabel : "") ||
+                /* B1: listening hint after 200ms with no text */
+                (recording && listenHint ? (
+                  <span className="hud-listen-hint">{t("hud.listening")}</span>
+                ) : null)
               )}
               {(loading || switching) && (displayText || switching) ? (
                 <span className="hud-loading-dots" aria-hidden>
@@ -1333,6 +1531,21 @@ function FloatingCapsule({
             </span>
           </div>
         )}
+        {/* B4: Recording duration timer */}
+        {recording && !editing ? (
+          <span
+            className={cn(
+              "hud-rec-timer",
+              recSec >= 80 && "hud-rec-timer-danger",
+              timerBlink && "hud-rec-timer-blink",
+            )}
+            aria-label={t("hud.recording", { time: formatTimer(recSec) })}
+          >
+            {formatTimer(recSec)}
+          </span>
+        ) : null}
+        {/* P1-13: Auto-submit hint at 90s */}
+        {autoSubmitHint && <span className="hud-auto-submit-hint">{t("hud.autoSubmit")}</span>}
       </div>
     </div>
   );

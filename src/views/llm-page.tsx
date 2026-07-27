@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Button,
   Chip,
+  Input,
   Label,
   Switch,
   TextArea,
@@ -10,7 +11,15 @@ import {
   toast,
 } from "@heroui/react";
 import { Link } from "react-router-dom";
-import { BookPlus, RotateCcw, Save, Sparkles, X } from "lucide-react";
+import {
+  BookOpen,
+  MoreHorizontal,
+  RotateCcw,
+  Save,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import {
   PageHeader,
   PageShell,
@@ -19,178 +28,202 @@ import {
 } from "@/components/shared/page-shell";
 import { hasRefineDiff, RefineDiff } from "@/components/ui/refine-diff";
 import { LlmProviderSelect } from "@/components/ui/llm-provider-select";
-import {
-  QualityRateBar,
-  type QualityRating,
-} from "@/components/ui/quality-rate-bar";
 import { useApp } from "@/app-context";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 import { DEFAULT_LLM_REFINE_PROMPT } from "@/lib/constants";
+import { springUI } from "@/lib/motion";
 import type { HistoryEntry } from "@/types";
-import { acceptVocabLine } from "@/lib/learn-from-refine";
-import {
-  collectLearnTriples,
-  harvestFromTriples,
-  learnGold,
-  mergeFewShotIntoPrompt,
-  modelAllowsFewshot,
-  toLearnTriple,
-} from "@/lib/learn-cases";
+import { learnGold } from "@/lib/learn-cases";
 
-function ratingOf(entry: Pick<HistoryEntry, "quality_rating">): QualityRating | null {
-  const r = entry.quality_rating;
-  if (r === "bad" || r === "ok" || r === "good") return r;
-  return null;
-}
+// ─── Types ──────────────────────────────────────────────────────────────────
 
-function learnOpen(entry: HistoryEntry): boolean {
-  const s = entry.learn_status;
-  return s !== "applied" && s !== "skipped";
+type LearnPair = {
+  id: string;
+  wrong: string;
+  right: string;
+  source: string;
+  confidence: number;
+  occurrence_count: number;
+  hit_count: number;
+  enabled: boolean;
+  created_at: string;
+  last_seen_at: string;
+};
+
+type LearnStats = {
+  total_pairs: number;
+  week_hits: number;
+  top_pairs: Array<{ wrong: string; right: string; hit_count: number }>;
+};
+
+type LearnKnowledge = {
+  pairs: LearnPair[];
+  version: number;
+};
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function sourceBadge(
+  source: string,
+  t: (key: string, vars?: Record<string, string | number>) => string,
+): string {
+  switch (source) {
+    case "auto":
+      return t("learn.sourceAuto");
+    case "manual":
+      return t("learn.sourceManual");
+    case "ai":
+      return "AI";
+    default:
+      return source;
+  }
 }
 
 function showLearnEntry(e: HistoryEntry): boolean {
   if ((e.source ?? "fn") === "translate") return false;
   if (e.user_text?.trim()) return true;
-  return (
-    Boolean(e.refined) &&
-    hasRefineDiff(e.raw_text, learnGold(e))
-  );
+  return Boolean(e.refined) && hasRefineDiff(e.raw_text, learnGold(e));
 }
 
-/** LLM refine-learning loop. Used standalone or embedded in 设置 → 纠错学习. */
+// ─── Main export ────────────────────────────────────────────────────────────
+
+/** Automatic learning dashboard. Used standalone or embedded in 设置 → 纠错学习. */
 export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
+  const t = useT();
   const {
     config,
     updateConfig,
     saveConfig,
     testLlm,
     history,
-    rateHistory,
-    setHistoryUserText,
     distillLearnFromRatings,
-    applyLearnedTerms,
-    pendingLearn,
-    offerLearnFromEntries,
-    abortPendingLearn,
-    removePendingLearnTerm,
   } = useApp();
-  const [distilling, setDistilling] = useState(false);
-  const [editDrafts, setEditDrafts] = useState<Record<string, string>>({});
-  const [editingId, setEditingId] = useState<string | null>(null);
 
+  const reducedMotion = useReducedMotion();
+
+  // ─── LLM config state
   const llmReady = Boolean(
     config.llm_api_base_url?.trim() && config.llm_model?.trim(),
   );
   const [configOpen, setConfigOpen] = useState(!llmReady);
 
+  // ─── Knowledge base state
+  const [knowledge, setKnowledge] = useState<LearnKnowledge | null>(null);
+  const [stats, setStats] = useState<LearnStats | null>(null);
+  const [query, setQuery] = useState("");
+  const [distilling, setDistilling] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+
+  // ─── Delete confirm state (two-step inline)
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const confirmTimer = useRef<number | null>(null);
+
+  // ─── Fetch knowledge + stats
+  const fetchKnowledge = useCallback(async () => {
+    try {
+      const data = await invoke<LearnKnowledge>("get_learn_knowledge");
+      setKnowledge(data);
+    } catch {
+      // backend not yet available — leave null
+    }
+  }, []);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const data = await invoke<LearnStats>("get_learn_stats");
+      setStats(data);
+    } catch {
+      // backend not yet available
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchKnowledge();
+    void fetchStats();
+  }, [fetchKnowledge, fetchStats]);
+
+  // ─── Filtered pairs
+  const filteredPairs = useMemo(() => {
+    if (!knowledge) return [];
+    const q = query.trim().toLowerCase();
+    if (!q) return knowledge.pairs;
+    return knowledge.pairs.filter(
+      (p) =>
+        p.wrong.toLowerCase().includes(q) ||
+        p.right.toLowerCase().includes(q),
+    );
+  }, [knowledge, query]);
+
+  // ─── Learning activity entries (from history)
   const learnEntries = useMemo(
-    () => history.filter(showLearnEntry).slice(0, 40),
+    () => history.filter(showLearnEntry).slice(0, 30),
     [history],
   );
 
-  const triples = useMemo(() => collectLearnTriples(history), [history]);
-  const userTripleCount = useMemo(
-    () => triples.filter((t) => t.hasUser).length,
-    [triples],
-  );
-
-  const ratingStats = useMemo(() => {
-    let bad = 0;
-    let applied = 0;
-    let unlabeled = 0;
-    for (const e of learnEntries) {
-      const r = ratingOf(e);
-      if (r == null) unlabeled += 1;
-      if (r === "bad") bad += 1;
-      if (e.learn_status === "applied") applied += 1;
-    }
-    return { bad, applied, unlabeled };
-  }, [learnEntries]);
-
-  const badOpenEntries = useMemo(
-    () =>
-      learnEntries.filter(
-        (e) =>
-          learnOpen(e) &&
-          (ratingOf(e) === "bad" || Boolean(e.user_text?.trim())),
-      ),
-    [learnEntries],
-  );
-
-  const harvestedFromBad = useMemo(
-    () => harvestFromTriples(badOpenEntries, config.vocabulary),
-    [badOpenEntries, config.vocabulary],
-  );
-
-  const refineValue = config.llm_refine_prompt || DEFAULT_LLM_REFINE_PROMPT;
-
-  const vocabSet = useMemo(
-    () =>
-      new Set(config.vocabulary.map((t) => t.trim().toLocaleLowerCase())),
-    [config.vocabulary],
-  );
-
-  const confirmPending = async () => {
-    if (!pendingLearn?.terms.length) return;
-    const terms = pendingLearn.terms
-      .map((c) => c.term.trim())
-      .filter((t) => t && !vocabSet.has(t.toLocaleLowerCase()));
-    if (!terms.length) {
-      toast("没有新词条可加");
-      await abortPendingLearn();
-      return;
-    }
+  // ─── Actions
+  const togglePair = async (id: string, enabled: boolean) => {
     try {
-      await applyLearnedTerms(pendingLearn.sourceIds, terms);
-      toast.success(`已加入词库 ${terms.length} 条，下次 ASR/纠错生效`);
+      await invoke("set_learn_pair_enabled", { id, enabled });
+      setKnowledge((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          pairs: prev.pairs.map((p) =>
+            p.id === id ? { ...p, enabled } : p,
+          ),
+        };
+      });
     } catch (e) {
       toast.danger(String(e));
     }
   };
 
-  const runLocalHarvest = async () => {
-    if (!badOpenEntries.length) {
-      toast("先标差或填写用户修正");
+  const deletePair = async (id: string) => {
+    // Two-step confirm
+    if (confirmingDelete !== id) {
+      // First press — enter confirm state
+      setConfirmingDelete(id);
+      if (confirmTimer.current) window.clearTimeout(confirmTimer.current);
+      confirmTimer.current = window.setTimeout(() => {
+        setConfirmingDelete(null);
+      }, 3000);
       return;
     }
-    if (!harvestedFromBad.length) {
-      toast("暂无可提炼词条（或已在词库）");
-      return;
+    // Second press — do delete
+    if (confirmTimer.current) {
+      window.clearTimeout(confirmTimer.current);
+      confirmTimer.current = null;
     }
-    const n = await offerLearnFromEntries(badOpenEntries, harvestedFromBad);
-    toast.success(`从 case 提炼 ${n} 条，确认后写入词库`);
+    setConfirmingDelete(null);
+    try {
+      await invoke("delete_learn_pair", { id });
+      setKnowledge((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          pairs: prev.pairs.filter((p) => p.id !== id),
+        };
+      });
+      void fetchStats();
+      toast.success(t("learn.deleted"));
+    } catch (e) {
+      toast.danger(String(e));
+    }
   };
 
   const runAiDistill = async () => {
-    // Distill now mines two things: correction pairs (needs bad/user cases) AND
-    // frequent user hotwords (works from plain history). Only block when there's
-    // no history at all.
-    if (!badOpenEntries.length && !history.length) {
-      toast("还没有记录可提炼：先说几段试试");
+    if (!history.length) {
+      toast(t("learn.nothingToDistill"));
       return;
     }
     setDistilling(true);
     try {
-      const result = await distillLearnFromRatings();
-      const cands = result.terms
-        .map(acceptVocabLine)
-        .filter((c): c is NonNullable<typeof c> => !!c)
-        .filter((c) => !vocabSet.has(c.term.toLocaleLowerCase()));
-      if (!cands.length) {
-        toast("未提炼出新词条（常用词需至少出现 2 次）");
-        return;
-      }
-      const sourceIds = result.source_ids.length
-        ? result.source_ids
-        : badOpenEntries.map((e) => e.id);
-      const entries = sourceIds
-        .map((id) => history.find((e) => e.id === id) ?? badOpenEntries.find((e) => e.id === id))
-        .filter((e): e is HistoryEntry => !!e);
-      await offerLearnFromEntries(
-        entries.length ? entries : badOpenEntries,
-        cands,
-      );
-      toast.success(`AI 提炼 ${cands.length} 条，确认后写入词库`);
+      await distillLearnFromRatings();
+      toast.success(t("learn.distillDone"));
+      void fetchKnowledge();
+      void fetchStats();
     } catch (e) {
       toast.danger(String(e));
     } finally {
@@ -198,73 +231,67 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
     }
   };
 
-  const writeFewShot = async () => {
-    if (!modelAllowsFewshot(config.llm_model)) {
-      toast(`当前模型（${config.llm_model.trim()}）较弱，注入 few-shot 会拖累纠错效果，已跳过`);
-      return;
-    }
-    const forShot = collectLearnTriples(history, { requireUser: false, max: 12 });
-    const preferred = [
-      ...forShot.filter((t) => t.hasUser),
-      ...forShot.filter((t) => !t.hasUser),
-    ];
-    if (!preferred.length) {
-      toast("没有可用 case：请在记录里写「用户修正」或标差");
-      return;
-    }
-    const next = mergeFewShotIntoPrompt(
-      config.llm_refine_prompt.trim()
-        ? config.llm_refine_prompt
-        : DEFAULT_LLM_REFINE_PROMPT,
-      preferred,
-    );
-    updateConfig("llm_refine_prompt", next);
-    await saveConfig({ ...config, llm_refine_prompt: next });
-    toast.success(`已写入 ${Math.min(preferred.length, 8)} 条 few-shot 到 Prompt`);
-  };
+  const refineValue = config.llm_refine_prompt || DEFAULT_LLM_REFINE_PROMPT;
 
-  const setRating = async (id: string, rating: QualityRating | "") => {
-    try {
-      await rateHistory(id, rating);
-      if (rating === "bad") {
-        toast.success("差评已记（词库请用本地 / AI 提炼）");
-      }
-    } catch (e) {
-      toast.danger(String(e));
-    }
-  };
+  // ─── Stats bar
+  const topPair = stats?.top_pairs?.[0];
 
-  const saveUserAdjust = async (entry: HistoryEntry) => {
-    const draft =
-      editDrafts[entry.id] ?? entry.user_text ?? entry.text ?? "";
-    const trimmed = draft.trim();
-    if (!trimmed) {
-      toast("用户修正不能为空");
-      return;
-    }
-    try {
-      await setHistoryUserText(entry.id, trimmed);
-      toast.success("已保存修正稿（识别稿 ↔ 修正稿）");
-    } catch (e) {
-      toast.danger(String(e));
-    }
-  };
-
+  // ─── Render
   const header = (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
-      <span>{config.llm_enabled ? "纠错开" : "纠错关"}</span>
+      <span>{config.llm_enabled ? t("learn.correctionsOn") : t("learn.correctionsOff")}</span>
       <span className="text-muted/40">·</span>
       <LlmProviderSelect />
     </div>
   );
+
   const headerAction = (
-    <Button
-      size="sm"
-      variant="secondary"
-      onPress={() => setConfigOpen((v) => !v)}
-    >
-      配置
-    </Button>
+    <div className="flex items-center gap-1.5">
+      <div className="relative">
+        <Button
+          size="sm"
+          variant="ghost"
+          aria-label={t("learn.moreActionsAria")}
+          onPress={() => setMoreMenuOpen((v) => !v)}
+        >
+          <MoreHorizontal size={16} />
+        </Button>
+        {moreMenuOpen && (
+          <>
+            <div
+              role="presentation"
+              className="fixed inset-0 z-40"
+              onClick={() => setMoreMenuOpen(false)}
+            />
+            <motion.div
+              className="absolute right-0 top-full z-50 mt-1 min-w-[10rem] rounded-xl border border-border bg-surface p-1 shadow-lg"
+              initial={reducedMotion ? false : { opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={springUI}
+            >
+              <button
+                type="button"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-default/60"
+                onClick={() => {
+                  setMoreMenuOpen(false);
+                  void runAiDistill();
+                }}
+              >
+                <Sparkles size={14} />
+                {t("learn.distillFromHistory")}
+              </button>
+            </motion.div>
+          </>
+        )}
+      </div>
+      <Button
+        size="sm"
+        variant="secondary"
+        onPress={() => setConfigOpen((v) => !v)}
+      >
+        {t("learn.configure")}
+      </Button>
+    </div>
   );
 
   const content = (
@@ -272,12 +299,12 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
       {embedded ? (
         <div className="set-row-line">
           <div className="set-row-line-lab">
-            纠错学习
-            <small>自动从你的修正中学习错词</small>
+            {t("learn.correctionsTitle")}
+            <small>{t("learn.embeddedDesc")}</small>
           </div>
           <div className="set-row-line-ctl">
             <Switch
-              aria-label="纠错开关"
+              aria-label={t("learn.correctionsSwitchAria")}
               isSelected={config.llm_enabled}
               onChange={(value) => updateConfig("llm_enabled", value)}
             >
@@ -293,14 +320,47 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
               className="dlink muted shrink-0"
               onClick={() => setConfigOpen((v) => !v)}
             >
-              配置{configOpen ? " ▴" : " ▾"}
+              {t("learn.configure")}{configOpen ? " ▴" : " ▾"}
             </button>
           </div>
         </div>
       ) : (
-        <PageHeader title="LLM" status={header} action={headerAction} />
+        <PageHeader title={t("learn.title")} status={header} action={headerAction} />
       )}
 
+      {/* ─── Stats bar ─── */}
+      {stats && (
+        <Reveal>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 font-mono type-meta">
+            <span>
+              {t("learn.statLearnedPrefix")}{" "}
+              <span className="text-foreground">{stats.total_pairs}</span>{" "}
+              {t("learn.statLearnedSuffix")}
+            </span>
+            <span className="text-muted/40">·</span>
+            <span>
+              {t("learn.statWeekPrefix")}{" "}
+              <span className="text-foreground">{stats.week_hits}</span>{" "}
+              {t("learn.statWeekSuffix")}
+            </span>
+            {topPair && (
+              <>
+                <span className="text-muted/40">·</span>
+                <span>
+                  {t("learn.statTopPrefix")}{" "}
+                  <span className="text-foreground">
+                    {topPair.wrong} → {topPair.right}
+                  </span>
+                  {" "}
+                  ({topPair.hit_count})
+                </span>
+              </>
+            )}
+          </div>
+        </Reveal>
+      )}
+
+      {/* ─── Config fold ─── */}
       <SoftCollapse open={configOpen}>
         <div className="surface-card mb-1 flex flex-col gap-5 p-4">
           <div className="settings-switchrow px-3 py-2">
@@ -310,7 +370,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
             >
               <Switch.Content className="w-full justify-between gap-2 p-2">
                 <div className="min-w-0 pr-2">
-                  <div className="type-ui">启用纠错</div>
+                  <div className="type-ui">{t("learn.enableCorrections")}</div>
                 </div>
                 <Switch.Control>
                   <Switch.Thumb />
@@ -320,11 +380,14 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
 
           <p className="type-meta">
-            Provider 与模型在标题栏选择，凭证在{" "}
-            <Link to="/settings?tab=llm" className="text-accent-soft-foreground hover:underline">
-              设置
+            {t("learn.configHintPrefix")}{" "}
+            <Link
+              to="/settings?tab=llm"
+              className="text-accent-soft-foreground hover:underline"
+            >
+              {t("learn.configHintSettings")}
             </Link>
-            {" 配置。"}
+            {t("learn.configHintSuffix")}
           </p>
 
           <TextField
@@ -333,7 +396,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
             value={refineValue}
             onChange={(value) => updateConfig("llm_refine_prompt", value)}
           >
-            <Label>纠错 Prompt</Label>
+            <Label>{t("learn.promptLabel")}</Label>
             <TextArea
               rows={10}
               className="min-h-[12rem] font-mono type-meta !text-[12px]"
@@ -348,25 +411,15 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
                 onPress={() => updateConfig("llm_refine_prompt", "")}
               >
                 <RotateCcw size={14} />
-                恢复默认
+                {t("learn.restoreDefault")}
               </Button>
               <Button
                 size="sm"
                 variant="secondary"
-                isDisabled={!triples.length}
-                onPress={() => void writeFewShot()}
+                onPress={() => void testLlm()}
               >
-                <BookPlus size={14} />
-                few-shot
-                {userTripleCount > 0
-                  ? `（${userTripleCount}）`
-                  : triples.length
-                    ? `（${triples.length}）`
-                    : ""}
-              </Button>
-              <Button size="sm" variant="secondary" onPress={() => void testLlm()}>
                 <Sparkles size={14} aria-hidden />
-                测试
+                {t("learn.test")}
               </Button>
             </div>
             <Button
@@ -376,136 +429,151 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
               onPress={() => void saveConfig()}
             >
               <Save size={16} aria-hidden />
-              保存
+              {t("learn.save")}
             </Button>
           </div>
         </div>
       </SoftCollapse>
 
-      {pendingLearn && pendingLearn.terms.length > 0 ? (
-        <Reveal>
-          <div className="surface-card border-border bg-surface-secondary/60 px-4 py-3.5">
-            <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
-              <div className="type-ui">
-                词库待确认（{pendingLearn.terms.length}）
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => void abortPendingLearn()}
-                >
-                  清空
-                </Button>
-                <Button
-                  size="sm"
-                  variant="primary"
-                  className="btn-press"
-                  onPress={() => void confirmPending()}
-                >
-                  确认加入
-                </Button>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {pendingLearn.terms.map((c) => (
-                <Button
-                  key={c.term}
-                  variant="ghost"
-                  className="h-auto min-h-0 p-0 shadow-none"
-                  aria-label={`移除 ${c.kind === "pair" ? `${c.from} → ${c.to}` : c.term}`}
-                  onPress={() => void removePendingLearnTerm(c.term)}
-                >
-                  <Chip size="sm" variant="soft" color="accent">
-                    <Chip.Label className="font-mono type-micro !normal-case !tracking-normal">
-                      {c.kind === "pair" ? `${c.from} → ${c.to}` : c.term}
-                    </Chip.Label>
-                  </Chip>
-                </Button>
-              ))}
-            </div>
-          </div>
-        </Reveal>
-      ) : null}
-
-      {learnEntries.length === 0 ? (
+      {/* ─── Knowledge base ─── */}
+      {knowledge && knowledge.pairs.length === 0 && !query ? (
         <div className="dropzone" style={{ minHeight: 200 }}>
           <span className="dropzone-ic">
-            <Sparkles size={22} aria-hidden />
+            <BookOpen size={22} aria-hidden />
           </span>
-          <span className="dropzone-t">还没有学习 case</span>
+          <span className="dropzone-t">
+            {t("learn.emptyTitle")}
+          </span>
           <span className="dropzone-fmt">
-            HUD 改字确认后 · 整段识别稿 ↔ 修正稿出现在这里
+            {t("learn.emptyHint")}
           </span>
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <p className="type-meta">
-              未标 {ratingStats.unlabeled} · 差 {ratingStats.bad} · 修正{" "}
-              {userTripleCount} · 已入库 {ratingStats.applied}
-              {" · "}
-              <Link to="/settings?tab=vocabulary" className="text-accent-soft-foreground hover:underline">
-                词库 →
-              </Link>
-            </p>
-            <div className="flex flex-wrap items-center gap-1.5">
+          {/* Search */}
+          <div className="flex items-center gap-2">
+            <TextField
+              fullWidth
+              variant="secondary"
+              value={query}
+              onChange={setQuery}
+            >
+              <Input
+                placeholder={t("learn.searchPlaceholder")}
+                className="font-mono text-sm"
+              />
+            </TextField>
+            {embedded && (
               <Button
                 size="sm"
-                variant="secondary"
-                isDisabled={(!badOpenEntries.length && !history.length) || distilling}
+                variant="ghost"
+                isDisabled={!history.length || distilling}
                 isPending={distilling}
                 onPress={() => void runAiDistill()}
               >
                 <Sparkles size={14} />
-                AI 提炼
+                {t("learn.distillFromHistory")}
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                isDisabled={!badOpenEntries.length}
-                onPress={() => void runLocalHarvest()}
-              >
-                <BookPlus size={14} />
-                本地
-                {harvestedFromBad.length > 0
-                  ? `（${harvestedFromBad.length}）`
-                  : ""}
-              </Button>
-            </div>
+            )}
           </div>
 
-          <FewShotPanel history={history} />
-
+          {/* Pair list */}
           <div className="recs">
-            {learnEntries.map((entry, i) => {
-              const rated = ratingOf(entry);
-              const status = entry.learn_status;
-              const triple = toLearnTriple(entry);
-              const draft =
-                editDrafts[entry.id] ??
-                entry.user_text ??
-                entry.text ??
-                "";
-              const editing = editingId === entry.id;
-              return (
+            {filteredPairs.map((pair, i) => (
+              <Reveal key={pair.id} index={i}>
+                <article className="rec">
+                  <div className="rec-l">
+                    <span className="font-mono">
+                      <span className="text-red-400/80 line-through">
+                        {pair.wrong}
+                      </span>
+                      {" → "}
+                      <span className="text-green-500/90">{pair.right}</span>
+                    </span>
+                    <Chip size="sm" variant="soft" color="default">
+                      <Chip.Label className="type-micro">
+                        {sourceBadge(pair.source, t)}
+                      </Chip.Label>
+                    </Chip>
+                    {pair.hit_count > 0 && (
+                      <span className="type-meta text-muted">
+                        {t("learn.hitCount", { n: pair.hit_count })}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between gap-2">
+                    <Switch
+                      aria-label={t(
+                        pair.enabled ? "learn.disablePair" : "learn.enablePair",
+                        { wrong: pair.wrong, right: pair.right },
+                      )}
+                      isSelected={pair.enabled}
+                      onChange={(value) => void togglePair(pair.id, value)}
+                    >
+                      <Switch.Content className="gap-2">
+                        <Switch.Control>
+                          <Switch.Thumb />
+                        </Switch.Control>
+                      </Switch.Content>
+                    </Switch>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className={cn(
+                        "h-auto min-h-0 px-1.5 py-0.5 type-meta shadow-none transition-colors",
+                        confirmingDelete === pair.id
+                          ? "text-red-500"
+                          : "text-muted hover:text-foreground",
+                      )}
+                      onPress={() => void deletePair(pair.id)}
+                    >
+                      <Trash2 size={12} />
+                      {confirmingDelete === pair.id
+                        ? t("learn.confirmDelete")
+                        : t("learn.delete")}
+                    </Button>
+                  </div>
+                </article>
+              </Reveal>
+            ))}
+            {filteredPairs.length === 0 && query && (
+              <p className="type-meta text-muted py-6 text-center">
+                {t("learn.noMatch")}
+              </p>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ─── Learning activity (collapsed) ─── */}
+      {learnEntries.length > 0 && (
+        <div>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 py-2 text-left type-meta text-muted hover:text-foreground transition-colors"
+            onClick={() => setActivityOpen((v) => !v)}
+          >
+            <span className="type-ui text-sm">{t("learn.activityTitle")}</span>
+            <span className="text-muted/60 type-micro">
+              ({learnEntries.length})
+            </span>
+            <span className="ml-auto text-xs">
+              {activityOpen ? "▴" : "▾"}
+            </span>
+          </button>
+          <SoftCollapse open={activityOpen}>
+            <div className="recs">
+              {learnEntries.slice(0, 20).map((entry, i) => (
                 <Reveal key={entry.id} index={i}>
                   <article className="rec">
                     <div className="rec-l">
-                      <span>
+                      <span className="type-meta">
                         {new Date(entry.created_at).toLocaleString()}
                       </span>
-                      <span>{entry.duration_seconds.toFixed(1)}s</span>
-                      {triple?.hasUser ? (
-                        <span className="tag">有修正</span>
-                      ) : null}
-                      {status === "applied" ? (
-                        <span>已入词库</span>
-                      ) : status === "suggested" ? (
-                        <span>待确认</span>
-                      ) : null}
+                      <span className="type-meta">
+                        {entry.duration_seconds.toFixed(1)}s
+                      </span>
                     </div>
-
                     {entry.raw_text && learnGold(entry) !== entry.raw_text ? (
                       <div className="rec-c">
                         <RefineDiff
@@ -515,129 +583,18 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
                         />
                       </div>
                     ) : (
-                      <p className="rec-c">{entry.raw_text}</p>
+                      <p className="rec-c type-meta">{entry.raw_text}</p>
                     )}
-
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-2.5">
-                      <QualityRateBar
-                        rating={rated}
-                        compact
-                        className="!border-0 !pt-0"
-                        onRate={(next) => void setRating(entry.id, next)}
-                      />
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className={cn(
-                          "h-auto min-h-0 px-1.5 py-0.5 type-meta shadow-none transition-colors hover:text-foreground data-[hovered=true]:bg-transparent",
-                          editing ? "text-accent-soft-foreground" : "text-muted",
-                        )}
-                        onPress={() =>
-                          setEditingId((id) =>
-                            id === entry.id ? null : entry.id,
-                          )
-                        }
-                      >
-                        {editing ? "收起" : "修正"}
-                      </Button>
-                    </div>
-
-                    <SoftCollapse open={editing}>
-                      <div className="mt-3 flex flex-col gap-2">
-                        <TextField
-                          fullWidth
-                          variant="secondary"
-                          value={draft}
-                          onChange={(value) =>
-                            setEditDrafts((prev) => ({
-                              ...prev,
-                              [entry.id]: value,
-                            }))
-                          }
-                        >
-                          <Label>用户修正</Label>
-                          <TextArea
-                            rows={2}
-                            className="font-mono text-[12px]"
-                          />
-                        </TextField>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="btn-press self-start"
-                          onPress={() => void saveUserAdjust(entry)}
-                        >
-                          <Save size={12} />
-                          保存修正
-                        </Button>
-                      </div>
-                    </SoftCollapse>
                   </article>
                 </Reveal>
-              );
-            })}
-          </div>
-        </>
+              ))}
+            </div>
+          </SoftCollapse>
+        </div>
       )}
     </>
   );
 
   if (embedded) return content;
   return <PageShell className="max-w-2xl">{content}</PageShell>;
-}
-
-type FewShotCaseInfo = { id: string; asr: string; gold: string };
-
-/**
- * 纠错示例（few-shot）管理 — 纠错时实际注入 prompt 的 输入→输出 对。
- * 来自 HUD 改字确认（user_text）与差评润色记录；移除 = learn_status=skipped。
- */
-function FewShotPanel({ history }: { history: HistoryEntry[] }) {
-  const { markHistoryLearnStatus } = useApp();
-  const [cases, setCases] = useState<FewShotCaseInfo[]>([]);
-
-  useEffect(() => {
-    void invoke<FewShotCaseInfo[]>("list_fewshot_cases")
-      .then(setCases)
-      .catch(() => setCases([]));
-  }, [history]);
-
-  if (!cases.length) return null;
-
-  const remove = async (id: string) => {
-    try {
-      await markHistoryLearnStatus([id], "skipped");
-      setCases((prev) => prev.filter((c) => c.id !== id));
-      toast.success("已从纠错示例移除");
-    } catch (e) {
-      toast.danger(String(e));
-    }
-  };
-
-  return (
-    <div className="fewshot">
-      <div className="fewshot-head">
-        <span className="set-group-t">纠错示例 · few-shot</span>
-        <span className="type-meta">纠错时注入的 {cases.length} 对输入 → 输出</span>
-      </div>
-      <div className="fewshot-list">
-        {cases.map((c) => (
-          <div key={c.id} className="fewshot-row">
-            <div className="fewshot-pair">
-              <div className="fewshot-asr">{c.asr}</div>
-              <div className="fewshot-gold">→ {c.gold}</div>
-            </div>
-            <button
-              type="button"
-              className="fewshot-x"
-              aria-label="从示例移除"
-              onClick={() => void remove(c.id)}
-            >
-              <X size={12} />
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }

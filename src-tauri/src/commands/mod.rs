@@ -54,7 +54,7 @@ pub(crate) fn get_app_info() -> AppInfo {
     let perms = permissions::get_permission_status();
     AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        name: "言落".to_string(),
+        name: "QuietType".to_string(),
         platform: perms.platform,
         executable_path: perms.executable_path,
         apple_speech_available: cfg!(target_os = "macos"),
@@ -439,6 +439,25 @@ pub(crate) async fn distill_learn_from_ratings(
         }
     }
 
+    // Upsert distilled terms into learn knowledge base
+    for term in &terms {
+        let t = term.trim();
+        if t.is_empty() {
+            continue;
+        }
+        if let Some((wrong, right)) = t
+            .split_once('=')
+            .or_else(|| t.split_once('→'))
+            .or_else(|| t.split_once("->"))
+        {
+            let w = wrong.trim();
+            let r = right.trim();
+            if !w.is_empty() && !r.is_empty() {
+                engine.inner().learn_state.upsert_pair(w, r, "ai_distill", 0.9);
+            }
+        }
+    }
+
     Ok(DistillLearnResult { terms, source_ids })
 }
 
@@ -794,10 +813,17 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
 }
 
 #[derive(Clone, Serialize)]
+pub(crate) struct LearnedPairInfo {
+    pub(crate) wrong: String,
+    pub(crate) right: String,
+}
+
+#[derive(Clone, Serialize)]
 pub(crate) struct LearnFromHudPayload {
     pub(crate) entry_id: String,
     pub(crate) before: String,
     pub(crate) after: String,
+    pub(crate) learned_pairs: Vec<LearnedPairInfo>,
 }
 
 /// Confirm Fn/⇧Fn HUD edit: paste → history → optional learn → hide.
@@ -837,12 +863,13 @@ pub(crate) fn confirm_floating_transcript(
     };
     result.text = confirmed.clone();
 
-    match inject_text_via_paste_on_main(&app, &confirmed) {
+    let paste_failed = match inject_text_via_paste_on_main(&app, &confirmed) {
         Ok(()) => {
             eprintln!(
                 "[paste] confirmed {} chars (edited={edited} mode={mode})",
                 confirmed.chars().count()
             );
+            false
         }
         Err(e) => {
             eprintln!("[paste] injection failed: {e}");
@@ -850,8 +877,9 @@ pub(crate) fn confirm_floating_transcript(
                 "partial-error",
                 format!("已写入剪切板，但粘贴失败（请检查辅助功能权限）: {e}"),
             );
+            true
         }
-    }
+    };
 
     let user_for_history = if learn {
         Some(confirmed.as_str())
@@ -869,16 +897,61 @@ pub(crate) fn confirm_floating_transcript(
 
     if learn {
         if let Some(id) = entry_id.clone() {
+            // Auto-extract correction pairs and upsert into knowledge base
+            let candidates = crate::learn::extract_correction_pairs(&learn_before, &confirmed);
+            let mut learned_pairs = Vec::new();
+            let state = app.state::<AsrEngine>();
+            for c in &candidates {
+                if c.kind == crate::learn::diff::CandidateKind::Pair && !c.wrong.is_empty() {
+                    state.inner().learn_state.upsert_pair(
+                        &c.wrong,
+                        &c.right,
+                        "auto_hud",
+                        c.score,
+                    );
+                    learned_pairs.push(LearnedPairInfo {
+                        wrong: c.wrong.clone(),
+                        right: c.right.clone(),
+                    });
+                }
+            }
+            if !learned_pairs.is_empty() {
+                eprintln!(
+                    "[learn] auto-extracted {} pairs from HUD edit",
+                    learned_pairs.len()
+                );
+            }
             let payload = LearnFromHudPayload {
                 entry_id: id,
                 before: learn_before,
                 after: confirmed.clone(),
+                learned_pairs,
             };
             let _ = app.emit("learn-from-hud", &payload);
         }
     }
 
-    emit_floating_status(&app, false, "idle", "", 0.0);
+    // P0-4: Confirm success flash + delayed hide / error with 3s auto-hide.
+    if paste_failed {
+        // Keep HUD with danger hint, auto-hide after 3s
+        let _ = app.emit_to(
+            "floating",
+            "hud-confirm-error",
+            serde_json::json!({"error": "粘贴失败，文字已在剪贴板"}),
+        );
+        let app_hide = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(3000));
+            emit_floating_status(&app_hide, false, "idle", "", 0.0);
+        });
+    } else {
+        // Flash success (FE plays .hud-capsule-confirm-success), then hide after 300ms.
+        let app_hide = app.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            emit_floating_status(&app_hide, false, "idle", "", 0.0);
+        });
+    }
     let _ = app.emit("transcription-result", &result);
     Ok(())
 }
@@ -973,6 +1046,7 @@ pub(crate) fn accept_floating_preview(
         language: lang,
         duration_seconds: 0.0,
         refined: false,
+        refine_failed: false,
         error: None,
         segments: Vec::new(),
         alignment: None,
@@ -1040,8 +1114,16 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
         let mut result = if matches!(config.asr_provider, AsrProvider::Apple)
             && apple_speech_ffi::stream_active()
         {
-            // Let pump flush the last PCM chunk after recording=false.
-            std::thread::sleep(Duration::from_millis(80));
+            // Wait for pump thread to flush final chunk (event-driven with 100ms cap).
+            // The pump exits its loop when recording=false; 100ms is generous fallback.
+            {
+                let notify = crate::audio::audio_chunk_notify();
+                let (lock, cvar) = &**notify;
+                if let Ok(ready) = lock.lock() {
+                    // Wait up to 100ms for one more audio notification (pump flush).
+                    let _ = cvar.wait_timeout(ready, Duration::from_millis(100));
+                }
+            }
             match apple_speech_ffi::stream_finish() {
                 Ok(text) => {
                     eprintln!(
@@ -1055,6 +1137,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
                         language: config.language.clone(),
                         duration_seconds: samples.len() as f64 / 16_000.0,
                         refined: false,
+                        refine_failed: false,
                         error: None,
                         segments: Vec::new(),
                         alignment: None,
@@ -1070,6 +1153,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
                             language: config.language.clone(),
                             duration_seconds: samples.len() as f64 / 16_000.0,
                             refined: false,
+                            refine_failed: false,
                             error: Some(error),
                             segments: Vec::new(),
                             alignment: None,
@@ -1087,6 +1171,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
                         language: config.language.clone(),
                         duration_seconds: samples.len() as f64 / 16_000.0,
                         refined: false,
+                        refine_failed: false,
                         error: Some(error),
                         segments: Vec::new(),
                         alignment: None,
@@ -1100,6 +1185,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
                             language: config.language.clone(),
                             duration_seconds: samples.len() as f64 / 16_000.0,
                             refined: false,
+                            refine_failed: false,
                             error: Some(error),
                             segments: Vec::new(),
                             alignment: None,
@@ -1119,6 +1205,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
                     language: config.language.clone(),
                     duration_seconds: samples.len() as f64 / 16_000.0,
                     refined: false,
+                    refine_failed: false,
                     error: Some(error),
                     segments: Vec::new(),
                     alignment: None,
@@ -1131,6 +1218,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
                     language: config.language.clone(),
                     duration_seconds: samples.len() as f64 / 16_000.0,
                     refined: false,
+                    refine_failed: false,
                     error: Some(error),
                     segments: Vec::new(),
                     alignment: None,
@@ -1223,6 +1311,7 @@ pub(crate) fn transcribe_file(
                         language: config.language.clone(),
                         duration_seconds: 0.0,
                         refined: false,
+                        refine_failed: false,
                         error: Some(e),
                         segments: Vec::new(),
                         alignment: None,
@@ -1244,6 +1333,7 @@ pub(crate) fn transcribe_file(
                         language: config.language.clone(),
                         duration_seconds: 0.0,
                         refined: false,
+                        refine_failed: false,
                         error: Some(e),
                         segments: Vec::new(),
                         alignment: None,
@@ -1262,6 +1352,7 @@ pub(crate) fn transcribe_file(
                         language: config.language.clone(),
                         duration_seconds: samples.len() as f64 / 16_000.0,
                         refined: false,
+                        refine_failed: false,
                         error: Some(error),
                         segments: Vec::new(),
                         alignment: None,
@@ -1274,6 +1365,7 @@ pub(crate) fn transcribe_file(
                         language: config.language.clone(),
                         duration_seconds: samples.len() as f64 / 16_000.0,
                         refined: false,
+                        refine_failed: false,
                         error: Some(error),
                         segments: Vec::new(),
                         alignment: None,
@@ -1388,4 +1480,89 @@ mod distill_eligibility_tests {
         let e = HistoryEntry::test_new("6", "今天开会");
         assert!(!candidate_for_distill(&e)); // gold == asr
     }
+}
+
+// ---------------------------------------------------------------------------
+// Learn knowledge commands (纠错学习自动闭环)
+// ---------------------------------------------------------------------------
+
+/// Learn from an edit (draft page / history page).
+/// Extracts correction pairs and upserts into knowledge base.
+#[tauri::command]
+pub(crate) fn learn_from_edit(
+    app: AppHandle,
+    entry_id: String,
+    before: String,
+    after: String,
+) -> Result<Vec<LearnedPairInfo>, String> {
+    let candidates = crate::learn::extract_correction_pairs(&before, &after);
+    let state = app.state::<AsrEngine>();
+    let mut learned = Vec::new();
+
+    for c in &candidates {
+        if c.kind == crate::learn::diff::CandidateKind::Pair && !c.wrong.is_empty() {
+            state
+                .inner()
+                .learn_state
+                .upsert_pair(&c.wrong, &c.right, "auto_draft", c.score);
+            learned.push(LearnedPairInfo {
+                wrong: c.wrong.clone(),
+                right: c.right.clone(),
+            });
+        }
+    }
+
+    // Update history entry user_text and learn_status
+    if let Ok(mut history) = state.inner().history.lock() {
+        if let Some(entry) = history.iter_mut().find(|e| e.id == entry_id) {
+            entry.user_text = Some(after.clone());
+            entry.text = after;
+            entry.learn_status = Some("applied".into());
+        }
+        let _ = save_history_to_disk(&history);
+    }
+
+    if !learned.is_empty() {
+        eprintln!(
+            "[learn] auto-extracted {} pairs from edit (entry={})",
+            learned.len(),
+            entry_id
+        );
+    }
+    Ok(learned)
+}
+
+/// Get the full learn knowledge base (for management UI).
+#[tauri::command]
+pub(crate) fn get_learn_knowledge(
+    app: AppHandle,
+) -> crate::learn::LearnKnowledge {
+    let state = app.state::<AsrEngine>();
+    state.inner().learn_state.get_knowledge()
+}
+
+/// Toggle a learn pair's enabled state.
+#[tauri::command]
+pub(crate) fn set_learn_pair_enabled(
+    app: AppHandle,
+    id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let state = app.state::<AsrEngine>();
+    state.inner().learn_state.set_pair_enabled(&id, enabled)
+}
+
+/// Delete a learn pair.
+#[tauri::command]
+pub(crate) fn delete_learn_pair(app: AppHandle, id: String) -> Result<(), String> {
+    let state = app.state::<AsrEngine>();
+    state.inner().learn_state.delete_pair(&id)
+}
+
+/// Get learn statistics.
+#[tauri::command]
+pub(crate) fn get_learn_stats(app: AppHandle) -> crate::learn::LearnStats {
+    let state = app.state::<AsrEngine>();
+    let knowledge = state.inner().learn_state.get_knowledge();
+    crate::learn::compute_stats(&knowledge)
 }

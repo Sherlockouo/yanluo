@@ -88,7 +88,7 @@ static int asr_speech_check_auth(char *err_buf, size_t err_len) {
     switch (auth) {
     case SFSpeechRecognizerAuthorizationStatusDenied:
       hint = @"denied — 系统设置 → 隐私与安全性 → 语音识别，打开 "
-             @"言落";
+             @"QuietType";
       break;
     case SFSpeechRecognizerAuthorizationStatusRestricted:
       hint = @"restricted by system policy";

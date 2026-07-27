@@ -479,7 +479,10 @@ html.light[data-floating="1"] .hud-agent-send:hover:not(:disabled):not([aria-dis
     transition: transform 100ms ease-out;
   }
 
-  .hud-agent-pill:active,
+  .hud-agent-pill:active {
+    transform: scale(0.96);
+  }
+
   .hud-agent-icon-btn:active,
   .hud-agent-send:active,
   .hud-agent-chip-x:active {
@@ -810,7 +813,7 @@ html.light[data-floating-lang="1"] .hud-lang-chip.is-open {
 }
 
 .audio-bar {
-  width: 4px;
+  width: 3px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.88);
   box-shadow: none;
@@ -1013,7 +1016,8 @@ html.light[data-floating="1"] .hud-text-switching .hud-text-scroll {
 }
 
 .hud-text-viewport.hud-text-overflow {
-  /* Fade only the departing (left) edge — right stays crisp for new ink */
+  /* Fade only the departing (left) edge — right stays crisp for new ink.
+     scroll-edge mask per DESIGN.md: transparent→solid over 28px at left. */
   mask-image: linear-gradient(to right, transparent 0, #000 28px, #000 100%);
   -webkit-mask-image: linear-gradient(
     to right,
@@ -1047,10 +1051,23 @@ html.light[data-floating="1"] .hud-text-scroll {
 }
 
 /* Same ink as live text — no gray “history” dim. */
-.hud-text-committed,
+.hud-text-committed {
+  color: inherit;
+  font-weight: inherit;
+}
+
+/* Active hypothesis: slightly dimmer than committed to visually distinguish
+   “tentative” from “confirmed”, fading to full as content stabilises. */
 .hud-text-active {
   color: inherit;
   font-weight: inherit;
+  opacity: 0.88;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hud-text-active {
+    transition: opacity 0.14s ease-out;
+  }
 }
 
 .hud-text-refining .hud-text-scroll {
@@ -1142,6 +1159,133 @@ html.light[data-floating="1"] .hud-spinner {
   }
 }
 
+/* B8: Audio bars flow-in on capsule appear (translateX -8→0, delay 0.12s) */
+@media (prefers-reduced-motion: no-preference) {
+  .hud-live-bars {
+    animation: hud-bars-flow-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
+  }
+}
+
+@keyframes hud-bars-flow-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* B1: "正在听" muted breathing hint */
+.hud-listen-hint {
+  color: rgba(255, 255, 255, 0.52);
+  font-weight: 500;
+  animation: hud-listen-breathe 1.8s ease-in-out infinite;
+}
+
+html.light[data-floating="1"] .hud-listen-hint {
+  color: rgba(16, 16, 18, 0.42);
+}
+
+@keyframes hud-listen-breathe {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.85; }
+}
+
+/* B1: First text appears → opacity 0.7→1 transition */
+@media (prefers-reduced-motion: no-preference) {
+  .hud-text-scroll {
+    transition: opacity 0.14s ease-out;
+  }
+}
+
+/* B2: Processing with preserved text — dimmed at ~72% */
+.hud-capsule-refined .hud-text-viewport .hud-text-scroll {
+  opacity: 0.72;
+}
+
+/* B4: Recording timer */
+.hud-rec-timer {
+  flex-shrink: 0;
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.02em;
+  margin-left: auto;
+  padding-left: 8px;
+}
+
+html.light[data-floating="1"] .hud-rec-timer {
+  color: rgba(16, 16, 18, 0.5);
+}
+
+.hud-rec-timer-danger {
+  color: var(--danger, #C24238);
+}
+
+html.light[data-floating="1"] .hud-rec-timer-danger {
+  color: var(--danger, #C24238);
+}
+
+/* B5: Error text in danger color */
+.hud-error-text {
+  color: var(--danger, #C24238);
+  font-weight: 500;
+}
+
+/* B5: Danger flash overlay (opacity-only per DESIGN.md motion rules) */
+.hud-error-flash-overlay {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--danger, #C24238);
+  opacity: 0.12;
+  pointer-events: none;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hud-error-flash-overlay {
+    animation: hud-error-flash 0.2s ease-out forwards;
+  }
+}
+
+@keyframes hud-error-flash {
+  0% { opacity: 0.18; }
+  100% { opacity: 0; }
+}
+
+/* B6: Confirm success — text briefly turns success color */
+.hud-capsule-confirm-success .hud-text-scroll {
+  color: var(--success, #2F7A4C) !important;
+}
+
+/* B7: Editing badge [Enter] */
+.hud-edit-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.7);
+  margin-left: 8px;
+  align-self: center;
+}
+
+html.light[data-floating="1"] .hud-edit-badge {
+  border-color: rgba(16, 16, 18, 0.15);
+  color: rgba(16, 16, 18, 0.6);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hud-spinner {
     animation: none;
@@ -1167,4 +1311,151 @@ html.light[data-floating="1"] .hud-spinner {
     animation: none;
     opacity: 0;
   }
+
+  .hud-live-bars {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .hud-listen-hint {
+    animation: none;
+    opacity: 0.7;
+  }
+
+  .hud-error-flash-overlay {
+    animation: none;
+    opacity: 0;
+  }
+
+  .hud-text-active {
+    opacity: 1;
+    transition: none;
+  }
+
+  .hud-capsule-warn-shake {
+    animation: none;
+  }
+
+  .hud-rec-timer-blink {
+    animation: none;
+  }
+}
+
+/* P0-9: Editing action buttons */
+.hud-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: 8px;
+  align-self: center;
+}
+
+.hud-edit-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 100ms ease-out;
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.hud-edit-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.hud-edit-btn-confirm {
+  background: var(--accent, #C4784A);
+  color: #fff;
+}
+
+.hud-edit-btn-confirm:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.hud-edit-btn-cancel {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.hud-edit-btn-cancel:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
+}
+
+html.light[data-floating="1"] .hud-edit-btn-cancel {
+  color: rgba(16, 16, 18, 0.6);
+}
+
+html.light[data-floating="1"] .hud-edit-btn-cancel:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.08);
+  color: rgba(16, 16, 18, 0.9);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hud-edit-btn:active:not(:disabled) {
+    transform: scale(0.92);
+  }
+}
+
+/* P0-10: Refine failed hint */
+.hud-refine-failed-hint {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--warning, #A66C12);
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+html.light[data-floating="1"] .hud-refine-failed-hint {
+  color: var(--warning, #A66C12);
+}
+
+/* P1-13: 80s warning shake */
+@keyframes hud-warn-shake {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hud-capsule-warn-shake {
+    animation: hud-warn-shake 150ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+/* P1-13: Timer blink */
+@keyframes hud-timer-blink {
+  0%, 100% { opacity: 1; }
+  25%, 75% { opacity: 0.2; }
+}
+
+.hud-rec-timer-blink {
+  animation: hud-timer-blink 0.4s ease-in-out 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-rec-timer-blink {
+    animation: none;
+  }
+}
+
+/* P1-13: Auto-submit hint */
+.hud-auto-submit-hint {
+  position: absolute;
+  bottom: 4px;
+  right: 18px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--danger, #C24238);
+  opacity: 0.85;
+  pointer-events: none;
 }

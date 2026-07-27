@@ -16,7 +16,25 @@ pub(crate) fn inject_text_via_paste(text: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         restore_previous_frontmost_app(false);
-        std::thread::sleep(Duration::from_millis(40));
+        // Adaptive wait: poll target app's isActive instead of blind 40ms sleep.
+        // Falls back to 40ms cap if it never becomes active.
+        use objc2_app_kit::NSWorkspace;
+        let active = (|| {
+            let front = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+            Some(front.isActive())
+        })();
+        if !active.unwrap_or(false) {
+            for _ in 0..8 {
+                std::thread::sleep(Duration::from_millis(5));
+                let ok = (|| {
+                    let front = NSWorkspace::sharedWorkspace().frontmostApplication()?;
+                    Some(front.isActive())
+                })();
+                if ok.unwrap_or(true) {
+                    break;
+                }
+            }
+        }
     }
 
     write_clipboard_text(text)?;

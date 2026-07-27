@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import type { WordWeight } from "@/lib/word-freq";
 import { duration, easeOut } from "@/lib/motion";
+import { useT } from "@/lib/i18n";
 
 const W = 960;
 const H = 300;
@@ -213,10 +214,9 @@ type Props = {
   emptyHint?: string;
 };
 
-export function WordCloud({
-  words,
-  emptyHint = "还没有词 · 开口出稿后出现",
-}: Props) {
+export function WordCloud({ words, emptyHint }: Props) {
+  const t = useT();
+  const resolvedEmptyHint = emptyHint ?? t("common.wordCloud.empty");
   const reduce = useReducedMotion();
   const navigate = useNavigate();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -271,7 +271,7 @@ export function WordCloud({
   if (words.length === 0) {
     return (
       <div className="home-cloud-empty" role="status">
-        {emptyHint}
+        {resolvedEmptyHint}
       </div>
     );
   }
@@ -298,7 +298,7 @@ export function WordCloud({
         className="home-cloud-svg"
         viewBox={`0 0 ${W} ${H}`}
         role="img"
-        aria-label="本机高频词"
+        aria-label={t("common.wordCloud.aria")}
         initial={reduce ? false : { opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: duration.slow, ease: easeOut }}
@@ -330,8 +330,8 @@ export function WordCloud({
             >
               <title>
                 {p.entryId
-                  ? `${p.word} · ${p.count} 次 · 打开记录`
-                  : `${p.word} · ${p.count} 次`}
+                  ? t("common.wordCloud.titleOpen", { word: p.word, count: p.count })
+                  : t("common.wordCloud.title", { word: p.word, count: p.count })}
               </title>
               <text
                 x={0}

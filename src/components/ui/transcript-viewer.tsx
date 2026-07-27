@@ -24,6 +24,7 @@ import {
 import { Button } from "@heroui/react";
 import { Focus, List, Pause, Play } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 import {
   composeSegmentsFromAlignment,
   formatClock,
@@ -117,9 +118,11 @@ function TranscriptRoot({
   durationSeconds,
   segments,
   alignment,
-  emptyLabel = "暂无转写文本",
+  emptyLabel,
   children,
 }: TranscriptViewerProps) {
+  const t = useT();
+  const resolvedEmptyLabel = emptyLabel ?? t("common.transcript.empty");
   const src = mediaSrc ?? null;
   const isVideo = mediaKind === "video";
   const mediaRef = useRef<HTMLMediaElement | null>(null);
@@ -359,7 +362,7 @@ function TranscriptRoot({
       hasTimed,
       paragraphs,
       plainParagraphs,
-      emptyLabel,
+      emptyLabel: resolvedEmptyLabel,
       currentParaIndex,
       isPlayingOrScrubbed,
       statusForWord,
@@ -380,7 +383,7 @@ function TranscriptRoot({
       hasTimed,
       paragraphs,
       plainParagraphs,
-      emptyLabel,
+      resolvedEmptyLabel,
       currentParaIndex,
       isPlayingOrScrubbed,
       statusForWord,
@@ -486,6 +489,7 @@ function TranscriptMedia({
 }
 
 function TranscriptControls({ className }: { className?: string }) {
+  const t = useT();
   const {
     src,
     isPlaying,
@@ -511,7 +515,9 @@ function TranscriptControls({ className }: { className?: string }) {
           size="sm"
           variant="secondary"
           isIconOnly
-          aria-label={isPlaying ? "暂停" : "播放"}
+          aria-label={
+            isPlaying ? t("common.transcript.pause") : t("common.transcript.play")
+          }
           onPress={togglePlay}
         >
           {isPlaying ? <Pause size={16} /> : <Play size={16} />}
@@ -533,6 +539,7 @@ function TranscriptControls({ className }: { className?: string }) {
 }
 
 function TranscriptModeToggle({ className }: { className?: string }) {
+  const t = useT();
   const { isLong, hasTimed, plainParagraphs, mode, setMode } = useTranscript();
 
   if (!((hasTimed || plainParagraphs.length > 0) && isLong)) return null;
@@ -540,7 +547,9 @@ function TranscriptModeToggle({ className }: { className?: string }) {
   return (
     <div className={cn("flex items-center justify-between gap-2", className)}>
       <p className="text-[11px] text-muted">
-        {mode === "focus" ? "专注模式 · 跟随当前一句" : "全文模式 · 可滚动阅读"}
+        {mode === "focus"
+          ? t("common.transcript.focusModeHint")
+          : t("common.transcript.readModeHint")}
       </p>
       <div className="flex overflow-hidden rounded-full border border-border bg-surface">
         <Button
@@ -556,7 +565,7 @@ function TranscriptModeToggle({ className }: { className?: string }) {
           onPress={() => setMode("focus")}
         >
           <Focus size={12} aria-hidden />
-          专注
+          {t("common.transcript.focus")}
         </Button>
         <Button
           size="sm"
@@ -571,7 +580,7 @@ function TranscriptModeToggle({ className }: { className?: string }) {
           onPress={() => setMode("read")}
         >
           <List size={12} aria-hidden />
-          全文
+          {t("common.transcript.fullText")}
         </Button>
       </div>
     </div>
@@ -589,6 +598,7 @@ function TranscriptContent({
   /** Use flex-1 min-h-0 instead of max-height when this element scrolls. */
   fill?: boolean;
 }) {
+  const t = useT();
   const {
     scrollRef,
     activeParaRef,
@@ -691,7 +701,9 @@ function TranscriptContent({
                 >
                   <Button
                     variant="ghost"
-                    aria-label={`跳转到 ${formatClock(para.startTime)}`}
+                    aria-label={t("common.transcript.jumpToAria", {
+                      time: formatClock(para.startTime),
+                    })}
                     className="mb-1.5 h-auto min-h-0 justify-start rounded-none px-0 py-0 font-mono text-[10px] font-normal tabular-nums tracking-wider text-muted/70 shadow-none hover:text-accent-soft-foreground data-[hovered=true]:bg-transparent data-[hovered=true]:text-accent-soft-foreground data-[pressed=true]:bg-transparent data-[pressed=true]:opacity-60"
                     onPress={() => seekToParagraph(para)}
                   >

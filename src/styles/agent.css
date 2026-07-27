@@ -1,18 +1,26 @@
 /* Agent chat — conversational, bright, few borders */
 
-/* Job page fills content pane; composer sits at window bottom */
-.app-content:has(.agent-job-shell),
-.app-content:has(.agent-list-shell) {
+/* Job detail page fills content pane (nested scroll for timeline is intentional).
+   List page: .app-content remains the single scroll region (no nested scroll). */
+.app-content:has(.agent-job-shell) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
   padding-bottom: 0.75rem;
 }
 
-.agent-job-shell,
-.agent-list-shell {
+.app-content:has(.agent-list-shell) {
+  /* Single scroll region — list flows naturally into .app-content scroll */
+  padding-bottom: 0;
+}
+
+.agent-job-shell {
   flex: 1 1 auto;
   min-height: 0;
+  width: 100%;
+}
+
+.agent-list-shell {
   width: 100%;
 }
 
@@ -250,27 +258,26 @@
 .agent-list-body {
   margin-inline: -0.25rem;
   padding-inline: 0.25rem;
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    #000 12px,
-    #000 calc(100% - 16px),
-    transparent 100%
-  );
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0,
-    #000 12px,
-    #000 calc(100% - 16px),
-    transparent 100%
-  );
 }
 
 .agent-list-composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  background: var(--background);
+  /* scroll-edge fade: content fades into the sticky composer */
+  box-shadow: 0 -1px 0 0 transparent;
+}
+
+.agent-list-composer::before {
+  content: "";
+  position: absolute;
+  inset: -24px 0 100% 0;
+  pointer-events: none;
   background: linear-gradient(
     to top,
-    var(--background) 55%,
-    color-mix(in oklab, var(--background) 0%, transparent)
+    var(--background) 0%,
+    color-mix(in oklab, var(--background) 0%, transparent) 100%
   );
 }
 
@@ -403,14 +410,14 @@
     to bottom,
     transparent 0,
     #000 12px,
-    #000 calc(100% - 28px),
+    #000 calc(100% - 16px),
     transparent 100%
   );
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0,
     #000 12px,
-    #000 calc(100% - 28px),
+    #000 calc(100% - 16px),
     transparent 100%
   );
 }
@@ -897,6 +904,23 @@
   margin: 0;
 }
 
+/* Crossfade icon swap — opacity ~120ms, transform only */
+.agent-composer-send-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.agent-composer-send-icon > svg {
+  transition: opacity 120ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-composer-send-icon > svg {
+    transition: none;
+  }
+}
+
 .agent-composer-send:disabled,
 .agent-composer-send[aria-disabled="true"] {
   opacity: 0.35;
@@ -957,14 +981,71 @@
 /* Empty states */
 .agent-list-empty {
   display: grid;
-  min-height: 100%;
+  min-height: 260px;
   place-items: center;
-  padding: 1.5rem 0;
+  padding: 3rem 0 1.5rem;
 }
 
-.agent-list-empty .dropzone {
+/* Actionable guide — editorial mono + hairline (no illustrations) */
+.agent-empty-guide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  max-width: 320px;
+  text-align: center;
+}
+
+.agent-empty-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   width: 100%;
-  min-height: 220px;
+}
+
+.agent-empty-steps li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: var(--text-ui);
+  line-height: 1.5;
+  color: var(--foreground);
+}
+
+.agent-empty-step-num {
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  color: var(--accent-soft-foreground);
+  width: 1.25rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.agent-empty-steps kbd {
+  display: inline-block;
+  padding: 0.1em 0.4em;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  line-height: 1.3;
+  color: var(--foreground);
+}
+
+.agent-empty-hint {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  letter-spacing: 0.01em;
+  line-height: 1.5;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 0.85rem;
+  width: 100%;
 }
 
 .agent-chat-empty {

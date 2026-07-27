@@ -8,6 +8,7 @@ import {
   FolderOpen,
   Image as ImageIcon,
 } from "lucide-react";
+import { useT } from "@/lib/i18n";
 
 export type AttachMediaItem = {
   path: string;
@@ -69,6 +70,7 @@ export function AttachMediaBody({
   density = "full",
   renderText,
 }: Props) {
+  const t = useT();
   const [broken, setBroken] = useState(false);
   const src = convertFileSrc(item.path);
   const compact = density === "compact";
@@ -192,11 +194,13 @@ export function AttachMediaBody({
           ? "flex h-auto min-h-0 w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-0 bg-default/30 px-3 py-5 text-muted shadow-none hover:bg-default/45 data-[hovered=true]:bg-default/45 data-[pressed=true]:scale-100"
           : "flex h-full min-h-48 w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-xl bg-default/30 text-muted hover:bg-default/45"
       }
-      aria-label="用系统打开"
+      aria-label={t("common.openInSystem")}
       onPress={openInSystem}
     >
       <FallbackIcon size={compact ? 28 : 48} strokeWidth={1.4} />
-      <span className={compact ? "text-xs" : "text-sm"}>点击用系统打开</span>
+      <span className={compact ? "text-xs" : "text-sm"}>
+        {t("common.clickToOpenInSystem")}
+      </span>
       {!compact ? (
         <span className="max-w-md break-all px-4 text-center text-xs opacity-70">
           {item.path}

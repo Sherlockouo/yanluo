@@ -12,6 +12,7 @@ import {
   defaultConfig,
 } from "@/lib/constants";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 
 function applyHudTheme(theme: "light" | "dark") {
   const root = document.documentElement;
@@ -26,6 +27,7 @@ function applyHudTheme(theme: "light" | "dark") {
  * Opens an in-window menu (native NSMenu fails over fullscreen apps).
  */
 export function AsrHudLangChip() {
+  const t = useT();
   const [payload, setPayload] = useState<FloatingPayload>({
     visible: false,
     state: "idle",
@@ -147,7 +149,7 @@ export function AsrHudLangChip() {
       }}
     >
       {menuOpen ? (
-        <div className="hud-lang-menu" role="listbox" aria-label="翻译目标语言">
+        <div className="hud-lang-menu" role="listbox" aria-label={t("hud.targetLang")}>
           {langOptions.map(([code, label]) => {
             const selected = code === target;
             return (
@@ -193,7 +195,7 @@ export function AsrHudLangChip() {
           else openMenu();
         }}
       >
-        <AnimatePresence mode="wait" initial={false}>
+        <AnimatePresence initial={false}>
           <motion.span
             key={target}
             initial={{ opacity: 0, y: 3 }}

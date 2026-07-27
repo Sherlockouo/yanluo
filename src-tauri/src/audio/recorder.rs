@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 /// Target sample rate for ASR.
 const TARGET_SR: usize = 16_000;
 /// HUD spectrum bands — keep in sync with `HUD_BAND_COUNT` / FE `SPECTRUM_BAR_COUNT`.
-pub const METER_BAND_COUNT: usize = 6;
+pub const METER_BAND_COUNT: usize = 5;
 const METER_WINDOW: usize = 1_024; // ~64ms @ 16kHz
 
 /// HUD meter — loudness envelope is lock-free (capture thread);
@@ -813,6 +813,13 @@ fn process_chunk(
     }
     // Lock-free envelope — never waits on ASR PCM clones.
     meter.observe_peak(peak);
+
+    // Wake mlx-worker if waiting for new audio data.
+    let (lock, cvar) = &**super::audio_chunk_notify();
+    if let Ok(mut ready) = lock.lock() {
+        *ready = true;
+    }
+    cvar.notify_one();
 }
 
 fn linear_resample(input: &[f32], from_sr: usize, to_sr: usize) -> Vec<f32> {

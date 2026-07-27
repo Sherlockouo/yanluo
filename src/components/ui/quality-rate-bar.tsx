@@ -1,6 +1,7 @@
 import { Button } from "@heroui/react";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 
 export type QualityRating = "bad" | "ok" | "good";
 
@@ -14,13 +15,13 @@ type Props = {
 
 const OPTIONS: {
   value: QualityRating;
-  label: string;
+  labelKey: string;
   tone?: "bad" | "good";
   icon?: "down" | "up";
 }[] = [
-  { value: "bad", label: "差", tone: "bad", icon: "down" },
-  { value: "ok", label: "一般" },
-  { value: "good", label: "好", tone: "good", icon: "up" },
+  { value: "bad", labelKey: "common.rate.bad", tone: "bad", icon: "down" },
+  { value: "ok", labelKey: "common.rate.ok" },
+  { value: "good", labelKey: "common.rate.good", tone: "good", icon: "up" },
 ];
 
 export function QualityRateBar({
@@ -28,8 +29,10 @@ export function QualityRateBar({
   onRate,
   compact,
   className,
-  label = "识别效果",
+  label,
 }: Props) {
+  const t = useT();
+  const resolvedLabel = label ?? t("common.rate.label");
   const toggle = (value: QualityRating) => {
     onRate(rating === value ? "" : value);
   };
@@ -42,8 +45,14 @@ export function QualityRateBar({
         className,
       )}
     >
-      {label ? <span className="type-micro tracking-[0.06em]!">{label}</span> : null}
-      <div className="rate-segment" role="group" aria-label={label || "评分"}>
+      {resolvedLabel ? (
+        <span className="type-micro tracking-[0.06em]!">{resolvedLabel}</span>
+      ) : null}
+      <div
+        className="rate-segment"
+        role="group"
+        aria-label={resolvedLabel || t("common.rate.ariaFallback")}
+      >
         {OPTIONS.map((opt) => {
           const active = rating === opt.value;
           return (
@@ -59,7 +68,7 @@ export function QualityRateBar({
             >
               {opt.icon === "down" ? <ThumbsDown size={11} aria-hidden /> : null}
               {opt.icon === "up" ? <ThumbsUp size={11} aria-hidden /> : null}
-              {opt.label}
+              {t(opt.labelKey)}
             </Button>
           );
         })}

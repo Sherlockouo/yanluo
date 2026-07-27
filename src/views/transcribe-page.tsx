@@ -6,7 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button, Input, Label, TextField, toast } from "@heroui/react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Clipboard,
   Download,
@@ -24,6 +24,7 @@ import { ModeSwitch, PageHeader, PageShell } from "@/components/shared/page-shel
 import { useApp } from "@/app-context";
 import { springUI, duration, easeOut } from "@/lib/motion";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 
 type TranscriptViewerType =
   typeof import("@/components/ui/transcript-viewer").TranscriptViewer;
@@ -156,6 +157,7 @@ export function TranscribePage({
   active?: boolean;
   actionSlot?: HTMLElement | null;
 } = {}) {
+  const t = useT();
   const {
     config,
     history,
@@ -229,7 +231,7 @@ export function TranscribePage({
               path: null,
               version: null,
               ffmpeg_available: false,
-              hint: "无法检测 yt-dlp",
+              hint: t("transcribe.ytdlpDetectFailed"),
             });
           }
         });
@@ -454,11 +456,11 @@ export function TranscribePage({
             <>
               {sessionEntries.length > 0 ? (
                 <span className="dmast-meta">
-                  转写记录 · {sessionEntries.length}
+                  {t("transcribe.recordsCount", { n: sessionEntries.length })}
                 </span>
               ) : null}
               <button type="button" className="dlink" onClick={enterUpload}>
-                ＋ 新转写
+                ＋ {t("transcribe.newTranscription")}
               </button>
             </>
           ) : screen === "upload" && sessionEntries.length > 0 ? (
@@ -467,7 +469,7 @@ export function TranscribePage({
               className="dlink muted"
               onClick={() => go("result")}
             >
-              ← 转写记录 · {sessionEntries.length}
+              ← {t("transcribe.recordsCount", { n: sessionEntries.length })}
             </button>
           ) : null,
           actionSlot,
@@ -479,7 +481,6 @@ export function TranscribePage({
   };
 
   const removeEntry = async (id: string) => {
-    if (!window.confirm("确定删除这条转写记录？")) return;
     const remaining = sessionEntries.filter((e) => e.id !== id);
     const nextId =
       activeId === id || activeEntry?.id === id
@@ -487,14 +488,14 @@ export function TranscribePage({
         : activeId;
     try {
       await deleteHistory(id);
-      toast.success("已删除");
+      toast.success(t("transcribe.deleted"));
       if (remaining.length === 0) {
         go("upload", { processingName: null });
       } else if (nextId && nextId !== activeId) {
         go("result", { id: nextId, processingName: null });
       }
     } catch (error) {
-      toast.danger(`删除失败: ${error}`);
+      toast.danger(t("transcribe.deleteFailed", { error: String(error) }));
     }
   };
 
@@ -507,7 +508,7 @@ export function TranscribePage({
     if (processing) return;
     const selected = await open({
       multiple: false,
-      title: "选择音频或视频文件",
+      title: t("transcribe.pickFileTitle"),
       filters: TRANSCRIBE_FILE_FILTERS.map((f) => ({
         name: f.name,
         extensions: [...f.extensions],
@@ -538,7 +539,7 @@ export function TranscribePage({
             setDragOver(false);
             const path = event.payload.paths.find(isMediaPath);
             if (!path) {
-              toast.warning("请拖入音频或视频文件");
+              toast.warning(t("transcribe.dropMediaOnly"));
               return;
             }
             acceptPath(path);
@@ -575,11 +576,11 @@ export function TranscribePage({
       jobDirRef.current = null;
       void invoke("cleanup_download_job", { jobDir: dir }).catch(() => {});
     }
-    toast.success("已取消");
+    toast.success(t("transcribe.cancelled"));
   };
 
   const languageLabel =
-    config.language === "auto" ? "自动检测" : config.language;
+    config.language === "auto" ? t("transcribe.langAutoDetect") : config.language;
   const selectedIsVideo = selectedPath ? isVideoPath(selectedPath) : false;
 
   const runTranscribe = async () => {
@@ -601,7 +602,7 @@ export function TranscribePage({
     } catch (error) {
       setSelectedPath(path);
       go("upload", { processingName: null, jobBaselineId: null });
-      toast.danger(`转写失败: ${error}`);
+      toast.danger(t("transcribe.transcribeFailed", { error: String(error) }));
     }
   };
 
@@ -610,15 +611,18 @@ export function TranscribePage({
     const url = rawUrl.trim();
     if (!/^https?:\/\//i.test(url)) return;
     if (!ytdlp?.available) {
-      toast.danger(ytdlp?.hint || "请先安装 yt-dlp");
+      toast.danger(ytdlp?.hint || t("transcribe.installYtdlp"));
       return;
     }
     if (!ytdlp.ffmpeg_available) {
-      toast.danger("需要本机 ffmpeg（brew install ffmpeg）");
+      toast.danger(t("transcribe.needFfmpeg"));
       return;
     }
 
-    const label = urlMode === "audio" ? "下载音频中…" : "下载视频中…";
+    const label =
+      urlMode === "audio"
+        ? t("transcribe.downloadingAudio")
+        : t("transcribe.downloadingVideo");
     beginJob(label);
     markSession("transcribe");
 
@@ -631,8 +635,10 @@ export function TranscribePage({
       const name =
         result.title?.trim() ||
         fileName(result.path) ||
-        (urlMode === "audio" ? "网络音频" : "网络视频");
-      go("upload", { processingName: `识别中 · ${name}` });
+        (urlMode === "audio"
+          ? t("transcribe.webAudio")
+          : t("transcribe.webVideo"));
+      go("upload", { processingName: t("transcribe.recognizingName", { name }) });
       await invoke("save_app_config", { config });
       await invoke("transcribe_file", {
         path: result.path,
@@ -641,7 +647,9 @@ export function TranscribePage({
       window.setTimeout(() => void loadHistory(), 800);
     } catch (error) {
       go("upload", { processingName: null, jobBaselineId: null });
-      toast.danger(`下载/转写失败: ${error}`);
+      toast.danger(
+        t("transcribe.downloadTranscribeFailed", { error: String(error) }),
+      );
       if (jobDirRef.current) {
         const dir = jobDirRef.current;
         jobDirRef.current = null;
@@ -654,7 +662,7 @@ export function TranscribePage({
 
   const headerStatus =
     screen === "processing"
-      ? "识别中"
+      ? t("transcribe.recognizing")
       : screen === "result"
         ? languageLabel
         : `${providerLabel(config.asr_provider)} · ${languageLabel}`;
@@ -662,7 +670,7 @@ export function TranscribePage({
     screen === "result" ? (
       <Button variant="primary" onPress={enterUpload}>
         <Plus size={16} aria-hidden />
-        新转写
+        {t("transcribe.newTranscription")}
       </Button>
     ) : null;
 
@@ -670,7 +678,7 @@ export function TranscribePage({
     <>
       {mastAction}
       {embedded ? null : (
-        <PageHeader title="转写" status={headerStatus} action={headerAction} />
+        <PageHeader title={t("transcribe.title")} status={headerStatus} action={headerAction} />
       )}
 
       {/* Embedded (出稿 文件): 新转写 / 转写记录 toggle lives in the masthead. */}
@@ -751,6 +759,7 @@ function UploadPhase({
   onStart: () => void;
   onUrlStart: (url: string) => void;
 }) {
+  const t = useT();
   const [source, setSource] = useState<"file" | "link">("file");
   // Local — keystrokes must not re-render TranscribePage + history tree.
   const [urlInput, setUrlInput] = useState("");
@@ -764,13 +773,13 @@ function UploadPhase({
           <div className="flex flex-col gap-5 pt-12">
             {modelBlocked ? (
               <div className="rounded-xl bg-warning/10 px-3 py-2 type-meta text-warning">
-                Qwen 模型未加载 — 去设置 → 识别点「加载模型」，或改用 Apple Speech
+                {t("transcribe.modelBlockedBanner")}
               </div>
             ) : null}
 
             <button
               type="button"
-              aria-label={selectedPath ? "更换文件" : "选择文件"}
+              aria-label={selectedPath ? t("transcribe.changeFile") : t("transcribe.chooseFile")}
               onClick={onPick}
               className={cn("dropzone", dragOver && "is-drag")}
             >
@@ -786,7 +795,7 @@ function UploadPhase({
                   <span className="dropzone-t max-w-full truncate">
                     {fileName(selectedPath)}
                   </span>
-                  <span className="dropzone-fmt">点击更换</span>
+                  <span className="dropzone-fmt">{t("transcribe.clickToChange")}</span>
                 </>
               ) : (
                 <>
@@ -794,10 +803,12 @@ function UploadPhase({
                     <Upload size={22} aria-hidden />
                   </span>
                   <span className="dropzone-t">
-                    {dragOver ? "松开以添加" : "拖入音频 / 视频文件"}
+                    {dragOver
+                      ? t("transcribe.releaseToAdd")
+                      : t("transcribe.dropHint")}
                   </span>
                   <span className="dropzone-fmt">
-                    mp3 · wav · m4a · mp4 · mov — 或粘贴链接
+                    {t("transcribe.formatHint")}
                   </span>
                 </>
               )}
@@ -814,7 +825,7 @@ function UploadPhase({
               ) : (
                 <FileAudio size={16} aria-hidden />
               )}
-              开始转写
+              {t("transcribe.start")}
             </Button>
           </div>
         ) : (
@@ -827,7 +838,7 @@ function UploadPhase({
               value={urlInput}
               onChange={setUrlInput}
             >
-              <Label>媒体链接</Label>
+              <Label>{t("transcribe.mediaLink")}</Label>
               <Input placeholder="https://…" />
             </TextField>
 
@@ -846,14 +857,14 @@ function UploadPhase({
               onPress={() => onUrlStart(urlInput)}
             >
               <Download size={16} aria-hidden />
-              开始转写
+              {t("transcribe.start")}
             </Button>
           </div>
         )}
       </ModeSwitch>
 
       <div className="mt-5 flex items-center">
-        <div className="tswitch" role="tablist" aria-label="来源">
+        <div className="tswitch" role="tablist" aria-label={t("transcribe.sourceAria")}>
           <button
             type="button"
             role="tab"
@@ -861,7 +872,7 @@ function UploadPhase({
             className={cn("o", source === "file" && "is-active")}
             onClick={() => setSource("file")}
           >
-            本地文件
+            {t("transcribe.localFile")}
           </button>
           <span className="sep">·</span>
           <button
@@ -871,13 +882,13 @@ function UploadPhase({
             className={cn("o", source === "link" && "is-active")}
             onClick={() => setSource("link")}
           >
-            网络链接
+            {t("transcribe.webLink")}
           </button>
         </div>
         {source === "link" ? (
           <>
             <span className="w-5" />
-            <div className="tswitch" role="tablist" aria-label="媒体类型">
+            <div className="tswitch" role="tablist" aria-label={t("transcribe.mediaTypeAria")}>
               <button
                 type="button"
                 role="tab"
@@ -885,7 +896,7 @@ function UploadPhase({
                 className={cn("o", urlMode === "audio" && "is-active")}
                 onClick={() => onUrlModeChange("audio")}
               >
-                音频
+                {t("transcribe.audio")}
               </button>
               <span className="sep">·</span>
               <button
@@ -895,7 +906,7 @@ function UploadPhase({
                 className={cn("o", urlMode === "video" && "is-active")}
                 onClick={() => onUrlModeChange("video")}
               >
-                视频
+                {t("transcribe.video")}
               </button>
             </div>
           </>
@@ -920,8 +931,10 @@ function ProcessingPhase({
   downloadMessage: string | null;
   onCancel: () => void;
 }) {
+  const t = useT();
+  // processingName is a localized label — match either locale's download marker.
   const downloading =
-    name?.includes("下载") === true || downloadPercent != null;
+    (name != null && /下载|Download/i.test(name)) || downloadPercent != null;
   return (
     <div className="proc mx-auto w-full max-w-2xl">
       <div className="proc-ic">
@@ -933,7 +946,9 @@ function ProcessingPhase({
       </div>
       <div>
         <div className="text-sm font-semibold text-foreground">
-          {downloading ? "正在下载…" : "正在识别…"}
+          {downloading
+            ? t("transcribe.downloading")
+            : t("transcribe.recognizingEllipsis")}
         </div>
         {name ? (
           <p className="mt-1.5 max-w-sm truncate text-[13px] text-muted">
@@ -964,7 +979,7 @@ function ProcessingPhase({
         </p>
       </div>
       <Button size="sm" variant="secondary" onPress={onCancel}>
-        取消
+        {t("transcribe.cancel")}
       </Button>
     </div>
   );
@@ -985,12 +1000,14 @@ function ResultPhase({
   onDelete: (id: string) => void;
   onNew: () => void;
 }) {
+  const t = useT();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [Viewer, setViewer] = useState<TranscriptViewerType | null>(null);
   /** Full entry w/ alignment — fetched only when a row expands. */
   const [detailEntry, setDetailEntry] = useState<HistoryEntry | null>(null);
   // First paint: few rows. Rest after idle — tab-click must stay light.
   const [visibleCount, setVisibleCount] = useState(8);
+  const reducedMotion = useReducedMotion();
 
   useEffect(() => {
     if (!activeEntry) {
@@ -1054,24 +1071,32 @@ function ResultPhase({
           <span className="dropzone-ic">
             <FileAudio size={22} aria-hidden />
           </span>
-          <span className="dropzone-t">还没有稿</span>
+          <span className="dropzone-t">{t("transcribe.emptyTitle")}</span>
           <Button variant="primary" onPress={onNew}>
             <Plus size={16} aria-hidden />
-            开始出稿
+            {t("transcribe.startDraft")}
           </Button>
         </div>
       ) : (
         <div className="rlist">
+          <AnimatePresence initial={false}>
           {rows.map((entry, i) => (
-            <HistoryRow
+            <motion.div
               key={entry.id}
-              entry={entry}
-              index={i + 1}
-              active={expandedId === entry.id}
-              onSelect={() => openRow(entry.id)}
-              onDelete={() => onDelete(entry.id)}
-            />
+              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: -12 }}
+              transition={springUI}
+              style={{ willChange: "opacity, transform" }}
+            >
+              <HistoryRow
+                entry={entry}
+                index={i + 1}
+                active={expandedId === entry.id}
+                onSelect={() => openRow(entry.id)}
+                onDelete={() => onDelete(entry.id)}
+              />
+            </motion.div>
           ))}
+          </AnimatePresence>
         </div>
       )}
 
@@ -1100,6 +1125,7 @@ function TranscriptResultModal({
   Viewer: TranscriptViewerType | null;
   onClose: () => void;
 }) {
+  const t = useT();
   // Esc to close.
   useEffect(() => {
     if (!open) return;
@@ -1132,7 +1158,7 @@ function TranscriptResultModal({
       {open && entry ? (
         <motion.div
           key="trm-backdrop"
-          className="trm-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8"
+          className="trm-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 active:bg-black/50 transition-colors duration-100"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -1145,7 +1171,7 @@ function TranscriptResultModal({
             key="trm-panel"
             role="dialog"
             aria-modal="true"
-            aria-label="转写详情"
+            aria-label={t("transcribe.detailAria")}
             className="flex h-[min(85vh,44rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl"
             initial={{ opacity: 0, scale: 0.95, y: 24 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -1167,11 +1193,11 @@ function TranscriptResultModal({
                     variant="secondary"
                     onPress={() => {
                       void navigator.clipboard.writeText(entry.text);
-                      toast.success("已复制");
+                      toast.success(t("transcribe.copied"));
                     }}
                   >
                     <Clipboard size={14} aria-hidden />
-                    复制
+                    {t("transcribe.copy")}
                   </Button>
                 </motion.span>
                 <motion.span className="inline-flex" whileTap={{ scale: 0.94 }}>
@@ -1179,7 +1205,7 @@ function TranscriptResultModal({
                     isIconOnly
                     size="sm"
                     variant="ghost"
-                    aria-label="关闭"
+                    aria-label={t("transcribe.close")}
                     onPress={onClose}
                   >
                     <X size={16} aria-hidden />
@@ -1198,7 +1224,7 @@ function TranscriptResultModal({
                 durationSeconds={entry.duration_seconds}
                 segments={entry.segments}
                 alignment={entry.alignment}
-                emptyLabel="（空结果）"
+                emptyLabel={t("transcribe.emptyResult")}
               >
                 <div className="flex min-h-0 flex-1">
                   {/* Left: media column — video player, or audio placeholder card */}
@@ -1225,7 +1251,7 @@ function TranscriptResultModal({
                                 {fileName}
                               </div>
                               <div className="mt-0.5 font-mono text-[11px] text-muted">
-                                {entry.duration_seconds.toFixed(1)}s · 音频
+                                {entry.duration_seconds.toFixed(1)}s · {t("transcribe.audio")}
                               </div>
                             </div>
                           </div>
@@ -1237,7 +1263,7 @@ function TranscriptResultModal({
                     ) : (
                       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-muted">
                         <FileAudio size={26} aria-hidden />
-                        <p className="text-[12px]">无媒体文件</p>
+                        <p className="text-[12px]">{t("transcribe.noMedia")}</p>
                       </div>
                     )}
                   </motion.div>
@@ -1258,7 +1284,7 @@ function TranscriptResultModal({
               </Viewer.Root>
             ) : (
               <div className="grid flex-1 place-items-center text-[12px] text-muted">
-                加载阅读器…
+                {t("transcribe.loadingReader")}
               </div>
             )}
           </motion.div>
@@ -1284,10 +1310,41 @@ const HistoryRow = memo(function HistoryRow({
   onSelect: () => void;
   onDelete: () => void;
 }) {
+  const t = useT();
   const isVideo = isVideoMediaKind(entry.media_kind, entry.audio_path);
-  const raw = entry.text || "（空）";
+  const raw = entry.text || t("transcribe.empty");
   const preview =
     raw.length > PREVIEW_CHARS ? `${raw.slice(0, PREVIEW_CHARS)}…` : raw;
+
+  // Two-step inline confirm (P0-1): first press arms, second executes, 3s auto-reset.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const confirmTimer = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (confirmTimer.current != null) {
+        window.clearTimeout(confirmTimer.current);
+      }
+    },
+    [],
+  );
+
+  const pressDelete = () => {
+    if (confirmingDelete) {
+      if (confirmTimer.current != null) {
+        window.clearTimeout(confirmTimer.current);
+        confirmTimer.current = null;
+      }
+      setConfirmingDelete(false);
+      onDelete();
+      return;
+    }
+    setConfirmingDelete(true);
+    confirmTimer.current = window.setTimeout(() => {
+      setConfirmingDelete(false);
+      confirmTimer.current = null;
+    }, 3000);
+  };
 
   return (
     <div className={cn("ritem group", active && "is-open")}>
@@ -1305,21 +1362,30 @@ const HistoryRow = memo(function HistoryRow({
             ) : (
               <FileAudio size={11} aria-hidden />
             )}
-            {isVideo ? "视频" : "音频"}
+            {isVideo ? t("transcribe.video") : t("transcribe.audio")}
           </span>
           <span>{entry.duration_seconds.toFixed(1)}s</span>
         </div>
         <p className="rtext">{preview}</p>
       </button>
       <Button
-        isIconOnly
+        isIconOnly={!confirmingDelete}
         size="sm"
         variant="ghost"
-        className="mt-0.5 shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:bg-danger/10 hover:text-danger data-[hovered=true]:bg-danger/10 data-[hovered=true]:text-danger"
-        aria-label="删除"
-        onPress={onDelete}
+        className={cn(
+          "mt-0.5 shrink-0 transition-opacity",
+          confirmingDelete
+            ? "opacity-100 text-danger text-[12px] font-medium"
+            : "text-muted opacity-0 group-hover:opacity-100 hover:bg-danger/10 hover:text-danger data-[hovered=true]:bg-danger/10 data-[hovered=true]:text-danger",
+        )}
+        aria-label={confirmingDelete ? t("transcribe.confirmDelete") : t("transcribe.delete")}
+        onPress={pressDelete}
       >
-        <Trash2 size={14} aria-hidden />
+        {confirmingDelete ? (
+          <>{t("transcribe.confirmDelete")}</>
+        ) : (
+          <Trash2 size={14} aria-hidden />
+        )}
       </Button>
     </div>
   );
