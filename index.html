@@ -5,16 +5,78 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>QuietType</title>
 
+    <!-- Instant shell — paint before CSS/JS bundles. Avoids white flash. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0e0f12;
+        color: #eceae6;
+        font-family: "Satoshi", "Noto Sans SC", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      html.light,
+      html[data-theme="light"] {
+        background: #f6f5f2;
+        color: #1c1a17;
+      }
+      #boot-shell {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
+        display: grid;
+        place-items: center;
+        background: inherit;
+        pointer-events: none;
+        transition: opacity 0.22s ease;
+      }
+      #boot-shell[data-gone="1"] {
+        opacity: 0;
+      }
+      #boot-shell .mark {
+        font-family: "Instrument Serif", "Noto Serif SC", Georgia, serif;
+        font-size: 42px;
+        letter-spacing: 0.12em;
+        font-weight: 400;
+        opacity: 0.92;
+      }
+      #boot-shell .rule {
+        width: 28px;
+        height: 1px;
+        margin: 14px auto 0;
+        background: currentColor;
+        opacity: 0.28;
+      }
+      html[data-floating="1"] #boot-shell {
+        display: none;
+      }
+    </style>
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap"
       rel="stylesheet"
+      href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap"
+      media="print"
+      onload="this.media='all'"
     />
     <link
-      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript>
+      <link
+        href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap"
+        rel="stylesheet"
+      />
+      <link
+        href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
 
     <script>
       (function () {
@@ -31,6 +93,12 @@
     </script>
   </head>
   <body class="bg-background text-foreground">
+    <div id="boot-shell" aria-hidden="true">
+      <div>
+        <div class="mark">言落</div>
+        <div class="rule"></div>
+      </div>
+    </div>
     <div id="app"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

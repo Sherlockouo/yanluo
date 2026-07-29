@@ -1122,6 +1122,59 @@ button.form-actions-primary,
   pointer-events: none;
   z-index: 1;
 }
+.spotlight-hole-smooth {
+  transition:
+    top 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    left 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-hole-smooth {
+    transition: none;
+  }
+}
+
+/* —— First-run brand intro (Arc-adjacent quiet chime + mark) —— */
+.first-run-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-content: center;
+  place-items: center;
+  gap: 1rem;
+  background: var(--background);
+  pointer-events: auto;
+}
+.first-run-intro-mark {
+  font-family: var(--font-display, "Instrument Serif", "Noto Serif SC", serif);
+  font-size: clamp(2.75rem, 6vw, 3.75rem);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  color: var(--foreground);
+  line-height: 1;
+}
+.first-run-intro-rule {
+  width: 3.5rem;
+  height: 1px;
+  background: var(--accent);
+  transform-origin: center;
+}
+.first-run-intro-tag {
+  font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+@media (prefers-reduced-motion: reduce) {
+  .first-run-intro,
+  .first-run-intro-mark,
+  .first-run-intro-rule,
+  .first-run-intro-tag {
+    transition: none;
+  }
+}
 .spotlight-tip {
   position: absolute;
   z-index: 2;

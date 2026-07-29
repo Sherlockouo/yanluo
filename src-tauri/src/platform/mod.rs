@@ -163,21 +163,33 @@ pub(crate) fn remember_frontmost_app() {}
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn restore_previous_frontmost_app(_clear: bool) {}
 
-/// Startup-only: restore Regular + Dock and gently focus main once.
-/// HUD is created under Accessory first (see setup), then we come back here.
+/// Startup-only: restore Regular + Dock. Main stays hidden until FE paints
+/// (see `revealMainWindow` in main.tsx) — avoids long white flash.
+/// Safety net: show after 3s if FE never revealed.
 #[cfg(target_os = "macos")]
 pub(crate) fn restore_regular_activation_at_launch(app: &AppHandle) {
     use objc2::MainThreadMarker;
     use objc2_app_kit::NSApplication;
+    use std::time::Duration;
 
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
     let _ = app.set_dock_visibility(true);
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.show();
-    }
     if let Some(mtm) = MainThreadMarker::new() {
         NSApplication::sharedApplication(mtm).activate();
     }
+
+    let fallback = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(3000));
+        if let Some(main) = fallback.get_webview_window("main") {
+            match main.is_visible() {
+                Ok(true) => {}
+                _ => {
+                    let _ = main.show();
+                }
+            }
+        }
+    });
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -201,15 +213,13 @@ pub(crate) fn raise_floating_hud_level(window: &tauri::WebviewWindow, order_fron
         // MainMenu level is enough for overlays; PopUp is fine too but MainMenu
         // is the common choice for fullscreen-auxiliary HUDs.
         ns_window.setLevel(NSMainMenuWindowLevel + 2);
-        // Do NOT use Stationary — it pins the window to the desktop Space and
-        // prevents joining fullscreen Spaces. Transient + FullScreenAuxiliary
-        // is what actually rides along with fullscreen apps.
-        let existing = ns_window.collectionBehavior();
-        let behavior = existing
-            | NSWindowCollectionBehavior::CanJoinAllSpaces
+        // Absolute mask — do not OR with Tauri defaults (Managed /
+        // MoveToActiveSpace / Stationary eject HUD from fullscreen Spaces).
+        // Transient also keeps overlays off fullscreen Spaces; omit it.
+        // Canonical: CanJoinAllSpaces | FullScreenAuxiliary (+ Stage Manager).
+        let behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
             | NSWindowCollectionBehavior::FullScreenAuxiliary
-            | NSWindowCollectionBehavior::CanJoinAllApplications
-            | NSWindowCollectionBehavior::Transient;
+            | NSWindowCollectionBehavior::CanJoinAllApplications;
         ns_window.setCollectionBehavior(behavior);
         // Always opaque for show — cancel any in-flight dismiss fade.
         ns_window.setAlphaValue(1.0);
@@ -456,12 +466,10 @@ fn configure_floating_overlay_panel(
         ns_window.setIgnoresMouseEvents(false);
         ns_window.setLevel(NSMainMenuWindowLevel + 2);
 
-        let existing = ns_window.collectionBehavior();
-        let behavior = existing
-            | NSWindowCollectionBehavior::CanJoinAllSpaces
+        // Same absolute mask as raise_floating_hud_level — stay above fullscreen.
+        let behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
             | NSWindowCollectionBehavior::FullScreenAuxiliary
-            | NSWindowCollectionBehavior::CanJoinAllApplications
-            | NSWindowCollectionBehavior::Transient;
+            | NSWindowCollectionBehavior::CanJoinAllApplications;
         ns_window.setCollectionBehavior(behavior);
     }
 

@@ -64,6 +64,10 @@ export function PageShell({
   className?: string;
 }) {
   const reduce = useReducedMotion();
+  // Tour navigates under a veil — skip enter hitch so steps don't flash.
+  const tourActive =
+    typeof document !== "undefined" &&
+    document.documentElement.dataset.tour === "1";
 
   return (
     <motion.section
@@ -71,7 +75,11 @@ export function PageShell({
         "mx-auto flex w-full max-w-3xl flex-col gap-6 pb-10",
         className,
       )}
-      initial={reduce ? false : { opacity: 0.92, y: 12, scale: 0.995 }}
+      initial={
+        reduce || tourActive
+          ? false
+          : { opacity: 0.92, y: 12, scale: 0.995 }
+      }
       animate={{ opacity: 1, y: 0, scale: 1 }}
       transition={{ duration: duration.normal, ease: easeOut }}
     >

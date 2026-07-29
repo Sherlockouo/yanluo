@@ -117,6 +117,13 @@ fn finish_floating_hide_inner(app: &AppHandle) {
     });
 }
 
+/// Native HUD currently ordered-in (true between show and hide-start).
+/// Recording→processing→editing re-emits visible=true; only place on false→true.
+fn hud_native_up() -> &'static AtomicBool {
+    static UP: AtomicBool = AtomicBool::new(false);
+    &UP
+}
+
 /// Remember the app that had focus before HUD / paste, so we can hand it back
 /// and so Cmd+V lands in the right place.
 pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
@@ -136,34 +143,40 @@ pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
                 // makes Fn/cancel "jump back" to QuietType. HUD was created
                 // under Accessory once at launch so FullScreenAuxiliary sticks.
                 remember_frontmost_app();
-                let width = window
-                    .inner_size()
-                    .ok()
-                    .and_then(|s| {
-                        window
-                            .scale_factor()
-                            .ok()
-                            .map(|scale| s.width as f64 / scale.max(1.0))
-                    })
-                    .unwrap_or(FLOATING_HUD_MIN_W);
-                let (x, y) = resolve_hud_logical_position(&app, width);
-                mark_hud_programmatic_move();
-                let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+                // Place only on hide→show. Mid-session emits (RMS / state) must
+                // not re-resolve — that snaps HUD away from drag / resize anchor.
+                let need_place = !hud_native_up().swap(true, Ordering::AcqRel);
+                if need_place {
+                    let width = window
+                        .inner_size()
+                        .ok()
+                        .and_then(|s| {
+                            window
+                                .scale_factor()
+                                .ok()
+                                .map(|scale| s.width as f64 / scale.max(1.0))
+                        })
+                        .unwrap_or(FLOATING_HUD_MIN_W);
+                    let (x, y) = resolve_hud_logical_position(&app, width);
+                    mark_hud_programmatic_move();
+                    let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+                    eprintln!("[floating] place at logical ({x:.0}, {y:.0})");
+                }
                 let _ = window.set_always_on_top(true);
                 // Prefer orderFrontRegardless over Tauri show()/set_focus —
                 // those activate the app and steal keyboard focus.
                 #[cfg(target_os = "macos")]
                 {
                     raise_floating_hud_level(&window, true);
-                    eprintln!("[floating] orderFrontRegardless at logical ({x:.0}, {y:.0})");
                 }
                 #[cfg(not(target_os = "macos"))]
                 match window.show() {
-                    Ok(()) => eprintln!("[floating] show() at logical ({x:.0}, {y:.0})"),
+                    Ok(()) => {}
                     Err(e) => eprintln!("[floating] show() failed: {e}"),
                 }
                 sync_floating_lang_chip(&app, show_lang);
             } else {
+                hud_native_up().store(false, Ordering::Release);
                 persist_floating_hud_position(&window);
                 // Fade native window alpha in lockstep with FE exit (220ms),
                 // then orderOut — do not wait for FE onExitComplete IPC lag.
@@ -933,6 +946,9 @@ pub(crate) fn get_floating_status(app: AppHandle) -> FloatingStatus {
 }
 
 /// Keep horizontal center; grow/shrink **upward** (bottom edge stays put).
+///
+/// Do **not** clamp with `.max(8.0)` — multi-monitor CG logical Y is often
+/// negative (screen above primary). That clamp yanked HUD onto the primary.
 fn anchored_resize_xy(
     cur_x: f64,
     cur_y: f64,
@@ -943,9 +959,7 @@ fn anchored_resize_xy(
 ) -> (f64, f64) {
     let center_x = cur_x + cur_w / 2.0;
     let bottom = cur_y + cur_h;
-    let x = (center_x - width / 2.0).max(8.0);
-    let y = (bottom - height).max(8.0);
-    (x, y)
+    (center_x - width / 2.0, bottom - height)
 }
 
 /// Keep the frosted capsule anchored on its current center as elastic width changes.
@@ -1189,7 +1203,7 @@ fn position_floating_agent_menu(app: &AppHandle, item_count: usize) {
     let x = pos.x as f64 / scale + x_off - FLOATING_AGENT_MENU_INSET;
     let y = pos.y as f64 / scale - h - 4.0;
     let _ = menu.set_size(tauri::LogicalSize::new(w, h));
-    let _ = menu.set_position(tauri::LogicalPosition::new(x, y.max(8.0)));
+    let _ = menu.set_position(tauri::LogicalPosition::new(x, y));
     let _ = menu.set_always_on_top(true);
 }
 

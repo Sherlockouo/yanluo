@@ -10,8 +10,9 @@ import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
 import { duration, easeOut, springBounce } from "@/lib/motion";
 import { useApp } from "@/app-context";
-import { ONBOARD_STORAGE_KEY } from "@/lib/first-run";
+import { ONBOARD_STORAGE_KEY, INTRO_DONE_EVENT, readIntroDone } from "@/lib/first-run";
 import { readTourDone, requestStartTour } from "@/components/spotlight-tour";
+import { playSfx, unlockSfx } from "@/lib/sfx";
 import {
   type ModelDownloadProgress,
   type ModelStatus,
@@ -58,10 +59,18 @@ export function OnboardingGate() {
   const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
 
   useEffect(() => {
-    const id = window.requestAnimationFrame(() => {
-      if (!readOnboarded()) setOpen(true);
-    });
-    return () => window.cancelAnimationFrame(id);
+    const tryOpen = () => {
+      if (readOnboarded()) return;
+      // Cover under intro until brand moment finishes — no double-flash.
+      if (!readIntroDone()) return;
+      setOpen(true);
+    };
+    const id = window.requestAnimationFrame(tryOpen);
+    window.addEventListener(INTRO_DONE_EVENT, tryOpen);
+    return () => {
+      window.cancelAnimationFrame(id);
+      window.removeEventListener(INTRO_DONE_EVENT, tryOpen);
+    };
   }, []);
 
   useEffect(() => {
@@ -128,15 +137,19 @@ export function OnboardingGate() {
   const [showDone, setShowDone] = useState(false);
 
   const finish = () => {
+    unlockSfx();
+    playSfx("success");
     markOnboarded();
     setShowDone(true);
+    // Start tour while gate still covers — shell stays veiled, no blank flash.
+    const willTour = !readTourDone();
+    if (willTour) {
+      window.setTimeout(() => requestStartTour(), 180);
+    }
     window.setTimeout(() => {
       setShowDone(false);
       setOpen(false);
-      if (!readTourDone()) {
-        window.setTimeout(() => requestStartTour(), 280);
-      }
-    }, 400);
+    }, willTour ? 520 : 400);
   };
 
   const goEngineOrFinish = () => {

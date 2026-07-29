@@ -40,6 +40,7 @@ import { cn } from "@/lib/cn";
 import { easeOut, springBounce } from "@/lib/motion";
 import { useT } from "@/lib/i18n";
 import { lookupRustMsg } from "@/lib/i18n/rust-msg";
+import { playSfx, unlockSfx } from "@/lib/sfx";
 
 const CAPSULE_W = 420;
 const CAPSULE_H = 56;
@@ -853,6 +854,14 @@ export function AsrHud() {
       payload.state === "refining" ||
       payload.state === "editing");
 
+  const prevShowRef = useRef(false);
+  useEffect(() => {
+    if (show === prevShowRef.current) return;
+    prevShowRef.current = show;
+    unlockSfx();
+    playSfx(show ? "hudShow" : "hudHide");
+  }, [show]);
+
   return (
     <div
       className="hud-root"
@@ -887,7 +896,7 @@ export function AsrHud() {
             }}
             exit={reducedMotion
               ? { opacity: 0, transition: { duration: 0.14 } }
-              : { opacity: 0, scale: 0.7, y: 8, transition: { type: "tween", duration: 0.15, ease: easeOut } }
+              : { opacity: 0, scale: 0.7, transition: { type: "tween", duration: 0.15, ease: easeOut } }
             }
           >
           {isAgent ? (
@@ -1544,8 +1553,6 @@ function FloatingCapsule({
             {formatTimer(recSec)}
           </span>
         ) : null}
-        {/* P1-13: Auto-submit hint at 90s */}
-        {autoSubmitHint && <span className="hud-auto-submit-hint">{t("hud.autoSubmit")}</span>}
       </div>
     </div>
   );

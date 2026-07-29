@@ -196,6 +196,7 @@ fn download_file(
     }
     let mut out = File::create(&tmp).map_err(|e| e.to_string())?;
     let mut downloaded: u64 = 0;
+    let mut last_emit: u64 = 0;
     let mut buf = [0u8; 1024 * 64];
     loop {
         let n = {
@@ -207,25 +208,29 @@ fn download_file(
         }
         out.write_all(&buf[..n]).map_err(|e| e.to_string())?;
         downloaded += n as u64;
-        let percent = total.map(|t| {
-            if t == 0 {
-                0.0
-            } else {
-                (downloaded as f64 / t as f64) * 100.0
-            }
-        });
-        let _ = app.emit(
-            "model-download-progress",
-            DownloadProgress {
-                model_id: model_id.to_string(),
-                file: file_label.to_string(),
-                downloaded,
-                total,
-                file_index,
-                file_count,
-                percent,
-            },
-        );
+        // Throttle — every 256 KiB (or finish). Unthrottled emits starve the webview.
+        if downloaded - last_emit >= 256 * 1024 || total == Some(downloaded) {
+            last_emit = downloaded;
+            let percent = total.map(|t| {
+                if t == 0 {
+                    0.0
+                } else {
+                    (downloaded as f64 / t as f64) * 100.0
+                }
+            });
+            let _ = app.emit(
+                "model-download-progress",
+                DownloadProgress {
+                    model_id: model_id.to_string(),
+                    file: file_label.to_string(),
+                    downloaded,
+                    total,
+                    file_index,
+                    file_count,
+                    percent,
+                },
+            );
+        }
     }
     drop(out);
     fs::rename(&tmp, dest).map_err(|e| e.to_string())?;
@@ -268,9 +273,23 @@ pub(crate) fn get_model_status(
     })
 }
 
+/// Download Qwen ASR weights + tokenizer off the IPC thread.
+/// Blocking HTTP on a sync command freezes the webview; mirror update/download.
 #[tauri::command]
-pub(crate) fn download_qwen_asr_model(
+pub(crate) async fn download_qwen_asr_model(
     app: AppHandle,
+    model_id: String,
+    download_aligner: Option<bool>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        download_qwen_asr_model_blocking(&app, model_id, download_aligner)
+    })
+    .await
+    .map_err(|e| format!("下载任务失败: {e}"))?
+}
+
+fn download_qwen_asr_model_blocking(
+    app: &AppHandle,
     model_id: String,
     download_aligner: Option<bool>,
 ) -> Result<String, String> {
@@ -288,7 +307,7 @@ pub(crate) fn download_qwen_asr_model(
         let dest = dest_dir.join(name);
         let url = hf_resolve(spec.repo, spec.file);
         eprintln!("[model-dl] {} → {}", url, dest.display());
-        download_file(&app, model_id, &url, &dest, name, i + 1, file_count)?;
+        download_file(app, model_id, &url, &dest, name, i + 1, file_count)?;
     }
 
     if !has_model_weights(&dest_dir) {
@@ -299,7 +318,7 @@ pub(crate) fn download_qwen_asr_model(
     }
 
     if download_aligner.unwrap_or(false) {
-        let _ = download_aligner_best_effort(&app);
+        let _ = download_aligner_best_effort(app);
     }
 
     let path_str = dest_dir.to_string_lossy().to_string();

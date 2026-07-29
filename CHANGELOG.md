@@ -2,6 +2,17 @@
 
 All notable changes to QuietType（言落）are documented in this file.
 
+## [0.10.6] — 2026-07-29
+
+### Added
+- 首次启动品牌 intro + 轻量交互音效（可关）
+- 启动壳：内联主题底色，主窗首帧后再显示，减轻白屏
+
+### Fixed
+- 模型下载改为后台线程 + 进度节流，不再冻住前端
+- HUD：仅 hide→show 时放置；去掉副屏 `.max(8)` 拽回主屏
+- HUD：全屏 Space 用 `CanJoinAllSpaces | FullScreenAuxiliary`（去掉 Transient）
+
 ## [0.10.5] — 2026-07-23
 
 ### Added

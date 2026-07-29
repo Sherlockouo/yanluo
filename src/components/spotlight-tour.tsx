@@ -9,7 +9,11 @@ import {
   ONBOARD_STORAGE_KEY,
   TOUR_START_EVENT,
   TOUR_STORAGE_KEY,
+  INTRO_DONE_EVENT,
+  readIntroDone,
+  setTourActive,
 } from "@/lib/first-run";
+import { playSfx, unlockSfx } from "@/lib/sfx";
 
 export { TOUR_STORAGE_KEY, TOUR_START_EVENT };
 
@@ -110,6 +114,7 @@ function measureAnchor(anchor: string): Hole | null {
 
 /**
  * Quiet spotlight tour — one short line per step, copper hole, no manual wall.
+ * Keeps previous hole while measuring next → no full-dim flash on step change.
  */
 export function SpotlightTour() {
   const navigate = useNavigate();
@@ -120,12 +125,15 @@ export function SpotlightTour() {
 
   const finish = useCallback(() => {
     markTourDone();
+    setTourActive(false);
     setActive(false);
     setIndex(0);
     setHole(null);
   }, []);
 
   const start = useCallback(() => {
+    unlockSfx();
+    setTourActive(true);
     setIndex(0);
     setActive(true);
   }, []);
@@ -133,12 +141,17 @@ export function SpotlightTour() {
   useEffect(() => {
     const onStart = () => start();
     window.addEventListener(TOUR_START_EVENT, onStart);
-    const id = window.requestAnimationFrame(() => {
+    const tryAuto = () => {
+      if (!readIntroDone()) return;
       if (readOnboardedFlag() && !readTourDone()) start();
-    });
+    };
+    const id = window.requestAnimationFrame(tryAuto);
+    window.addEventListener(INTRO_DONE_EVENT, tryAuto);
     return () => {
       window.removeEventListener(TOUR_START_EVENT, onStart);
+      window.removeEventListener(INTRO_DONE_EVENT, tryAuto);
       window.cancelAnimationFrame(id);
+      setTourActive(false);
     };
   }, [start]);
 
@@ -152,13 +165,15 @@ export function SpotlightTour() {
     const run = async () => {
       if (step.path) {
         navigate(step.path);
-        await new Promise((r) => window.setTimeout(r, 120));
+        // Let route paint under veil (tour-active disables PageShell enter).
+        await new Promise((r) => window.setTimeout(r, 80));
       }
       const tick = () => {
         if (cancelled) return;
         const next = measureAnchor(step.anchor);
         if (next) {
           setHole(next);
+          playSfx("tourStep");
           return;
         }
         tries += 1;
@@ -190,11 +205,13 @@ export function SpotlightTour() {
   }, [active, step]);
 
   const next = () => {
+    unlockSfx();
+    playSfx("uiTap");
     if (index + 1 >= STEPS.length) {
       finish();
       return;
     }
-    setHole(null);
+    // Keep current hole until next measures — no flash to full dim.
     setIndex((i) => i + 1);
   };
 
@@ -219,7 +236,7 @@ export function SpotlightTour() {
       >
         {hole ? (
           <div
-            className="spotlight-hole"
+            className="spotlight-hole spotlight-hole-smooth"
             style={{
               top: hole.top,
               left: hole.left,

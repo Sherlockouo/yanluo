@@ -60,6 +60,7 @@ import { cn } from "@/lib/cn";
 import { useI18n, useT, tStatic } from "@/lib/i18n";
 import { useApp } from "@/app-context";
 import { requestStartTour } from "@/components/spotlight-tour";
+import { playSfx, readSfxEnabled, setSfxEnabled, unlockSfx } from "@/lib/sfx";
 import {
   activateLlmProviderPatch,
   agentModelsFor,
@@ -1781,6 +1782,7 @@ function GeneralPanel() {
   const langOptions = asrLanguageOptions(config.extra_languages);
   const addable = addableLanguageCatalog(config.extra_languages);
   const [pendingAdd, setPendingAdd] = useState<string>(addable[0]?.[0] ?? "");
+  const [sfxOn, setSfxOn] = useState(() => readSfxEnabled());
 
   useEffect(() => {
     if (!addable.some(([id]) => id === pendingAdd)) {
@@ -1788,6 +1790,14 @@ function GeneralPanel() {
     }
   }, [addable, pendingAdd]);
 
+  useEffect(() => {
+    const onSfx = (e: Event) => {
+      const detail = (e as CustomEvent<{ enabled: boolean }>).detail;
+      if (detail && typeof detail.enabled === "boolean") setSfxOn(detail.enabled);
+    };
+    window.addEventListener("yanluo:sfx-enabled", onSfx);
+    return () => window.removeEventListener("yanluo:sfx-enabled", onSfx);
+  }, []);
   const addLanguage = (id: string) => {
     const row = addable.find(([v]) => v === id);
     if (!row) return;
@@ -2010,6 +2020,32 @@ function GeneralPanel() {
             options={[
               { id: "dark" as const, label: t("settings.general.themeDark") },
               { id: "light" as const, label: t("settings.general.themeLight") },
+            ]}
+          />
+        </div>
+      </div>
+
+      <div className="set-row-line">
+        <div className="set-row-line-lab">
+          {t("settings.general.sfx")}
+          <small>{t("settings.general.sfxBlurb")}</small>
+        </div>
+        <div className="set-row-line-ctl">
+          <QSwitch
+            ariaLabel={t("settings.general.sfx")}
+            value={sfxOn ? "on" : "off"}
+            onChange={(mode) => {
+              const on = mode === "on";
+              setSfxEnabled(on);
+              setSfxOn(on);
+              if (on) {
+                unlockSfx();
+                playSfx("uiTap");
+              }
+            }}
+            options={[
+              { id: "on" as const, label: t("settings.general.sfxOn") },
+              { id: "off" as const, label: t("settings.general.sfxOff") },
             ]}
           />
         </div>
