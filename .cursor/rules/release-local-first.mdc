@@ -1,0 +1,14 @@
+---
+description: Release tags only after local pnpm build + cargo check
+alwaysApply: true
+---
+
+# Release — local green first
+
+Before cutting or pushing any `v*` release tag / `chore: release` commit:
+
+1. Run `pnpm build` (CI `beforeBuildCommand`; catches `tsc` unused / type errors).
+2. Run `cargo check --features qwen-local` in `src-tauri`.
+3. Prefer `pnpm tauri build --features qwen-local --bundles app` once when touching packaging.
+
+**Do not** push the tag hoping CI will find the break. Authority: `doc/RELEASE.md` → **Hard rule — local green before push**.

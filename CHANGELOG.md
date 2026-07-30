@@ -2,6 +2,12 @@
 
 All notable changes to QuietType（言落）are documented in this file.
 
+## [0.10.7] — 2026-07-30
+
+### Fixed
+- `pnpm build` / CI：`asr-hud` 未使用的 `autoSubmitHint`（TS6133）——接上 90s 提示 UI
+- 发版流程：必须本地 `pnpm build` + `cargo check` 过后再推 tag（见 `doc/RELEASE.md`）
+
 ## [0.10.6] — 2026-07-29
 
 ### Added
@@ -12,6 +18,7 @@ All notable changes to QuietType（言落）are documented in this file.
 - 模型下载改为后台线程 + 进度节流，不再冻住前端
 - HUD：仅 hide→show 时放置；去掉副屏 `.max(8)` 拽回主屏
 - HUD：全屏 Space 用 `CanJoinAllSpaces | FullScreenAuxiliary`（去掉 Transient）
+- （CI 因上述 TS6133 未出包；功能随 0.10.7 发布）
 
 ## [0.10.5] — 2026-07-23
 

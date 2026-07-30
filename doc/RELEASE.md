@@ -1,5 +1,28 @@
 # Release checklist (QuietType / 言落)
 
+## Hard rule — local green before push
+
+**Never push a release tag (or release commit) until the same commands CI runs have passed locally.** Tagging first and “letting CI find it” burns Actions minutes and ships broken releases (v0.10.5 / v0.10.6).
+
+Minimum gate **on the machine that cuts the release** (today: macOS arm64):
+
+```bash
+# 1) Frontend — same as tauri beforeBuildCommand (tsc catches unused vars)
+pnpm build
+
+# 2) Rust lib with release features
+cd src-tauri && cargo check --features qwen-local && cd ..
+
+# 3) Prefer a real package once (slow but catches metallib / bundle hooks)
+#    pnpm tauri build --features qwen-local --bundles app
+```
+
+Only after those pass: bump version → `pnpm version:sync` → CHANGELOG → commit → **then** tag + push.
+
+If `pnpm build` / `tsc` fails, do **not** tag. Fix, re-run, then release.
+
+Linux/Windows release jobs still run in CI (libtorch); macOS local `pnpm build` + package is the bar for FE / Tauri wiring mistakes.
+
 ## Version source of truth
 
 ```
@@ -20,11 +43,13 @@ package.json version
 1. Bump `package.json` version.
 2. Run `pnpm version:sync` (keeps Cargo / tauri.conf in lockstep).
 3. Update `CHANGELOG.md` with `## [x.y.z] — YYYY-MM-DD`.
-4. Commit, then tag **exactly** that version:
+4. **Run the local gate above** (`pnpm build` + `cargo check --features qwen-local`).
+5. Commit, then tag **exactly** that version:
 
 ```bash
 VERSION=$(node -p "require('./package.json').version")
 git tag "v$VERSION"
+git push origin HEAD
 git push origin "v$VERSION"
 ```
 
@@ -61,7 +86,7 @@ Release jobs run `node scripts/fetch-libtorch.mjs --cuda` then set `LIBTORCH` / 
 After the DMG is built, `scripts/embed-gatekeeper-fix.mjs` puts `若打不开-点我.command` on the DMG volume (and beside `.app` when present). CI re-uploads the patched DMG. Users who see「已损坏」drag the app to Applications, then double-click that script.
 
 ## Cut a release
-1. Follow **Version source of truth** above.
+1. Follow **Hard rule — local green before push**, then **Version source of truth**.
 2. **Release** workflow builds all platforms and uploads to the GitHub Release for that tag.
 3. In-app **设置 → 更新** compares local `CARGO_PKG_VERSION` to the latest GitHub Release tag and can download the matching installer.
 

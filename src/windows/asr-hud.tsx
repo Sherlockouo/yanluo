@@ -1553,6 +1553,9 @@ function FloatingCapsule({
             {formatTimer(recSec)}
           </span>
         ) : null}
+        {autoSubmitHint && recording && !editing ? (
+          <span className="hud-auto-submit-hint">{t("hud.autoSubmit")}</span>
+        ) : null}
       </div>
     </div>
   );
