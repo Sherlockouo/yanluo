@@ -1,6 +1,42 @@
 # Changelog
 
-All notable changes to QuietType（言落）are documented in this file.
+All notable changes to Yanluo（言落）are documented in this file.
+
+## Unreleased
+
+## [0.11.0] — 2026-08-13
+
+### Performance（macOS 交互延迟优化批次）
+- **Fn → HUD 原生直通**：热键不再绕行隐藏主窗口 webview + 2 次 IPC，原生
+  决策 start/stop（`handle_fn_toggle`）；松开→HUD 可见从 ~100–300ms 降至 ≈1 帧
+- **按下即开麦**（`speculative_mic`，默认开）：Fn 按下即预热采集，松开转正；
+  按下→松开之间的语音不再丢失；取消/异常路径立即丢弃，10s 收割兜底
+- **GPU 预热**：LoadModel 后跑静音前向，首次录音不再付 ~2s Metal JIT 冷启动
+- **吐字节奏 ramp**：段内前 3 个 partial 以 0.5s 步进（首字后快速跟进），
+  之后回 chunk 节奏；VAD commit / rollback 质量地板不变
+- `chunk_size_sec` 默认 1.5s → 1.0s（与前端对齐）
+- Apple 路径：设备支持时强制 on-device 识别（省网络往返）
+- HUD 弹出零磁盘 IO（hud-position.json 进程内缓存）；`start_recording`
+  异步化不再阻塞 AppKit 主线程；sfx AudioContext 启动即预建
+- `elog!` 全量毫秒时间戳 + 关键链路埋点，量化见 `doc/PERFORMANCE.md`
+
+### Changed
+- 性能差异报告：新增 `doc/PERFORMANCE.md`（链路前后对比 / 估算依据 / 实测协议）
+
+## [0.10.8] — 2026-08-04（随 v0.11.0 一并发布）
+
+### Changed
+- 品牌 EN / 安装包 / macOS TCC 显示名恢复为 **Yanluo**（QuietType 退役）；UI 中文仍为「言落」
+- 权限说明：提示系统设置里找 **Yanluo**，勿搜「言落」
+- HUD 默认位：靠下约 78% 屏高，距底 ≥160px
+- HUD 实时文字：水流式左推（transform 粘性跟追），不再变灰
+
+### Fixed
+- HUD：去掉粘贴后「撤销」态
+- HUD 编辑态：加宽加高、可选字（关 MovableByWindowBackground）、去掉 Fn badge
+- HUD 编辑态向上扩展（底边锚定）
+- HUD 位置记忆：外接屏错误 scale 导致左上角；拒绝/清理 `(0,~30)` 垃圾偏移
+- HUD：hide→show 才放置；FE 不再 `recenter` 抢位
 
 ## [0.10.7] — 2026-07-30
 

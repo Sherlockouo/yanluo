@@ -1,6 +1,6 @@
 [package]
 name = "yanluo"
-version = "0.10.7"
+version = "0.11.0"
 description = "Desktop app for Qwen3-ASR, built with Tauri 2.0"
 authors = ["Sherlockouo"]
 edition = "2021"
