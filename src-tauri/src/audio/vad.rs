@@ -338,7 +338,7 @@ pub(crate) fn make_vad(
     aggression: u8,
 ) -> Box<dyn VadBackend> {
     let kind = parse_backend_kind(backend).unwrap_or_else(|| {
-        eprintln!(
+        crate::elog::elog!(
             "[vad] unknown backend {:?}, falling back to energy",
             backend
         );
@@ -348,7 +348,7 @@ pub(crate) fn make_vad(
         "webrtc" => match WebRtcVad::try_new(cfg.frame_samples, aggression) {
             Ok(v) => Box::new(v),
             Err(e) => {
-                eprintln!("[vad] webrtc init failed ({e}), falling back to energy");
+                crate::elog::elog!("[vad] webrtc init failed ({e}), falling back to energy");
                 Box::new(EnergyVad::from_config(cfg))
             }
         },
@@ -360,14 +360,14 @@ pub(crate) fn make_vad(
                 match SileroVad::try_new(thr) {
                     Ok(v) => Box::new(v),
                     Err(e) => {
-                        eprintln!("[vad] silero init failed ({e}), falling back to energy");
+                        crate::elog::elog!("[vad] silero init failed ({e}), falling back to energy");
                         Box::new(EnergyVad::from_config(cfg))
                     }
                 }
             }
             #[cfg(not(feature = "silero-vad"))]
             {
-                eprintln!(
+                crate::elog::elog!(
                     "[vad] silero requested but built without `silero-vad` feature; using energy"
                 );
                 Box::new(EnergyVad::from_config(cfg))

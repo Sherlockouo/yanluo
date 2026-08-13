@@ -22,7 +22,7 @@
 | 音频条 | 5 根 × 3px 宽，铜 accent，高 6/14/20/12/8px，`scaleY(0.55↔1)` pulse 1.1s，delay 0/0.1/0.2/0.15/0.05s |
 | 文本 | 13px Satoshi，单行 nowrap ellipsis；已提交段 muted，当前段 foreground |
 | Fn badge | mono 10px，border hairline，圆角 6px，padding 1px 5px |
-| 位置 | **跟随鼠标所在屏幕**；默认居中、距底 **120px**（避开 Dock）。**按显示器**记住拖拽位；换屏 → 该屏默认位 |
+| 位置 | **跟随鼠标所在屏幕**；默认水平居中、垂直约 **78%** 屏高（靠下、距底 ≥160px 避开 Dock）。**按显示器**记住拖拽位；换屏 → 该屏默认位 |
 
 ## 状态
 

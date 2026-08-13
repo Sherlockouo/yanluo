@@ -18,7 +18,7 @@
 @import "./styles/agent.css";
 @import "./styles/view-motion.css";
 
-/* ─── Press-feedback utilities (pointer-down, not release) ─── */
+/* Press utilities — pointer-down, not release. Text tabs stay opacity-only (no glyph jitter). */
 .btn-press {
   transition: transform 100ms ease-out;
 }
@@ -53,18 +53,12 @@
   }
 }
 
-/* P1-3 & P1-5: :active for draft-page (.dmode) and transcribe-page (.dropzone) */
-.dmode:active {
-  transform: scale(0.96);
-  transition: transform 100ms ease-out;
-}
 .dropzone:active {
   transform: scale(0.985);
   transition: transform 100ms ease-out;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dmode:active,
   .dropzone:active {
     transform: none;
   }

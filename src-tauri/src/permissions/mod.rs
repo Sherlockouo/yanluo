@@ -6,10 +6,11 @@
 //! `macos_tcc.m` / `macos_speech.m`) — never via `/usr/bin/swift` (TCC aborts).
 //!
 //! UX rules:
-//! - Never stack an OS prompt **and** `open` System Settings for the same click.
-//! - Mic / Speech: show the Allow dialog when undecided; open Settings only if denied.
-//! - Accessibility / Input Monitoring / Screen: the request APIs already surface
-//!   Apple's prompt or Settings — do not open Settings again on top.
+//! - Mic / Speech: Allow dialog when undecided; open Settings only if previously denied.
+//! - Accessibility / Input Monitoring / Screen: always request in-process (registers the
+//!   binary in TCC), then open the matching Privacy pane if still not granted — Apple's
+//!   sheet alone often shows nothing on a second click, which feels like a dead button.
+//! - `needs_relaunch`: Screen Capture (and sometimes event taps) only stick after relaunch.
 
 use serde::Serialize;
 use std::env;
@@ -33,8 +34,10 @@ pub struct PermissionStatus {
 pub struct PermissionRequestResult {
     pub message: String,
     pub granted: bool,
-    /// Frontend should open System Settings only when this is true.
+    /// Frontend should open the matching Privacy pane when true.
     pub open_settings: bool,
+    /// Frontend should offer / run app relaunch (Screen Capture, dead event tap).
+    pub needs_relaunch: bool,
 }
 
 fn executable_path() -> String {
@@ -153,7 +156,7 @@ pub fn get_permission_status() -> PermissionStatus {
     }
 }
 
-/// Trigger the right OS flow for this permission — without stacking Settings on top.
+/// Trigger OS request, then open Settings when the grant cannot finish in-dialog.
 pub fn request_permission(kind: &str) -> Result<PermissionRequestResult, String> {
     #[cfg(target_os = "macos")]
     {
@@ -164,9 +167,10 @@ pub fn request_permission(kind: &str) -> Result<PermissionRequestResult, String>
                         message: "辅助功能已授权".into(),
                         granted: true,
                         open_settings: false,
+                        needs_relaunch: false,
                     });
                 }
-                // Apple's prompt already offers “打开系统设置”. Do not also `open` Settings.
+                // Registers this binary in TCC + may show Apple's sheet.
                 use core_foundation::base::TCFType;
                 use core_foundation::boolean::CFBoolean;
                 use core_foundation::dictionary::CFDictionary;
@@ -182,18 +186,22 @@ pub fn request_permission(kind: &str) -> Result<PermissionRequestResult, String>
                 };
                 if trusted != 0 {
                     Ok(PermissionRequestResult {
-                        message: "辅助功能已授权".into(),
+                        message: "辅助功能已授权。若粘贴仍失败，请重启应用。".into(),
                         granted: true,
                         open_settings: false,
+                        needs_relaunch: false,
                     })
                 } else {
+                    // Second click often shows no sheet — open Privacy pane so the
+                    // click always has a visible next step.
                     Ok(PermissionRequestResult {
                         message: format!(
-                            "请在系统弹窗中打开辅助功能，并开启本应用。开发模式列表名看路径：\n{}",
+                            "请在系统设置 → 辅助功能中开启本应用（列表名 Yanluo）。开发路径：\n{}",
                             executable_path()
                         ),
                         granted: false,
-                        open_settings: false,
+                        open_settings: true,
+                        needs_relaunch: false,
                     })
                 }
             }
@@ -203,22 +211,28 @@ pub fn request_permission(kind: &str) -> Result<PermissionRequestResult, String>
                         message: "输入监视已授权".into(),
                         granted: true,
                         open_settings: false,
+                        needs_relaunch: false,
                     });
                 }
-                // CGRequestListenEventAccess opens Privacy → Input Monitoring itself.
                 let granted = unsafe { ffi::CGRequestListenEventAccess() };
-                Ok(PermissionRequestResult {
-                    message: if granted {
-                        "输入监视已授权".into()
-                    } else {
-                        format!(
-                            "请在系统设置中打开「输入监视」开关。开发模式列表名看路径：\n{}",
+                if granted {
+                    Ok(PermissionRequestResult {
+                        message: "输入监视已授权。全局快捷键若仍无效，请重启应用。".into(),
+                        granted: true,
+                        open_settings: false,
+                        needs_relaunch: true,
+                    })
+                } else {
+                    Ok(PermissionRequestResult {
+                        message: format!(
+                            "请在系统设置 → 输入监视中开启本应用。开启后需重启才能生效。开发路径：\n{}",
                             executable_path()
-                        )
-                    },
-                    granted,
-                    open_settings: false,
-                })
+                        ),
+                        granted: false,
+                        open_settings: true,
+                        needs_relaunch: true,
+                    })
+                }
             }
             "microphone" => {
                 let status = unsafe { ffi::asr_tcc_mic_status() };
@@ -227,6 +241,7 @@ pub fn request_permission(kind: &str) -> Result<PermissionRequestResult, String>
                         message: "麦克风已授权".into(),
                         granted: true,
                         open_settings: false,
+                        needs_relaunch: false,
                     }),
                     0 => {
                         let started = unsafe { ffi::asr_tcc_request_mic_async() };
@@ -240,12 +255,14 @@ pub fn request_permission(kind: &str) -> Result<PermissionRequestResult, String>
                             message: "已弹出麦克风授权，请点「允许」。".into(),
                             granted: false,
                             open_settings: false,
+                            needs_relaunch: false,
                         })
                     }
                     1 | 3 => Ok(PermissionRequestResult {
                         message: "麦克风此前被拒绝，请在系统设置中开启。".into(),
                         granted: false,
                         open_settings: true,
+                        needs_relaunch: false,
                     }),
                     _ => Err("无法读取麦克风权限状态".into()),
                 }
@@ -257,6 +274,7 @@ pub fn request_permission(kind: &str) -> Result<PermissionRequestResult, String>
                         message: "语音识别已授权".into(),
                         granted: true,
                         open_settings: false,
+                        needs_relaunch: false,
                     }),
                     0 => {
                         let started = unsafe { ffi::asr_tcc_request_speech_async() };
@@ -270,12 +288,14 @@ pub fn request_permission(kind: &str) -> Result<PermissionRequestResult, String>
                             message: "已弹出语音识别授权，请点「允许」。".into(),
                             granted: false,
                             open_settings: false,
+                            needs_relaunch: false,
                         })
                     }
                     1 | 3 => Ok(PermissionRequestResult {
                         message: "语音识别此前被拒绝，请在系统设置中开启。".into(),
                         granted: false,
                         open_settings: true,
+                        needs_relaunch: false,
                     }),
                     _ => Err("无法读取语音识别权限状态".into()),
                 }
@@ -292,22 +312,28 @@ pub fn request_permission(kind: &str) -> Result<PermissionRequestResult, String>
                         message: "屏幕录制已授权".into(),
                         granted: true,
                         open_settings: false,
+                        needs_relaunch: false,
                     });
                 }
-                // CGRequestScreenCaptureAccess opens Privacy → Screen Recording itself.
                 let granted = unsafe { ffi::CGRequestScreenCaptureAccess() };
-                Ok(PermissionRequestResult {
-                    message: if granted {
-                        "屏幕录制已授权（可用于系统音频采集）".into()
-                    } else {
-                        format!(
-                            "请在系统设置中打开「屏幕录制」后重启应用。开发模式列表名看路径：\n{}",
+                if granted {
+                    Ok(PermissionRequestResult {
+                        message: "屏幕录制已授权。采集系统声请重启应用后生效。".into(),
+                        granted: true,
+                        open_settings: false,
+                        needs_relaunch: true,
+                    })
+                } else {
+                    Ok(PermissionRequestResult {
+                        message: format!(
+                            "请在系统设置 → 屏幕录制中开启本应用，然后重启。开发路径：\n{}",
                             executable_path()
-                        )
-                    },
-                    granted,
-                    open_settings: false,
-                })
+                        ),
+                        granted: false,
+                        open_settings: true,
+                        needs_relaunch: true,
+                    })
+                }
             }
             _ => Err(format!("unknown permission kind: {kind}")),
         }

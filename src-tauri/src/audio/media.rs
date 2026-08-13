@@ -87,7 +87,7 @@ pub(crate) fn ffmpeg_location_dir() -> Option<PathBuf> {
     let probe = dir.join("ffprobe");
     if !probe.is_file() && !ffmpeg_works(probe.to_str()?) {
         // Still return dir — some installs name-only work via PATH inside that dir.
-        eprintln!(
+        crate::elog::elog!(
             "[ffmpeg] ffprobe missing next to {} — yt-dlp may fail postprocess",
             path.display()
         );

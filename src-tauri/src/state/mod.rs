@@ -127,7 +127,7 @@ impl AsrEngine {
                 }));
                 if let Err(payload) = result {
                     let msg = panic_payload_str(&payload);
-                    eprintln!("[mlx-worker] PANIC: {msg}");
+                    crate::elog::elog!("[mlx-worker] PANIC: {msg}");
                     let _ = app_for_worker.emit("mlx-worker-dead", &msg);
                 }
             })

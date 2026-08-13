@@ -1149,7 +1149,7 @@ export function AgentJobPage() {
                         aria-expanded={addMenu}
                         data-add-menu-trigger
                         className={cn(
-                          "agent-composer-icon h-7 w-7 min-h-7 min-w-7 p-0",
+                          "agent-composer-icon btn-press h-7 w-7 min-h-7 min-w-7 p-0",
                           addMenu && "is-open",
                         )}
                         isDisabled={sending}
@@ -1253,10 +1253,11 @@ export function AgentJobPage() {
                             : t("agent.pause")
                         }
                         className={cn(
-                          "agent-composer-send h-7 w-7 min-h-7 min-w-7 p-0",
+                          "agent-composer-send btn-press h-7 w-7 min-h-7 min-w-7 p-0",
                           !hasPayload && active && "is-pause",
                         )}
                         isDisabled={!canSend}
+                        isPending={sending && hasPayload}
                         onPress={() => void sendContinue()}
                       >
                         <span
@@ -1282,13 +1283,11 @@ export function AgentJobPage() {
           </section>
         </div>
 
-        <AnimatePresence initial={false}>
-          {sideOpen ? (
+        {sideOpen ? (
             <motion.aside
               key="agent-side"
-              initial={{ opacity: 0, x: 20 }}
+              initial={{ opacity: 0, x: 12 }}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
               transition={springUI}
               className="agent-side-scroll flex w-full shrink-0 flex-col gap-2 overflow-auto border-t border-border pt-3 lg:w-72 lg:border-t-0 lg:border-l lg:pl-3 lg:pt-0"
             >
@@ -1362,7 +1361,6 @@ export function AgentJobPage() {
             </div>
             </motion.aside>
           ) : null}
-        </AnimatePresence>
       </div>
 
       <FilePreviewModal

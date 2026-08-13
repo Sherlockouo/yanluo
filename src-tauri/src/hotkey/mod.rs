@@ -124,11 +124,14 @@ fn hud_skip_pipeline(app: &AppHandle) -> bool {
 
 fn emit_hud_skip_or_confirm(app: &AppHandle) -> bool {
     if hud_confirm_editing(app) {
+        // Fn consumed by HUD interaction — no session will start.
+        crate::audio::discard_speculative_mic();
         let _ = app.emit_to("floating", "hud-confirm-request", ());
         let _ = app.emit("hud-confirm-request", ());
         return true;
     }
     if hud_skip_pipeline(app) {
+        crate::audio::discard_speculative_mic();
         let _ = app.emit_to("floating", "hud-accept-preview-request", ());
         let _ = app.emit("hud-accept-preview-request", ());
         return true;
@@ -136,24 +139,43 @@ fn emit_hud_skip_or_confirm(app: &AppHandle) -> bool {
     false
 }
 
+/// Fn key-down: warm the mic while the chord is still being decided (release
+/// commits). Config-gated (`speculative_mic`), External capture only, skipped
+/// while a session is live or while rebinding chords. Never blocks the tap —
+/// stream construction happens on its own thread.
+fn maybe_begin_speculative_mic(app: &AppHandle) {
+    // t0 of the press→popup→first-word chain (timestamps via elog).
+    crate::elog::elog!("[fn] key-down: arming (speculative warm-start attempt)");
+    let Some(engine) = app.try_state::<AsrEngine>() else {
+        return;
+    };
+    if engine.inner().recording.load(std::sync::atomic::Ordering::Acquire) {
+        return;
+    }
+    let Some(cfg) = engine.inner().config.lock().ok() else {
+        return;
+    };
+    if !cfg.speculative_mic
+        || cfg.audio_capture_mode != crate::audio::AudioCaptureMode::External
+        || (!binding_is_fn(&cfg.hotkey_transcribe) && !binding_is_fn(&cfg.hotkey_translate))
+    {
+        return;
+    }
+    drop(cfg);
+    crate::audio::begin_speculative_mic(engine.inner().live_meter.clone());
+}
+
 pub(crate) fn start_fn_event_tap(app: AppHandle) {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
-        eprintln!("[fn] global Fn listener is macOS-only");
+        crate::elog::elog!("[fn] global Fn listener is macOS-only");
         return;
     }
-    #[cfg(target_os = "macos")]
-    {
-        #[derive(Clone, Serialize)]
-        struct HotkeyPayload {
-            intention: String,
-            #[serde(skip_serializing_if = "std::ops::Not::not")]
-            shift: bool,
-        }
-
-        #[derive(Clone, Serialize)]
-        struct CapturedPayload {
+        #[cfg(target_os = "macos")]
+        {
+            #[derive(Clone, Serialize)]
+            struct CapturedPayload {
             slot: String,
             binding: HotkeyBinding,
         }
@@ -366,7 +388,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                             "recording" | "processing" | "refining"
                                         )
                                     {
-                                        eprintln!("[asr] agent Esc → cancel ({hud_state})");
+                                        crate::elog::elog!("[asr] agent Esc → cancel ({hud_state})");
                                         if let Some(engine) = app_cb.try_state::<AsrEngine>() {
                                             crate::commands::cancel_recording_with_reason(
                                                 &app_cb,
@@ -430,13 +452,9 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                 if emit_hud_skip_or_confirm(&app_cb) {
                                     return CallbackResult::Drop;
                                 }
-                                let _ = app_cb.emit(
-                                    "fn-key-down",
-                                    HotkeyPayload {
-                                        intention: "translate".into(),
-                                        shift: true,
-                                    },
-                                );
+                                // Native fast path — no webview round-trip before the
+                                // HUD starts showing (see handle_fn_toggle).
+                                let _ = app_cb.emit("fn-toggle-native", "translate");
                                 return CallbackResult::Drop;
                             }
                             if !binding_is_fn(&hk_transcribe)
@@ -445,13 +463,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                 if emit_hud_skip_or_confirm(&app_cb) {
                                     return CallbackResult::Drop;
                                 }
-                                let _ = app_cb.emit(
-                                    "fn-key-down",
-                                    HotkeyPayload {
-                                        intention: "transcribe".into(),
-                                        shift: false,
-                                    },
-                                );
+                                let _ = app_cb.emit("fn-toggle-native", "transcribe");
                                 return CallbackResult::Drop;
                             }
 
@@ -505,17 +517,19 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                             return CallbackResult::Keep;
                         }
 
-                        // --- Normal mode: Fn action commits on *release* ---
-                        // Same as capture: Fn→then→Shift still counts as ⇧+Fn.
-                        // Peak mods survive releasing Shift a frame before Fn.
-                        if let Ok(mut c) = chord_cb.lock() {
-                            if has_fn {
-                                merge_mods(&mut c.peak_mods, &mods);
-                                if !was_down {
-                                    c.fn_armed = true;
-                                }
-                                return CallbackResult::Drop;
-                            }
+        // --- Normal mode: Fn action commits on *release* ---
+        // Same as capture: Fn→then→Shift still counts as ⇧+Fn.
+        // Peak mods survive releasing Shift a frame before Fn.
+        if let Ok(mut c) = chord_cb.lock() {
+            if has_fn {
+                merge_mods(&mut c.peak_mods, &mods);
+                if !was_down {
+                    c.fn_armed = true;
+                    // Press→release is dead time otherwise; warm the mic now.
+                    maybe_begin_speculative_mic(&app_cb);
+                }
+                return CallbackResult::Drop;
+            }
 
                             if was_down && c.fn_armed {
                                 merge_mods(&mut c.peak_mods, &mods);
@@ -537,13 +551,9 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                     if emit_hud_skip_or_confirm(&app_cb) {
                                         return CallbackResult::Drop;
                                     }
-                                    let _ = app_cb.emit(
-                                        "fn-key-down",
-                                        HotkeyPayload {
-                                            intention: "translate".into(),
-                                            shift: true,
-                                        },
-                                    );
+                                    // Native fast path — no webview round-trip before the
+                                    // HUD starts showing (see handle_fn_toggle).
+                                    let _ = app_cb.emit("fn-toggle-native", "translate");
                                     return CallbackResult::Drop;
                                 }
                                 if binding_is_fn(&hk_transcribe)
@@ -552,17 +562,13 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                     if emit_hud_skip_or_confirm(&app_cb) {
                                         return CallbackResult::Drop;
                                     }
-                                    let _ = app_cb.emit(
-                                        "fn-key-down",
-                                        HotkeyPayload {
-                                            intention: "transcribe".into(),
-                                            shift: false,
-                                        },
-                                    );
+                                    let _ = app_cb.emit("fn-toggle-native", "transcribe");
                                     return CallbackResult::Drop;
                                 }
                                 if binding_is_fn(&hk_transcribe) || binding_is_fn(&hk_translate)
                                 {
+                                    // Fn chord matched no action — press armed but unused.
+                                    crate::audio::discard_speculative_mic();
                                     return CallbackResult::Drop;
                                 }
                             }

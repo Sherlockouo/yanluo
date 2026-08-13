@@ -198,10 +198,19 @@ impl AudioCaptureMode {
     }
 }
 
+/// How the mic capture is held for a session.
+enum MicHandle {
+    /// Built by this session; dropped with the recorder.
+    Owned(cpal::Stream),
+    /// Promoted speculative warm-start; the owner thread stops the stream
+    /// when this lease drops (cpal::Stream is !Send — never moved).
+    Leased(WarmMicLease),
+}
+
 /// Active audio recorder. Drop streams / system capture to stop.
 pub struct AudioRecorder {
     /// Mic stream (cpal) — present for External / Both.
-    _mic_stream: Option<cpal::Stream>,
+    _mic_stream: Option<MicHandle>,
     /// System-audio capture handle — present for System / Both (macOS).
     _system: Option<SystemAudioCapture>,
     mic_samples: Arc<Mutex<Vec<f32>>>,
@@ -217,17 +226,44 @@ impl AudioRecorder {
         live_meter: Arc<LiveMeter>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         live_meter.clear();
-        let mic_samples = Arc::new(Mutex::new(Vec::<f32>::new()));
-        let system_samples = Arc::new(Mutex::new(Vec::<f32>::new()));
-
         let want_mic = matches!(mode, AudioCaptureMode::External | AudioCaptureMode::Both);
         let want_system = matches!(mode, AudioCaptureMode::System | AudioCaptureMode::Both);
 
-        let mut mic_stream = if want_mic {
-            Some(start_mic_stream(mic_samples.clone(), live_meter.clone())?)
+        // Warm path: a speculative capture started on Fn key-down may already
+        // be flowing — promote it instead of cold-booting the AudioUnit,
+        // keeping speech captured between press and release. External only:
+        // Both mixes mic/system by index and must not offset the mic.
+        let fresh_mic = Arc::new(Mutex::new(Vec::<f32>::new()));
+        let (mut mic_stream, mic_samples) = if want_mic {
+            let warm = if mode == AudioCaptureMode::External {
+                take_speculative_mic()
+            } else {
+                discard_speculative_mic();
+                None
+            };
+            match warm {
+                Some(lease) => {
+                    let buffered = lease.samples.lock().map(|s| s.len()).unwrap_or(0);
+                    crate::elog::elog!(
+                        "[audio] promoted speculative mic (pre-buffered {:.2}s)",
+                        buffered as f64 / 16_000.0
+                    );
+                    let samples = lease.samples.clone();
+                    (Some(MicHandle::Leased(lease)), samples)
+                }
+                None => (
+                    Some(MicHandle::Owned(start_mic_stream(
+                        fresh_mic.clone(),
+                        live_meter.clone(),
+                    )?)),
+                    fresh_mic,
+                ),
+            }
         } else {
-            None
+            discard_speculative_mic();
+            (None, fresh_mic)
         };
+        let system_samples = Arc::new(Mutex::new(Vec::<f32>::new()));
 
         let (system, effective_mode, fallback_warning) = if want_system {
             match SystemAudioCapture::start(
@@ -241,10 +277,10 @@ impl AudioRecorder {
                     let msg = format!(
                         "系统音频不可用（{err}），已退回只录麦克风。需要录系统声时请到「设置 → 权限」授予屏幕录制。"
                     );
-                    eprintln!("[audio] {msg}");
+                    crate::elog::elog!("[audio] {msg}");
                     if mic_stream.is_none() {
                         match start_mic_stream(mic_samples.clone(), live_meter.clone()) {
-                            Ok(stream) => mic_stream = Some(stream),
+                            Ok(stream) => mic_stream = Some(MicHandle::Owned(stream)),
                             Err(mic_err) => {
                                 return Err(format!(
                                     "系统音频不可用（{err}）；麦克风也启动失败（{mic_err}）"
@@ -264,7 +300,7 @@ impl AudioRecorder {
             return Err("no audio capture source started".into());
         }
 
-        eprintln!(
+        crate::elog::elog!(
             "[audio] capture mode={} (effective={})",
             mode.as_str(),
             effective_mode.as_str()
@@ -338,6 +374,135 @@ impl AudioRecorder {
         drop(self._mic_stream);
         drop(self._system);
         Ok(samples)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Speculative mic warm-start
+//
+// Fn commits on *release* (chord support). That press→release gap is dead time
+// the mic used to spend cold-booting only after the release (device
+// enumeration + AudioUnit init ≈ 30-80ms, after the HUD is already visible).
+// Instead: Fn key-down starts a discard buffer; a committed release promotes
+// it — speech captured between press and release (the user's first words) is
+// kept — while cancelled chords drop it. A reaper bounds leaks to ~10s
+// (~640KB mono 16kHz). External mode only: Both must keep mic/system
+// index-aligned for mix_buffers.
+//
+// Threading: cpal::Stream is !Send (raw AudioUnit handles), so the stream is
+// created AND dropped on a dedicated owner thread. The global slot and the
+// session lease only ever hold Send handles (buffer Arc + command Sender).
+// ---------------------------------------------------------------------------
+
+enum SpecCmd {
+    /// Stop capture and drop the stream on its owning thread.
+    Stop,
+}
+
+struct SpeculativeMic {
+    samples: Arc<Mutex<Vec<f32>>>,
+    cmd: std::sync::mpsc::Sender<SpecCmd>,
+    started_at: std::time::Instant,
+}
+
+fn speculative_slot() -> &'static Mutex<Option<SpeculativeMic>> {
+    static SLOT: std::sync::OnceLock<Mutex<Option<SpeculativeMic>>> =
+        std::sync::OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(None))
+}
+
+const SPECULATIVE_REAP_AFTER: std::time::Duration =
+    std::time::Duration::from_secs(10);
+
+/// Begin warming the mic. Called from the hotkey tap thread — never blocks:
+/// stream construction runs on the owner thread.
+pub fn begin_speculative_mic(live_meter: Arc<LiveMeter>) {
+    // Replace any stale capture (also reaps leftovers from an aborted press).
+    discard_speculative_mic();
+
+    let (tx, rx) = std::sync::mpsc::channel::<SpecCmd>();
+    let samples = Arc::new(Mutex::new(Vec::<f32>::new()));
+    let samples_owner = samples.clone();
+    std::thread::spawn(move || {
+        // Owner thread — the only place this stream is created or dropped.
+        let stream = match start_mic_stream(samples_owner.clone(), live_meter) {
+            Ok(s) => s,
+            Err(e) => {
+                // TCC first-run / device gone — release path falls back to a
+                // regular cold start, so this is strictly a lost optimization.
+                crate::elog::elog!("[audio] speculative mic start failed: {e}");
+                return;
+            }
+        };
+        crate::elog::elog!("[audio] speculative mic warm-started");
+        if let Ok(mut slot) = speculative_slot().lock() {
+            *slot = Some(SpeculativeMic {
+                samples: samples_owner,
+                cmd: tx,
+                started_at: std::time::Instant::now(),
+            });
+        }
+        // Serve until told to stop (or every sender handle is gone).
+        for cmd in rx {
+            match cmd {
+                SpecCmd::Stop => break,
+            }
+        }
+        drop(stream); // Stop the AudioUnit on the owning thread.
+    });
+
+    // Reaper: if the release never commits (chord cancelled, HUD stole the
+    // key…), stop the stream so the mic indicator doesn't stay lit.
+    std::thread::spawn(|| {
+        std::thread::sleep(SPECULATIVE_REAP_AFTER);
+        if let Ok(mut slot) = speculative_slot().lock() {
+            let stale = slot
+                .as_ref()
+                .map(|s| s.started_at.elapsed() >= SPECULATIVE_REAP_AFTER)
+                .unwrap_or(false);
+            if stale {
+                crate::elog::elog!("[audio] reaped stale speculative mic");
+                if let Some(spec) = slot.take() {
+                    let _ = spec.cmd.send(SpecCmd::Stop);
+                }
+            }
+        }
+    });
+}
+
+/// Live handle onto a speculative capture. Promote via
+/// [`AudioRecorder::start`]; dropping the lease stops the stream.
+pub struct WarmMicLease {
+    pub samples: Arc<Mutex<Vec<f32>>>,
+    cmd: Option<std::sync::mpsc::Sender<SpecCmd>>,
+}
+
+impl Drop for WarmMicLease {
+    fn drop(&mut self) {
+        if let Some(tx) = self.cmd.take() {
+            let _ = tx.send(SpecCmd::Stop);
+        }
+    }
+}
+
+/// Promote a live speculative capture into a session. None when nothing is
+/// warm (regular cold start follows).
+pub fn take_speculative_mic() -> Option<WarmMicLease> {
+    let mut slot = speculative_slot().lock().ok()?;
+    slot.take()
+        .map(|spec| WarmMicLease {
+            samples: spec.samples,
+            cmd: Some(spec.cmd),
+        })
+}
+
+/// Drop the speculative capture without using it (cancelled chord / error).
+pub fn discard_speculative_mic() {
+    if let Ok(mut slot) = speculative_slot().lock() {
+        if let Some(spec) = slot.take() {
+            crate::elog::elog!("[audio] speculative mic discarded");
+            let _ = spec.cmd.send(SpecCmd::Stop);
+        }
     }
 }
 
@@ -564,7 +729,7 @@ fn start_mic_stream(
 
     let actual_sr = config.sample_rate().0 as usize;
     let actual_channels = config.channels() as usize;
-    eprintln!(
+    crate::elog::elog!(
         "[audio] mic device: {:?}, format: {:?}, sample_rate: {}Hz, channels: {}",
         device.name().unwrap_or_default(),
         sample_format,
@@ -581,7 +746,7 @@ fn start_mic_stream(
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     process_chunk(data, actual_sr, actual_channels, &samples_cb, &meter_cb);
                 },
-                |err| eprintln!("[audio] mic capture error: {}", err),
+                |err| crate::elog::elog!("[audio] mic capture error: {}", err),
                 None,
             )?
         }
@@ -600,7 +765,7 @@ fn start_mic_stream(
                         &meter_cb,
                     );
                 },
-                |err| eprintln!("[audio] mic capture error: {}", err),
+                |err| crate::elog::elog!("[audio] mic capture error: {}", err),
                 None,
             )?
         }
@@ -622,7 +787,7 @@ fn start_mic_stream(
                         &meter_cb,
                     );
                 },
-                |err| eprintln!("[audio] mic capture error: {}", err),
+                |err| crate::elog::elog!("[audio] mic capture error: {}", err),
                 None,
             )?
         }

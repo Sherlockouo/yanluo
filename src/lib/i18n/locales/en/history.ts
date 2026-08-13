@@ -34,6 +34,8 @@ export const history: Record<string, string> = {
   "history.dispatchThis": "Dispatch this",
   "history.exportMd": "Export as Markdown",
   "history.exportTxt": "Export as TXT",
+  "history.exportSrt": "Export as SRT",
+  "history.exportRaw": "Export Raw (model output)",
   "history.confirmDelete": "Delete?",
   "history.delete": "Delete",
   "history.revertedToRaw": "Reverted to original",

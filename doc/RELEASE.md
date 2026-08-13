@@ -1,4 +1,4 @@
-# Release checklist (QuietType / 言落)
+# Release checklist (Yanluo / 言落)
 
 ## Hard rule — local green before push
 
@@ -38,7 +38,7 @@ package.json version
                  └─ In-app「设置 → 更新」shows this version + checks newer tags
 ```
 
-**Bundle name:** `tauri.conf.json` `productName` must stay ASCII **`QuietType`** (WiX / installer filenames). Window title + `CFBundleDisplayName` / menu are **QuietType**（中文名「言落」走 zh locale 文案）. Do not put CJK in `productName` — CI WiX `light.exe` and asset names break.
+**Bundle name:** `tauri.conf.json` `productName` must stay ASCII **`Yanluo`** (WiX / installer filenames). Dock / TCC / `CFBundleDisplayName` / menu are **Yanluo**（中文名「言落」走 zh locale 文案）. Do not put CJK in `productName` — CI WiX `light.exe` and asset names break.
 
 1. Bump `package.json` version.
 2. Run `pnpm version:sync` (keeps Cargo / tauri.conf in lockstep).
@@ -101,7 +101,7 @@ make install-local
 
 ## In-app updates
 - **检查更新** calls the GitHub Releases API off the UI thread (async + short timeout).
-- **下载并安装** saves under `~/Downloads/QuietType Updates/` and opens the installer.
+- **下载并安装** saves under `~/Downloads/Yanluo Updates/` and opens the installer.
 - macOS: open the `.dmg`, drag into Applications, relaunch.
 - Menu: **Check for Updates…** → **设置 → 更新**.
 
@@ -109,8 +109,8 @@ make install-local
 Privacy lists only show apps that **requested** the permission.
 
 1. Open **设置 → 权限**
-2. Click **去授权** (one click — do not also spam「系统设置」)
-3. Mic / Speech show an Allow dialog; Accessibility / Input Monitoring / Screen use the system prompt or Settings pane themselves
-4. During `tauri dev`, look for binary `yanluo` (path shown on the page), not the product display name alone
+2. Click **去授权** once — Mic/Speech show Allow; AX/IM/Screen request then open the Privacy pane if still off
+3. If the UI offers **重启应用** (Screen / Input Monitoring), relaunch
+4. During `tauri dev`, look for binary `yanluo` (path shown on the page)
 5. After packaging a `.app`, the product name appears
-6. Signed releases keep Mic / Speech / Screen across reinstalls; Accessibility / Input Monitoring often need a re-toggle after path change (macOS TCC)
+6. **Why reinstall asks again:** Mic/Speech/Screen stick with a stable Developer ID + Bundle ID. Accessibility / Input Monitoring key off path + code identity — new path or ad-hoc re-sign → re-toggle. Ad-hoc / unsigned builds reset almost everything each install.

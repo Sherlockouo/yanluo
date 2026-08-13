@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { Kbd, ListBox, Select } from "@heroui/react";
@@ -25,6 +25,7 @@ export function TranslatePage({
 } = {}) {
   const t = useT();
   const { config, updateConfig, saveConfig, history } = useApp();
+  const [savingTarget, setSavingTarget] = useState(false);
 
   const entries = useMemo(
     () =>
@@ -41,11 +42,13 @@ export function TranslatePage({
   );
 
   const setTargetLanguage = (code: string) => {
+    if (savingTarget) return;
     updateConfig("translate_target_language", code);
+    setSavingTarget(true);
     void saveConfig(
       { ...config, translate_target_language: code },
       { silent: true },
-    );
+    ).finally(() => setSavingTarget(false));
   };
 
   const targetSelect = (
@@ -53,6 +56,7 @@ export function TranslatePage({
       className="inline-flex w-auto"
       aria-label={t("translate.targetAria")}
       selectedKey={config.translate_target_language}
+      isDisabled={savingTarget}
       onSelectionChange={(key) => {
         if (key == null) return;
         setTargetLanguage(String(key));

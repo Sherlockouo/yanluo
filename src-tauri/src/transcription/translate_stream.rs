@@ -116,7 +116,7 @@ pub(crate) fn handle_asr_partial_ex(
     if let Ok(mut st) = app.state::<AsrEngine>().inner().translate_stream.lock() {
         if text != st.last_asr {
             if !st.src_done.is_empty() && !text.starts_with(&st.src_done) {
-                eprintln!("[llm] translate stream reset (ASR rewrite)");
+                crate::elog::elog!("[llm] translate stream reset (ASR rewrite)");
                 st.src_done.clear();
                 st.out_done.clear();
                 st.epoch = st.epoch.wrapping_add(1);
@@ -202,7 +202,7 @@ pub(crate) fn tick_translate_stable(app: &AppHandle) {
         (segment, st.epoch)
     };
 
-    eprintln!(
+    crate::elog::elog!(
         "[llm] translate stable segment chars={} epoch={}",
         segment.chars().count(),
         epoch
@@ -217,7 +217,7 @@ pub(crate) fn tick_translate_stable(app: &AppHandle) {
                     apply_stream_translation(&app2, epoch, &segment, &tr);
                 }
                 Err(e) => {
-                    eprintln!("[llm] translate stream failed: {e}");
+                    crate::elog::elog!("[llm] translate stream failed: {e}");
                     if let Ok(mut st) = app2.state::<AsrEngine>().inner().translate_stream.lock() {
                         if st.epoch == epoch {
                             st.inflight = false;
@@ -336,7 +336,7 @@ pub(crate) fn retarget_translate_stream(app: &AppHandle) {
         (st.last_asr.clone(), st.epoch)
     };
 
-    eprintln!(
+    crate::elog::elog!(
         "[llm] translate retarget → {} (asr_chars={})",
         config.translate_target_language,
         asr.chars().count()
@@ -372,7 +372,7 @@ pub(crate) fn retarget_translate_stream(app: &AppHandle) {
             match translate_transcript(&config, &asr) {
                 Ok(tr) => apply_retarget_translation(&app2, epoch, &asr, &tr),
                 Err(e) => {
-                    eprintln!("[llm] translate retarget failed: {e}");
+                    crate::elog::elog!("[llm] translate retarget failed: {e}");
                     if let Ok(mut st) = app2.state::<AsrEngine>().inner().translate_stream.lock() {
                         if st.epoch == epoch {
                             st.inflight = false;

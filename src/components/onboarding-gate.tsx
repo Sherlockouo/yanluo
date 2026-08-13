@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Link } from "react-router-dom";
-import { Button, toast } from "@heroui/react";
+import { Button } from "@heroui/react";
+import { toast } from "@/lib/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { CheckCircle2, CircleAlert, Download, Keyboard, Mic, Shield } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
-import { duration, easeOut, springBounce } from "@/lib/motion";
+import { duration, easeOut, springUI } from "@/lib/motion";
 import { useApp } from "@/app-context";
 import { ONBOARD_STORAGE_KEY, INTRO_DONE_EVENT, readIntroDone } from "@/lib/first-run";
 import { readTourDone, requestStartTour } from "@/components/spotlight-tour";
@@ -39,7 +40,12 @@ function markOnboarded() {
 
 type MiniPerms = { microphone: boolean; accessibility: boolean };
 type PermKind = "microphone" | "accessibility";
-type PermRequestResult = { granted: boolean; open_settings: boolean };
+type PermRequestResult = {
+  granted: boolean;
+  open_settings: boolean;
+  message?: string;
+  needs_relaunch?: boolean;
+};
 type OnboardStep = "perms" | "engine";
 
 /**
@@ -49,6 +55,7 @@ type OnboardStep = "perms" | "engine";
 export function OnboardingGate() {
   const { config, updateConfig, loadModel, saveConfig } = useApp();
   const t = useT();
+  const reduce = useReducedMotion();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<OnboardStep>("perms");
   const [perms, setPerms] = useState<MiniPerms | null>(null);
@@ -126,8 +133,11 @@ export function OnboardingGate() {
       if (result.open_settings) {
         await invoke("open_permission_settings", { kind }).catch(() => {});
       }
-    } catch {
-      /* ignore */
+      if (result.message && !result.granted) {
+        toast.warning(result.message);
+      }
+    } catch (error) {
+      toast.danger(error instanceof Error ? error.message : String(error));
     } finally {
       window.setTimeout(() => void refreshPerms(), 900);
       setBusy(null);
@@ -227,10 +237,10 @@ export function OnboardingGate() {
                 : t("onboarding.engineAria")
             }
             className="flex w-full max-w-md flex-col overflow-hidden rounded-2xl bg-surface p-6 shadow-2xl"
-            initial={{ opacity: 0, scale: 0.95, y: 16 }}
+            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.95, y: 16 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 12 }}
-            transition={springBounce}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 12 }}
+            transition={reduce ? { duration: 0.14, ease: easeOut } : springUI}
           >
             {showDone ? (
               <div className="flex flex-col items-center justify-center gap-3 py-8">

@@ -67,7 +67,7 @@ fn llm_post_json_abortable(
                 })?,
                 _ = tokio::time::sleep(Duration::from_millis(40)) => {
                     if should_abort() {
-                        eprintln!("[llm] HTTP aborted (send)");
+                        crate::elog::elog!("[llm] HTTP aborted (send)");
                         return Err("aborted".into());
                     }
                 }
@@ -82,7 +82,7 @@ fn llm_post_json_abortable(
                 t = &mut text_fut => break t.map_err(|e| e.to_string())?,
                 _ = tokio::time::sleep(Duration::from_millis(40)) => {
                     if should_abort() {
-                        eprintln!("[llm] HTTP aborted (body)");
+                        crate::elog::elog!("[llm] HTTP aborted (body)");
                         return Err("aborted".into());
                     }
                 }
@@ -97,17 +97,27 @@ fn llm_post_json_abortable(
 /// (src/lib/constants.ts) so the Settings preview matches what actually runs.
 /// Guarded by `refine_prompt_sync_tests`.
 pub(crate) const DEFAULT_REFINE: &str = "\
-任务：修正语音识别(ASR)文本中的错误并补充标点。\n\
+任务：整理 ASR 文本，让它可直接粘贴使用。三件事都要做：纠错、按意图理顺、润色表达。\n\
 \n\
-规则：\n\
-1. 修正识别错误：谐音字、同音字、英文术语被错误听写为汉字。\n\
-2. 补充缺失的标点符号（逗号、句号、问号），断句自然。\n\
-3. 中英文之间加一个空格（如「用 Python 写」）；英文术语不要译成中文；正确中文不要改成英文。\n\
-4. 保留口语原意：不润色、不扩写、不删内容、不总结、不改语序。\n\
-5. 看不出错误且标点完整 → 原样输出输入。\n\
-6. 只输出纠错后全文；不要解释、不要引号、不要 <think>。\n\
+必须做：\n\
+1. 纠错：谐音/同音字、英文术语被听成汉字 → 改回正确写法（配森→Python、杰森→JSON、麦赛口→MySQL）。\n\
+2. 意图：听出用户真正想说什么；指代含糊时合并信息（「那个文件…上周的报价」→「上周的报价文件」）。\n\
+3. 润色：删除口头禅与无意义重复——嗯、啊、那个、就是说、其实吧、然后然后；理顺语序，读起来像人写的句子，不像口头流水账。\n\
+4. 补标点；中英文之间加空格；英文术语保留英文，正确中文不要改成英文。\n\
+\n\
+禁止：\n\
+- 加新信息、总结成要点、改事实/数字/结论。\n\
+- 随意同义替换用户用词（如「卡点」不要改成「瓶颈」）；理顺即可，别换说法。\n\
+- 为改而改：已通顺且无口头禅时，可只补标点。\n\
+- 解释、引号、<think>；只输出整理后全文。\n\
 \n\
 示例：\n\
+输入：嗯那个就是说我们今天这个会议主要是想讨论一下进度的问题然后看看有没有什么卡点\n\
+输出：今天这个会议主要讨论一下进度问题，然后看看有没有什么卡点。\n\
+输入：帮我把那个文件那个那个发给小王一下就是上周的那个报价\n\
+输出：帮我把上周的那个报价文件发给小王一下。\n\
+输入：我觉得这个方案其实吧就是有点问题就是说性能方面不太行\n\
+输出：我觉得这个方案有点问题，性能方面不太行。\n\
 输入：我用配森写了个杰森接口然后部署到了服务器上\n\
 输出：我用 Python 写了个 JSON 接口，然后部署到了服务器上。\n\
 输入：打开麦赛口数据库看一下那个表的数据对不对\n\
@@ -162,13 +172,13 @@ pub(crate) fn refine_transcript_with_cases_abortable(
     let fewshot_block = if model_allows_fewshot(&config.llm_model) {
         build_refine_fewshot(fewshot)
     } else {
-        eprintln!("[llm] fewshot skipped: weak model {}", config.llm_model.trim());
+        crate::elog::elog!("[llm] fewshot skipped: weak model {}", config.llm_model.trim());
         String::new()
     };
     let chunks = split_for_refine(input, REFINE_CHUNK_LIMIT);
     let multi = chunks.len() > 1;
     if multi {
-        eprintln!("[llm] refine: long input split into {} chunks", chunks.len());
+        crate::elog::elog!("[llm] refine: long input split into {} chunks", chunks.len());
     }
     let mut out = String::with_capacity(input.len());
     for (i, chunk) in chunks.iter().enumerate() {
@@ -182,7 +192,7 @@ pub(crate) fn refine_transcript_with_cases_abortable(
         }
         let refined = refine_one_chunk(config, chunk, &fewshot_block, &mut should_abort)?;
         if multi {
-            eprintln!(
+            crate::elog::elog!(
                 "[llm] refine chunk #{}/{} chars={}→{}",
                 i + 1,
                 chunks.len(),
@@ -255,9 +265,9 @@ fn refine_one_chunk(
     let is_qwen3 = model_name.to_ascii_lowercase().contains("qwen3");
     // Qwen3 thinking mode pollutes refine output on 1.7b; force no-think.
     let user_content = if is_qwen3 {
-        format!("纠错下面 ASR 文本：\n---\n{input}\n---\n/no_think")
+        format!("整理下面 ASR 文本（纠错 + 按意图润色表达）：\n---\n{input}\n---\n/no_think")
     } else {
-        format!("纠错下面 ASR 文本：\n---\n{input}\n---")
+        format!("整理下面 ASR 文本（纠错 + 按意图润色表达）：\n---\n{input}\n---")
     };
     let request = Request {
         model: model_name,
@@ -275,7 +285,7 @@ fn refine_one_chunk(
     };
     let base = config.llm_api_base_url.trim().trim_end_matches('/');
     let url = format!("{base}/chat/completions");
-    eprintln!(
+    crate::elog::elog!(
         "[llm] refine → POST {} model={} in_chars={}",
         url,
         config.llm_model.trim(),
@@ -298,7 +308,7 @@ fn refine_one_chunk(
                     break;
                 }
                 let retryable = status.is_server_error();
-                eprintln!("[llm] refine HTTP {status}: {text}");
+                crate::elog::elog!("[llm] refine HTTP {status}: {text}");
                 last_err = format!("LLM HTTP {status}: {text}");
                 if !retryable {
                     return Err(last_err);
@@ -306,7 +316,7 @@ fn refine_one_chunk(
             }
             Err(e) if e == "aborted" => return Err("aborted".into()),
             Err(e) => {
-                eprintln!("[llm] refine network error (attempt {}): {e}", attempt + 1);
+                crate::elog::elog!("[llm] refine network error (attempt {}): {e}", attempt + 1);
                 last_err = e;
             }
         }
@@ -320,7 +330,7 @@ fn refine_one_chunk(
     }
     let response_body = response_body.ok_or(last_err)?;
     let parsed: Response = serde_json::from_str(&response_body).map_err(|e| {
-        eprintln!("[llm] refine parse error: {e}");
+        crate::elog::elog!("[llm] refine parse error: {e}");
         e.to_string()
     })?;
     let out = parsed
@@ -338,14 +348,14 @@ fn refine_one_chunk(
     // Guard against model drift (summary / hallucination / dropped sentences).
     // On rejection, keep the original ASR text rather than paste garbage.
     if !guard_refine(input, &out) {
-        eprintln!(
+        crate::elog::elog!(
             "[llm] refine rejected by guard (in_chars={} out_chars={}) — keeping original",
             input.chars().count(),
             out.chars().count()
         );
         return Ok(input.to_string());
     }
-    eprintln!(
+    crate::elog::elog!(
         "[llm] refine ok: out_chars={} changed={}",
         out.chars().count(),
         out != input
@@ -618,10 +628,10 @@ pub(crate) fn guard_refine(input: &str, refined: &str) -> bool {
         let delta = (nb as i64 - na as i64).abs();
         delta <= 6 && ratio <= 3.0
     } else {
-        // Punctuation + CJK/Latin spacing can legitimately grow text ~40-50%
-        // (e.g. 45 chars → 62 after commas and spaces), so the band is wider
-        // than a pure-correction guard would need.
-        (0.55..=1.50).contains(&ratio)
+        // Punctuation + CJK/Latin spacing (e.g. 配森→Python) + light polish
+        // can legitimately grow text ~50-60%, so the band is wider than a
+        // pure-correction guard would need. Still rejects summaries / blowups.
+        (0.50..=1.65).contains(&ratio)
     };
     if !ratio_ok {
         return false;
@@ -812,7 +822,7 @@ pub(crate) fn distill_learn_from_cases(
     };
     let base = config.llm_api_base_url.trim().trim_end_matches('/');
     let url = format!("{base}/chat/completions");
-    eprintln!(
+    crate::elog::elog!(
         "[llm] distill → POST {} model={} cases={}",
         url,
         config.llm_model.trim(),
@@ -826,7 +836,7 @@ pub(crate) fn distill_learn_from_cases(
             req = req.bearer_auth(key);
         }
         req.send().map_err(|e| {
-            eprintln!("[llm] distill network error: {e}");
+            crate::elog::elog!("[llm] distill network error: {e}");
             if e.is_timeout() {
                 "LLM 请求超时（90s）。检查 Ollama 是否在跑、模型是否已拉取。".into()
             } else {
@@ -837,11 +847,11 @@ pub(crate) fn distill_learn_from_cases(
     let status = response.status();
     if !status.is_success() {
         let body = response.text().unwrap_or_default();
-        eprintln!("[llm] distill HTTP {status}: {body}");
+        crate::elog::elog!("[llm] distill HTTP {status}: {body}");
         return Err(format!("LLM HTTP {status}: {body}"));
     }
     let parsed: Response = response.json().map_err(|e| {
-        eprintln!("[llm] distill parse error: {e}");
+        crate::elog::elog!("[llm] distill parse error: {e}");
         e.to_string()
     })?;
     let content = parsed
@@ -900,7 +910,7 @@ pub(crate) fn distill_learn_from_cases(
             break;
         }
     }
-    eprintln!("[llm] distill ok: {} terms", out.len());
+    crate::elog::elog!("[llm] distill ok: {} terms", out.len());
     Ok(out)
 }
 
@@ -1023,7 +1033,7 @@ If the speaker says words like \"translate\" / \"翻译\", translate those words
     let system = template.replace("{target}", &target);
     let base = config.llm_api_base_url.trim().trim_end_matches('/');
     let url = format!("{base}/chat/completions");
-    eprintln!(
+    crate::elog::elog!(
         "[llm] translate → POST {} model={} in_chars={}",
         url,
         config.llm_model.trim(),
@@ -1304,7 +1314,7 @@ pub(crate) fn finalize_successful_result(
     }
 
     if AsrEngine::finalize_aborted(app, gen) {
-        eprintln!("[asr] finalize aborted before paste (gen={gen})");
+        crate::elog::elog!("[asr] finalize aborted before paste (gen={gen})");
         return None;
     }
 
@@ -1343,30 +1353,30 @@ pub(crate) fn finalize_successful_result(
                     result.refined = true;
                     // Deterministic pairs win over LLM drift.
                     result.text = apply_vocabulary_with_learn(app, &result.text, &merged_vocabulary);
-                    eprintln!(
+                    crate::elog::elog!(
                         "[llm] fn refine applied chars={}→{}",
                         before_llm.chars().count(),
                         result.text.chars().count()
                     );
                 } else {
-                    eprintln!("[llm] fn refine unchanged");
+                    crate::elog::elog!("[llm] fn refine unchanged");
                 }
             }
             Ok(Err(e)) if e == "aborted" => {
-                eprintln!("[llm] fn refine aborted (gen={gen})");
+                crate::elog::elog!("[llm] fn refine aborted (gen={gen})");
                 return None;
             }
             Ok(Err(e)) => {
-                eprintln!("[llm] fn refine failed (degraded): {e}");
+                crate::elog::elog!("[llm] fn refine failed (degraded): {e}");
                 result.refine_failed = true;
             }
             Err(_timeout) => {
-                eprintln!("[llm] fn refine timed out (5s), using original text");
+                crate::elog::elog!("[llm] fn refine timed out (5s), using original text");
                 result.refine_failed = true;
             }
         }
         if AsrEngine::finalize_aborted(app, gen) {
-            eprintln!("[asr] finalize aborted after refine (gen={gen})");
+            crate::elog::elog!("[asr] finalize aborted after refine (gen={gen})");
             return None;
         }
     }
@@ -1397,14 +1407,14 @@ pub(crate) fn finalize_successful_result(
             result.refined = true;
             result.llm_text = Some(out_done.clone());
             result.text = out_done;
-            eprintln!(
+            crate::elog::elog!(
                 "[llm] translate accept stream preview chars={} (asr_chars={})",
                 result.text.chars().count(),
                 source_text.chars().count()
             );
         } else {
             result.text = source_text;
-            eprintln!(
+            crate::elog::elog!(
                 "[llm] translate accept ASR fallback chars={} (no stream preview)",
                 result.text.chars().count()
             );
@@ -1412,7 +1422,7 @@ pub(crate) fn finalize_successful_result(
     }
 
     if AsrEngine::finalize_aborted(app, gen) {
-        eprintln!("[asr] finalize aborted after prepare (gen={gen})");
+        crate::elog::elog!("[asr] finalize aborted after prepare (gen={gen})");
         return None;
     }
 
@@ -1424,7 +1434,7 @@ pub(crate) fn finalize_successful_result(
         emit_floating_status(app, false, "processing", &result.text, 0.0);
 
         if AsrEngine::finalize_aborted(app, gen) {
-            eprintln!("[asr] finalize aborted after paste (gen={gen}) — keeping pasted text");
+            crate::elog::elog!("[asr] finalize aborted after paste (gen={gen}) — keeping pasted text");
             emit_floating_status(app, false, "idle", "", 0.0);
             return None;
         }
@@ -1439,11 +1449,11 @@ pub(crate) fn finalize_successful_result(
                 let id = format!("{}", chrono::Utc::now().timestamp_millis());
                 match save_recording_wav(s, &id) {
                     Ok(path) => {
-                        eprintln!("[transcribe] saved audio {:?}", path);
+                        crate::elog::elog!("[transcribe] saved audio {:?}", path);
                         Some(path.to_string_lossy().to_string())
                     }
                     Err(e) => {
-                        eprintln!("[transcribe] save audio failed: {e}");
+                        crate::elog::elog!("[transcribe] save audio failed: {e}");
                         None
                     }
                 }
@@ -1453,7 +1463,7 @@ pub(crate) fn finalize_successful_result(
         append_history(app, result, &source, audio_path, media_kind);
 
         if AsrEngine::finalize_aborted(app, gen) {
-            eprintln!("[asr] finalize aborted after history (gen={gen})");
+            crate::elog::elog!("[asr] finalize aborted after history (gen={gen})");
             emit_floating_status(app, false, "idle", "", 0.0);
             return None;
         }
@@ -1470,12 +1480,12 @@ pub(crate) fn finalize_successful_result(
             .map(|s| s.text.trim().to_string())
             .unwrap_or_default();
         if fallback.is_empty() {
-            eprintln!("[asr] hud confirm-wait skipped: empty result mode={source}");
+            crate::elog::elog!("[asr] hud confirm-wait skipped: empty result mode={source}");
             AsrEngine::set_pending_hud_confirm(app, None);
             result.error = Some("未识别到内容 — 请检查麦克风 / 语音识别权限 / 是否在说话".into());
             return Some(false);
         }
-        eprintln!(
+        crate::elog::elog!(
             "[asr] hud confirm-wait: empty finalize, using live HUD fallback chars={}",
             fallback.chars().count()
         );
@@ -1518,7 +1528,7 @@ pub(crate) fn finalize_successful_result(
             "refine_failed": result.refine_failed,
         }),
     );
-    eprintln!(
+    crate::elog::elog!(
         "[asr] hud confirm-wait mode={source} chars={} refined={} raw_chars={}",
         result.text.chars().count(),
         result.refined,
@@ -1844,7 +1854,7 @@ pub(crate) mod apple_speech_ffi {
                     }
                 }),
             ) {
-                eprintln!("[asr] apple stream start failed: {e}");
+                crate::elog::elog!("[asr] apple stream start failed: {e}");
                 let _ = app.emit(
                     "audio-capture-warning",
                     format!("Apple 流式识别未启动：{e}"),
@@ -1852,14 +1862,14 @@ pub(crate) mod apple_speech_ffi {
                 return;
             }
 
-            eprintln!("[asr] apple stream started locale={locale}");
+            crate::elog::elog!("[asr] apple stream started locale={locale}");
             let mut cursor = 0usize;
             while recording.load(Ordering::Acquire) {
                 if let Some((from, chunk)) = crate::state::AsrEngine::get_audio_from(&app, cursor)
                 {
                     cursor = from.saturating_add(chunk.len());
                     if let Err(e) = stream_append(&chunk) {
-                        eprintln!("[asr] apple stream append: {e}");
+                        crate::elog::elog!("[asr] apple stream append: {e}");
                     }
                     // After stream_append succeeds, notify so stop-side can wake early
                     {
@@ -1880,7 +1890,7 @@ pub(crate) mod apple_speech_ffi {
                 }
                 cvar.notify_one();
             }
-            eprintln!("[asr] apple stream pump exit (await finish from stop)");
+            crate::elog::elog!("[asr] apple stream pump exit (await finish from stop)");
         });
     }
 }
@@ -1896,7 +1906,7 @@ pub(crate) fn transcribe_with_apple_speech(
         .map_err(|e| e.to_string())?;
     let audio_path = audio_file.path().to_string_lossy().to_string();
     let locale = language_for_apple(&config.language);
-    eprintln!(
+    crate::elog::elog!(
         "[asr] apple speech in-process: locale={locale} path={}",
         audio_file.path().display()
     );
@@ -2034,7 +2044,7 @@ pub(crate) fn transcribe_file_samples(
         };
     }
 
-    eprintln!(
+    crate::elog::elog!(
         "[mlx-worker] long file ({:.1}s): chunking every {:.0}s (overlap {:.1}s)",
         duration, FILE_CHUNK_SEC, FILE_CHUNK_OVERLAP_SEC
     );
@@ -2050,7 +2060,7 @@ pub(crate) fn transcribe_file_samples(
         let chunk = &samples[start..end];
         let offset = start as f64 / 16_000.0;
         chunk_i += 1;
-        eprintln!(
+        crate::elog::elog!(
             "[mlx-worker] file chunk #{chunk_i}: {:.1}s–{:.1}s lang={:?}",
             offset,
             end as f64 / 16_000.0,
@@ -2096,7 +2106,7 @@ pub(crate) fn transcribe_file_samples(
                                 }
                             }
                             Err(e) => {
-                                eprintln!(
+                                crate::elog::elog!(
                                     "[mlx-worker] ForcedAligner chunk #{chunk_i} failed: {e}"
                                 );
                             }
@@ -2145,7 +2155,7 @@ pub(crate) fn transcribe_file_samples(
         alignment: None,
     };
     attach_segments(&mut result, all_segments);
-    eprintln!(
+    crate::elog::elog!(
         "[mlx-worker] long file done: {} chunks, text_len={}, segments={}",
         chunk_i,
         result.text.chars().count(),
@@ -2179,10 +2189,10 @@ pub(crate) fn maybe_align_chunk(
                     end: item.end_time + offset,
                 })
                 .collect();
-            eprintln!("[mlx-worker] ForcedAligner segments={}", segs.len());
+            crate::elog::elog!("[mlx-worker] ForcedAligner segments={}", segs.len());
             attach_segments(result, segs);
         }
-        Err(e) => eprintln!("[mlx-worker] ForcedAligner failed: {e}"),
+        Err(e) => crate::elog::elog!("[mlx-worker] ForcedAligner failed: {e}"),
     }
 }
 
@@ -2642,12 +2652,38 @@ fn init_local_asr_backend() {
     #[cfg(target_os = "macos")]
     {
         qwen3_asr_rs::backend::mlx::stream::init_mlx(true);
-        eprintln!("[asr-worker] MLX Metal initialized");
+        crate::elog::elog!("[asr-worker] MLX Metal initialized");
     }
     #[cfg(not(target_os = "macos"))]
     {
-        eprintln!("[asr-worker] libtorch (tch) backend ready");
+        crate::elog::elog!("[asr-worker] libtorch (tch) backend ready");
     }
+}
+
+/// GPU warm-up against the pinned qwen3_asr_rs git rev (which ships no
+/// built-in `warmup()`): one offline forward on 1s of silence forces Metal
+/// shader JIT for the shared kernel set (mel / encoder / prefill / decode).
+///
+/// Offline-only on purpose: the streaming pass would leave the encoder in
+/// chunk-local mode and the field is private — leaking that state into
+/// `transcribe_samples` would corrupt file transcriptions. The chunk-local
+/// variants still JIT on the first live session, but they are a small
+/// fraction of the total cold-start cost.
+#[cfg(feature = "qwen-local")]
+fn warmup_asr_inference(
+    inf: &mut qwen3_asr_rs::inference::AsrInference,
+) -> Result<(), String> {
+    let silence: Vec<f32> = vec![0.0; 16_000];
+    inf.transcribe_samples(&silence, None)
+        .map(|_| ())
+        .map_err(|e| e.to_string())?;
+    // Force all queued Metal work (shader compilation) to complete now.
+    #[cfg(target_os = "macos")]
+    {
+        qwen3_asr_rs::backend::mlx::stream::synchronize();
+        qwen3_asr_rs::backend::mlx::stream::clear_cache();
+    }
+    Ok(())
 }
 
 /// Prefer GPU (Metal / CUDA). On libtorch builds without CUDA, fall back to CPU.
@@ -2658,7 +2694,7 @@ fn load_asr_inference(
     use qwen3_asr_rs::tensor::Device;
     match qwen3_asr_rs::inference::AsrInference::load(path, Device::Gpu(0)) {
         Ok(inf) => {
-            eprintln!("[asr-worker] model loaded on GPU {:?}", path);
+            crate::elog::elog!("[asr-worker] model loaded on GPU {:?}", path);
             Ok(inf)
         }
         Err(gpu_err) => {
@@ -2668,7 +2704,7 @@ fn load_asr_inference(
             }
             #[cfg(not(target_os = "macos"))]
             {
-                eprintln!(
+                crate::elog::elog!(
                     "[asr-worker] GPU load failed ({gpu_err}); falling back to CPU"
                 );
                 qwen3_asr_rs::inference::AsrInference::load(path, Device::Cpu).map_err(|e| {
@@ -2693,7 +2729,7 @@ fn load_align_inference(
             }
             #[cfg(not(target_os = "macos"))]
             {
-                eprintln!(
+                crate::elog::elog!(
                     "[asr-worker] ForcedAligner GPU load failed ({gpu_err}); trying CPU"
                 );
                 qwen3_asr_rs::align::AlignInference::load(path, Device::Cpu)
@@ -2712,7 +2748,7 @@ pub(crate) fn mlx_worker(
     cancel_requested: Arc<AtomicBool>,
 ) {
     init_local_asr_backend();
-    eprintln!("[asr-worker] waiting for commands...");
+    crate::elog::elog!("[asr-worker] waiting for commands...");
 
     let mut inference: Option<qwen3_asr_rs::inference::AsrInference> = None;
     let mut aligner: Option<qwen3_asr_rs::align::AlignInference> = None;
@@ -2720,9 +2756,23 @@ pub(crate) fn mlx_worker(
     while let Ok(cmd) = rx.recv() {
         match cmd {
             WorkerCommand::LoadModel { path } => {
-                eprintln!("[asr-worker] Loading model from {:?}", path);
+                crate::elog::elog!("[asr-worker] Loading model from {:?}", path);
                 match load_asr_inference(&path) {
-                    Ok(inf) => {
+                    Ok(mut inf) => {
+                        // Warm the GPU right after load: forces Metal shader JIT
+                        // so the first real utterance doesn't pay the ~2s
+                        // cold-start that reads as "ASR stuck before the first
+                        // word". "model-loaded" now means ready.
+                        let warmup_t0 = std::time::Instant::now();
+                        match warmup_asr_inference(&mut inf) {
+                            Ok(()) => crate::elog::elog!(
+                                "[asr-worker] GPU warmup done in {:.0}ms",
+                                warmup_t0.elapsed().as_millis()
+                            ),
+                            Err(e) => crate::elog::elog!(
+                                "[asr-worker] GPU warmup failed (non-fatal): {e}"
+                            ),
+                        }
                         inference = Some(inf);
                         model_loaded.store(true, Ordering::Release);
                         let _ = app.emit("model-loaded", &path.to_string_lossy().to_string());
@@ -2737,14 +2787,14 @@ pub(crate) fn mlx_worker(
                             .unwrap_or_default();
                         if align_enabled && !align_dir.trim().is_empty() {
                             let align_path = PathBuf::from(&align_dir);
-                            eprintln!("[asr-worker] Loading ForcedAligner from {:?}", align_path);
+                            crate::elog::elog!("[asr-worker] Loading ForcedAligner from {:?}", align_path);
                             match load_align_inference(&align_path) {
                                 Ok(a) => {
-                                    eprintln!("[asr-worker] ForcedAligner loaded");
+                                    crate::elog::elog!("[asr-worker] ForcedAligner loaded");
                                     aligner = Some(a);
                                 }
                                 Err(e) => {
-                                    eprintln!("[asr-worker] ForcedAligner load failed: {e}");
+                                    crate::elog::elog!("[asr-worker] ForcedAligner load failed: {e}");
                                     aligner = None;
                                 }
                             }
@@ -2753,7 +2803,7 @@ pub(crate) fn mlx_worker(
                         }
                     }
                     Err(e) => {
-                        eprintln!("[asr-worker] Model load failed: {}", e);
+                        crate::elog::elog!("[asr-worker] Model load failed: {}", e);
                         model_loaded.store(false, Ordering::Release);
                         aligner = None;
                         let _ = app.emit("model-error", &format!("Failed to load model: {}", e));
@@ -2769,7 +2819,7 @@ pub(crate) fn mlx_worker(
                 let inf = match inference.as_mut() {
                     Some(inf) => inf,
                     None => {
-                        eprintln!("[asr-worker] StartStreaming but no model loaded");
+                        crate::elog::elog!("[asr-worker] StartStreaming but no model loaded");
                         continue;
                     }
                 };
@@ -2799,7 +2849,7 @@ pub(crate) fn mlx_worker(
                     )
                 };
 
-                eprintln!(
+                crate::elog::elog!(
                     "[mlx-worker] streaming: chunk={}s ({} samples), rollback={}, max_seg={:.0}s, overlap={}ms, ctx_tokens={}, vad_backend={}, vad_aggression={}",
                     chunk_sec,
                     chunk_samples,
@@ -2822,7 +2872,7 @@ pub(crate) fn mlx_worker(
                     None
                 };
                 let mut lang_locked = user_forced_lang;
-                eprintln!(
+                crate::elog::elog!(
                     "[mlx-worker] asr language: config={} → qwen={:?} (locked={})",
                     configured_lang.unwrap_or("auto"),
                     sticky_qwen_lang,
@@ -2849,19 +2899,19 @@ pub(crate) fn mlx_worker(
                         ) {
                             Ok(s) => {
                                 if ctx.is_some() || lang.is_some() {
-                                    eprintln!(
+                                    crate::elog::elog!(
                                         "[mlx-worker] init_streaming lang={lang:?} context_chars={}",
                                         hint.chars().count()
                                     );
                                 } else if !context.trim().is_empty() && max_context_tokens > 0 {
-                                    eprintln!(
+                                    crate::elog::elog!(
                                         "[mlx-worker] init_streaming lang={lang:?} context skipped (finished sentence)"
                                     );
                                 }
                                 Some(s)
                             }
                             Err(e) => {
-                                eprintln!("[mlx-worker] init_streaming failed: {}", e);
+                                crate::elog::elog!("[mlx-worker] init_streaming failed: {}", e);
                                 let _ = app.emit("partial-error", &format!("init_streaming: {e}"));
                                 None
                             }
@@ -2874,7 +2924,7 @@ pub(crate) fn mlx_worker(
                     continue;
                 };
 
-                eprintln!(
+                crate::elog::elog!(
                     "[mlx-worker] segmented streaming loop started (rollback={})",
                     rollback_tokens
                 );
@@ -2882,7 +2932,7 @@ pub(crate) fn mlx_worker(
                 let mut vad = make_vad(&vad_backend, &seg_cfg, vad_aggression);
                 let mut clock = SegmentClock::new(seg_cfg.clone());
                 let frame_len = vad.frame_samples();
-                eprintln!(
+                crate::elog::elog!(
                     "[mlx-worker] vad={} frame={} samples ({:.0}ms)",
                     vad.name(),
                     frame_len,
@@ -2896,6 +2946,9 @@ pub(crate) fn mlx_worker(
                 let mut active_text = String::new();
                 let mut segment_index = 0usize;
                 let mut partial_count = 0usize;
+                // Partials emitted within the *current* segment (drives the
+                // early-ramp gate below; reset on every segment open/reopen).
+                let mut seg_partial_count = 0usize;
                 let mut last_language = String::new();
                 // Consecutive warm empties → drop cross-seg context and re-init once.
                 let mut empty_active_streak = 0usize;
@@ -2933,7 +2986,7 @@ pub(crate) fn mlx_worker(
                         }
                         let seg = &samples[start..end];
                         let seg_secs = seg.len() as f64 / 16000.0;
-                        eprintln!(
+                        crate::elog::elog!(
                             "[mlx-worker] commit segment ({reason}): {:.1}s–{:.1}s ({:.1}s)",
                             start as f64 / 16000.0,
                             end as f64 / 16000.0,
@@ -2942,7 +2995,7 @@ pub(crate) fn mlx_worker(
                         // Tiny post-silence / stop scraps → Qwen hallucinates fillers (恩/嗯).
                         const MIN_COMMIT_SECS: f64 = 0.35;
                         if seg_secs < MIN_COMMIT_SECS {
-                            eprintln!(
+                            crate::elog::elog!(
                                 "[mlx-worker] commit skipped: segment too short ({seg_secs:.2}s < {MIN_COMMIT_SECS})"
                             );
                             if !active_text.trim().is_empty() {
@@ -2962,7 +3015,7 @@ pub(crate) fn mlx_worker(
                                 // Final decode empty but we still have a live hypothesis —
                                 // keep it rather than dropping a whole spoken segment.
                                 if r.text.trim().is_empty() && !active_text.trim().is_empty() {
-                                    eprintln!(
+                                    crate::elog::elog!(
                                         "[mlx-worker] commit empty decode; keeping active_len={}",
                                         active_text.len()
                                     );
@@ -2985,7 +3038,7 @@ pub(crate) fn mlx_worker(
                                 true
                             }
                             Err(e) => {
-                                eprintln!("[mlx-worker] segment commit failed: {e}");
+                                crate::elog::elog!("[mlx-worker] segment commit failed: {e}");
                                 let _ = app.emit("partial-error", &format!("segment commit: {e}"));
                                 // Keep last active hypothesis if final failed.
                                 if !active_text.is_empty() {
@@ -3059,10 +3112,11 @@ pub(crate) fn mlx_worker(
                                 SegmentEvent::Open { start_sample } => {
                                     seg_start = Some(start_sample);
                                     last_partial_abs = start_sample;
+                                    seg_partial_count = 0;
                                     active_text.clear();
                                     empty_active_streak = 0;
                                     context_rescue_used = false;
-                                    eprintln!(
+                                    crate::elog::elog!(
                                         "[mlx-worker] segment #{} open @ {:.1}s",
                                         segment_index,
                                         start_sample as f64 / 16000.0
@@ -3084,7 +3138,7 @@ pub(crate) fn mlx_worker(
                                             AsrEngine::get_audio_from(&app, start)
                                         {
                                             if cbase > start {
-                                                eprintln!(
+                                                crate::elog::elog!(
                                                     "[mlx-worker] commit skipped: hot window base {cbase} > start {start}"
                                                 );
                                             } else {
@@ -3112,7 +3166,7 @@ pub(crate) fn mlx_worker(
                                             );
                                             notify_asr_committed(&app, &committed_text);
                                         } else {
-                                            eprintln!(
+                                            crate::elog::elog!(
                                                 "[mlx-worker] commit audio missing — still reopen stream"
                                             );
                                         }
@@ -3145,7 +3199,7 @@ pub(crate) fn mlx_worker(
                                                 stream_state = s;
                                                 segment_index += 1;
                                                 stream_ok = true;
-                                                eprintln!(
+                                                crate::elog::elog!(
                                                     "[mlx-worker] reopen fallback without context"
                                                 );
                                             } else {
@@ -3167,7 +3221,7 @@ pub(crate) fn mlx_worker(
                                                 last_partial_abs.saturating_sub(dropped);
                                             clock.rebase(dropped);
                                             drained_ok = true;
-                                            eprintln!(
+                                            crate::elog::elog!(
                                                 "[mlx-worker] pcm drain {} samples ({:.1}s) → archive (total {:.1}s)",
                                                 dropped,
                                                 dropped as f64 / 16000.0,
@@ -3184,10 +3238,11 @@ pub(crate) fn mlx_worker(
                                         clock.force_open(reopen_at);
                                         seg_start = Some(reopen_at);
                                         last_partial_abs = reopen_at;
+                                        seg_partial_count = 0;
                                         active_text.clear();
                                         empty_active_streak = 0;
                                         context_rescue_used = false;
-                                        eprintln!(
+                                        crate::elog::elog!(
                                             "[mlx-worker] segment #{} reopen @ {:.1}s ({})",
                                             segment_index,
                                             reopen_at as f64 / 16000.0,
@@ -3222,11 +3277,17 @@ pub(crate) fn mlx_worker(
                     // mel frames (8000 samples) — verified safe (no min-length assert).
                     const BOOTSTRAP_SAMPLES: usize = 8_000;
                     let first_tick = last_partial_abs <= start;
-                    let gate_samples = if first_tick {
-                        BOOTSTRAP_SAMPLES.min(chunk_samples)
-                    } else {
-                        chunk_samples
-                    };
+                    // Early-ramp: the first few partials of a segment use the 0.5s
+                    // gate so the caption starts flowing and keeps moving quickly
+                    // (perceived latency), then settles to the chunk_sec cadence
+                    // (hypothesis stability floor). Commit/rollback untouched.
+                    const EARLY_RAMP_PARTIALS: usize = 2;
+                    let gate_samples =
+                        if first_tick || seg_partial_count <= EARLY_RAMP_PARTIALS {
+                            BOOTSTRAP_SAMPLES.min(chunk_samples)
+                        } else {
+                            chunk_samples
+                        };
                     if session_len.saturating_sub(start) < gate_samples
                         || new_in_seg < gate_samples
                     {
@@ -3242,7 +3303,8 @@ pub(crate) fn mlx_worker(
                     let rel_start = start.saturating_sub(base);
                     let seg_pcm = &samples[rel_start..];
                     partial_count += 1;
-                    eprintln!(
+                    seg_partial_count += 1;
+                    crate::elog::elog!(
                         "[mlx-worker] partial #{} seg#{}: {:.1}s window (+{:.1}s new)",
                         partial_count,
                         segment_index,
@@ -3269,7 +3331,7 @@ pub(crate) fn mlx_worker(
                                     stream_state.chunk_id,
                                     stream_state.unfixed_chunk_num,
                                 ) {
-                                    eprintln!(
+                                    crate::elog::elog!(
                                         "[mlx-worker] sticky language lock → {lock} (was {:?}, seg={seg_secs:.1}s chunk={})",
                                         sticky_qwen_lang,
                                         stream_state.chunk_id
@@ -3290,7 +3352,7 @@ pub(crate) fn mlx_worker(
                                                 r = r2;
                                             }
                                             Err(e) => {
-                                                eprintln!(
+                                                crate::elog::elog!(
                                                     "[mlx-worker] re-decode after lang lock failed: {e}"
                                                 );
                                             }
@@ -3318,7 +3380,7 @@ pub(crate) fn mlx_worker(
                                     seg_secs,
                                 );
                                 if warm {
-                                    eprintln!(
+                                    crate::elog::elog!(
                                         "[mlx-worker] partial #{} done: lang={} active_len={} committed_len={}",
                                         partial_count,
                                         last_language,
@@ -3332,7 +3394,7 @@ pub(crate) fn mlx_worker(
                                         segment_index,
                                     );
                                 } else {
-                                    eprintln!(
+                                    crate::elog::elog!(
                                         "[mlx-worker] partial #{} warming (HUD suppressed): lang={} seg={seg_secs:.1}s chunk={}",
                                         partial_count,
                                         last_language,
@@ -3352,7 +3414,7 @@ pub(crate) fn mlx_worker(
                                 {
                                     context_rescue_used = true;
                                     empty_active_streak = 0;
-                                    eprintln!(
+                                    crate::elog::elog!(
                                         "[mlx-worker] empty-active rescue: re-init without context (seg#{segment_index} {seg_secs:.1}s)"
                                     );
                                     if let Some(s) = open_stream(
@@ -3382,7 +3444,7 @@ pub(crate) fn mlx_worker(
                                                 }
                                             }
                                             Err(e) => {
-                                                eprintln!(
+                                                crate::elog::elog!(
                                                     "[mlx-worker] empty-active rescue decode failed: {e}"
                                                 );
                                             }
@@ -3392,7 +3454,7 @@ pub(crate) fn mlx_worker(
                             }
                         }
                         Err(e) => {
-                            eprintln!("[mlx-worker] partial #{} failed: {}", partial_count, e);
+                            crate::elog::elog!("[mlx-worker] partial #{} failed: {}", partial_count, e);
                             let _ = app.emit("partial-error", &format!("{e}"));
                             // RoPE soft-cap mid-segment: force-cut and reopen.
                             if format!("{e}").contains("RoPE position table exhausted") {
@@ -3438,13 +3500,13 @@ pub(crate) fn mlx_worker(
                     }
                 }
 
-                eprintln!("[mlx-worker] streaming loop ended, doing final transcription");
+                crate::elog::elog!("[mlx-worker] streaming loop ended, doing final transcription");
 
                 // --- Final transcription ---
                 let remaining = match AsrEngine::take_recorder_and_stop(&app) {
                     Some(s) => s,
                     None => {
-                        eprintln!("[mlx-worker] recorder already gone, skipping final");
+                        crate::elog::elog!("[mlx-worker] recorder already gone, skipping final");
                         if cancel_requested.swap(false, Ordering::AcqRel) {
                             emit_floating_status(&app, false, "idle", "", 0.0);
                             let _ = app.emit("recording-cancelled", ());
@@ -3473,7 +3535,7 @@ pub(crate) fn mlx_worker(
                 samples.extend_from_slice(&remaining);
 
                 if cancel_requested.swap(false, Ordering::AcqRel) {
-                    eprintln!(
+                    crate::elog::elog!(
                         "[mlx-worker] cancelled — discarded {:.1}s audio",
                         samples.len() as f64 / 16000.0
                     );
@@ -3484,13 +3546,13 @@ pub(crate) fn mlx_worker(
 
                 let finalize_gen = AsrEngine::finalize_gen(&app);
                 if AsrEngine::finalize_aborted(&app, finalize_gen) {
-                    eprintln!("[mlx-worker] finalize gen stale before commit — suppress");
+                    crate::elog::elog!("[mlx-worker] finalize gen stale before commit — suppress");
                     emit_floating_status(&app, false, "idle", "", 0.0);
                     continue;
                 }
 
                 let duration = samples.len() as f64 / 16000.0;
-                eprintln!(
+                crate::elog::elog!(
                     "[mlx-worker] final: {:.1}s audio (archive+hot), {} segments committed",
                     duration, segment_index
                 );
@@ -3550,7 +3612,7 @@ pub(crate) fn mlx_worker(
                                 attach_segments(&mut result, segs);
                             }
                             Err(e) => {
-                                eprintln!("[mlx-worker] ForcedAligner (stream final) failed: {e}");
+                                crate::elog::elog!("[mlx-worker] ForcedAligner (stream final) failed: {e}");
                             }
                         }
                     }
@@ -3558,7 +3620,7 @@ pub(crate) fn mlx_worker(
 
                 if result.error.is_none() {
                     if AsrEngine::finalize_aborted(&app, finalize_gen) {
-                        eprintln!("[mlx-worker] aborted before finalize — suppress result");
+                        crate::elog::elog!("[mlx-worker] aborted before finalize — suppress result");
                         emit_floating_status(&app, false, "idle", "", 0.0);
                         continue;
                     }
@@ -3570,7 +3632,7 @@ pub(crate) fn mlx_worker(
                         "audio",
                     ) {
                         None => {
-                            eprintln!("[mlx-worker] finalize aborted — suppress transcription-result");
+                            crate::elog::elog!("[mlx-worker] finalize aborted — suppress transcription-result");
                             continue;
                         }
                         Some(false) => {
@@ -3593,7 +3655,7 @@ pub(crate) fn mlx_worker(
                     continue;
                 }
 
-                eprintln!(
+                crate::elog::elog!(
                     "[mlx-worker] final done: lang={} text_len={} error={:?}",
                     result.language,
                     result.text.len(),
@@ -3702,7 +3764,7 @@ pub(crate) fn mlx_worker(
         }
     }
 
-    eprintln!("[mlx-worker] channel closed, exiting");
+    crate::elog::elog!("[mlx-worker] channel closed, exiting");
 }
 
 #[cfg(not(feature = "qwen-local"))]
@@ -3713,7 +3775,7 @@ pub(crate) fn mlx_worker(
     _recording: Arc<AtomicBool>,
     _cancel_requested: Arc<AtomicBool>,
 ) {
-    eprintln!("[mlx-worker] qwen-local feature disabled; MLX backend not compiled");
+    crate::elog::elog!("[mlx-worker] qwen-local feature disabled; MLX backend not compiled");
     while let Ok(cmd) = rx.recv() {
         match cmd {
             WorkerCommand::LoadModel { .. } => {
@@ -4284,6 +4346,23 @@ mod guard_refine_tests {
     fn accepts_short_english_correction() {
         // Short inputs must not be over-rejected by the length ratio guard.
         assert!(guard_refine("打开麦赛口", "打开MySQL"));
+    }
+
+    #[test]
+    fn accepts_spaced_term_expansion() {
+        // CJK→Latin with spaces + punctuation can exceed old ±50% band.
+        assert!(guard_refine(
+            "我用配森写了个杰森接口然后部署到了服务器上",
+            "我用 Python 写了个 JSON 接口，然后部署到了服务器上。"
+        ));
+    }
+
+    #[test]
+    fn accepts_filler_polish() {
+        assert!(guard_refine(
+            "嗯那个就是说我们今天这个会议主要是想讨论一下进度的问题然后看看有没有什么卡点",
+            "今天这个会议主要讨论一下进度问题，然后看看有没有什么卡点。"
+        ));
     }
 }
 

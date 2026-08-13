@@ -1,4 +1,4 @@
-# Design System — 言落 (QuietType)
+# Design System — 言落 (Yanluo)
 
 > Authority for brand, visual, and IA. Companion:
 > [`architecture-local-first.md`](./architecture-local-first.md).
@@ -20,10 +20,10 @@
 | Field | Value |
 |-------|--------|
 | **Name (ZH)** | 言落 |
-| **Name (EN / bundle)** | QuietType |
+| **Name (EN / bundle)** | Yanluo |
 | **Tagline** | 开口有结果。 |
 | **One-liner (sell)** | 你的声音留在本机。开口出稿，开口派活。 |
-| **Former names (retire)** | Yanluo · ASR Workshop · asr-workshop (user-facing) · Workshop / 工作台 narrative |
+| **Former names (retire)** | QuietType · ASR Workshop · asr-workshop (user-facing) · Workshop / 工作台 narrative |
 | **Alts considered** | 台本 · Cue |
 
 ### Say / Never say
@@ -193,8 +193,8 @@ Ship in order. Each step should still pass Jobs 3-second test.
 
 - [x] Replace accent `#007AFF` → copper `#C4784A` in `theme.css` (light + dark)
 - [x] Load Instrument Serif + DM Sans/Satoshi + IBM Plex Mono; set `--font-display` / `--font-sans` / `--font-mono`
-- [x] Retire user-facing string `ASR Workshop` → `言落` / `QuietType` (window title, tray, sidebar, overview, plist display name plan)
-- [x] Bundle packaging: `productName` = ASCII **QuietType** (WiX + asset filenames); UI / CFBundleDisplayName / menu = **QuietType**
+- [x] Retire user-facing string `ASR Workshop` → `言落` / `Yanluo` (window title, tray, sidebar, overview, plist display name)
+- [x] Bundle packaging: `productName` = ASCII **Yanluo** (WiX + asset filenames); TCC / CFBundleDisplayName / menu = **Yanluo**; UI zh = **言落**
 - [x] Bundle id plan: leave `com.template…` for a dedicated packaging pass (don't half-rename signing) — defaults domain now `com.sherlockouo.yanluo` with legacy read fallback; data dir `Yanluo` with `ASR Workshop` migrate
 
 ### P1 — Kill workbench nav
@@ -230,7 +230,7 @@ Ship in order. Each step should still pass Jobs 3-second test.
 | Date | Decision | Rationale |
 |------|----------|-----------|
 | 2026-07-15 | Dual-primary (出稿 + 派活), anti-workbench shell | User chose B capability set + “能卖的产品，不要工作台” |
-| 2026-07-15 | Brand name **言落** / QuietType (formerly Yanluo) | Speak → something lands (draft or job); not Workshop |
+| 2026-07-15 | Brand name **言落** / Yanluo (QuietType later tried then retired) | Speak → something lands (draft or job); not Workshop |
 | 2026-07-15 | Copper accent + Instrument Serif wordmark + dark brand face | Leave Apple-blue utility clone; memorable product face |
 | 2026-07-15 | IA collapse 9 pages → 3 rail destinations | Sellable product vs developer console |
 | 2026-07-15 | Approved design-consultation A | Write DESIGN.md + renew checklist |
@@ -239,6 +239,7 @@ Ship in order. Each step should still pass Jobs 3-second test.
 | 2026-07-16 | Flat app background (drop `.app-content` radial gradient) | Sticky masthead over gradient left a visible "red line" seam |
 | 2026-07-16 | 派活 = 3 fixed built-in agents; 润色 = provider CRUD; 识别 slimmed | User feedback on v2 doc: no free-form agents, need provider mgmt, too many scattered config |
 | 2026-07-27 | EN brand = **QuietType** (言落 retained as ZH name); former name Yanluo retired | Reddit-driven international positioning; bundle id/data dir migration deferred to packaging pass |
+| 2026-07-31 | EN / bundle / TCC restored to **Yanluo**; QuietType retired; UI zh stays **言落** | Friends could not match System Settings Privacy toggle (QuietType) to in-app「言落」 |
 
 ## Artifacts
 

@@ -172,9 +172,15 @@ export const settings: Record<string, string> = {
   "settings.perm.granted": "Granted",
   "settings.perm.notGranted": "Not granted",
   "settings.perm.authorize": "Authorize",
+  "settings.perm.relaunch": "Relaunch app",
   "settings.perm.helpTitle": "Notes",
-  "settings.perm.helpLine1": "· Signed installer permissions persist with the Bundle ID",
-  "settings.perm.helpLine2": "· Accessibility / Input Monitoring track the executable path",
+  "settings.perm.helpLine1": "· System Settings lists this app as Yanluo (not 言落)",
+  "settings.perm.helpLine2":
+    "· Signed builds keep Mic / Speech / Screen with the Bundle ID",
+  "settings.perm.helpLine3":
+    "· Accessibility / Input Monitoring follow the executable path — reinstall often needs a re-toggle",
+  "settings.perm.helpLine4":
+    "· Ad-hoc / dev codesign identities change each build, so TCC resets",
   "settings.perm.openSystemSettings": "Open System Settings",
 
   // Updates panel
@@ -199,7 +205,7 @@ export const settings: Record<string, string> = {
   // Dispatch agent panel
   "settings.agent.notSet": "Not set",
   "settings.agent.intro":
-    "QuietType has built-in support for the Claude · Codex · Pi CLIs. Fill in the path and default model, then pick one as the default dispatch agent.",
+    "Yanluo has built-in support for the Claude · Codex · Pi CLIs. Fill in the path and default model, then pick one as the default dispatch agent.",
   "settings.agent.binNotFound": "{kind} not found",
   "settings.agent.whichFailed": "which failed: {msg}",
   "settings.agent.modelsRefreshed": "Model list refreshed",

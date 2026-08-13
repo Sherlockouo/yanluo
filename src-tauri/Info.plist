@@ -2,20 +2,20 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Bundle id / binary stay ASCII; Dock & About show QuietType. -->
+	<!-- Bundle id / binary stay ASCII; Dock, About, and TCC Privacy lists show Yanluo. -->
 	<key>CFBundleDisplayName</key>
-	<string>QuietType</string>
+	<string>Yanluo</string>
 	<key>CFBundleName</key>
-	<string>QuietType</string>
+	<string>Yanluo</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>QuietType needs microphone access to capture your voice for transcription.</string>
+	<string>Yanluo needs microphone access to capture your voice for transcription.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>QuietType uses Apple Speech Recognition to convert your speech into text.</string>
+	<string>Yanluo uses Apple Speech Recognition to convert your speech into text.</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>QuietType needs Apple Events access to paste transcription results into the active application.</string>
+	<string>Yanluo needs Apple Events access to paste transcription results into the active application.</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>QuietType needs Screen Recording permission to capture system audio (speakers or headphones) in "system only" or "both" mode. No video is recorded.</string>
+	<string>Yanluo needs Screen Recording permission to capture system audio (speakers or headphones) in "system only" or "both" mode. No video is recorded.</string>
 	<key>NSAudioCaptureUsageDescription</key>
-	<string>QuietType needs to capture system audio output (including headphones) for transcribing and translating playback content.</string>
+	<string>Yanluo needs to capture system audio output (including headphones) for transcribing and translating playback content.</string>
 </dict>
 </plist>

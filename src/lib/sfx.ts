@@ -72,6 +72,13 @@ export function unlockSfx() {
   void c.resume().catch(() => {});
 }
 
+/** Pre-create the AudioContext (module load) so the first hudShow doesn't pay
+ * construction + WKWebView warmup inside the show critical path. May stay
+ * suspended until a gesture — that's fine, only the object cost is front-loaded. */
+export function warmSfx() {
+  ensureCtx();
+}
+
 function envGain(
   c: AudioContext,
   t0: number,

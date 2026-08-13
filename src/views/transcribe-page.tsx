@@ -5,10 +5,9 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, Input, Label, TextField, toast } from "@heroui/react";
+import { Button, Input, Label, TextField } from "@heroui/react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
-  Clipboard,
   Download,
   FileAudio,
   FileVideo,
@@ -21,10 +20,12 @@ import type { HistoryEntry, TranscriptionResult } from "@/types";
 import { providerLabel, TRANSCRIBE_FILE_FILTERS } from "@/lib/constants";
 import { isVideoMediaKind } from "@/lib/alignment";
 import { ModeSwitch, PageHeader, PageShell } from "@/components/shared/page-shell";
+import { TranscriptExportMenu } from "@/components/ui/transcript-export-menu";
 import { useApp } from "@/app-context";
 import { springUI, duration, easeOut } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
+import { toast } from "@/lib/toast";
 
 type TranscriptViewerType =
   typeof import("@/components/ui/transcript-viewer").TranscriptViewer;
@@ -683,45 +684,51 @@ export function TranscribePage({
 
       {/* Embedded (出稿 文件): 新转写 / 转写记录 toggle lives in the masthead. */}
 
-      {/* No nested AnimatePresence — PageShell already owns enter. Double motion = tab hitch. */}
+      {/* Enter-only phase swap — no AnimatePresence exit (ghost stack). */}
       {screen === "upload" ? (
-        <UploadPhase
-          selectedPath={selectedPath}
-          selectedIsVideo={selectedIsVideo}
-          dragOver={dragOver}
-          modelBlocked={modelBlocked}
-          canStart={canStart}
-          provider={providerLabel(config.asr_provider)}
-          urlMode={urlMode}
-          ytdlp={ytdlp}
-          processing={processing}
-          onUrlModeChange={setUrlMode}
-          onPick={() => void pickFile()}
-          onStart={() => void runTranscribe()}
-          onUrlStart={(url) => void runUrlDownloadAndTranscribe(url)}
-        />
+        <ModeSwitch modeKey="upload">
+          <UploadPhase
+            selectedPath={selectedPath}
+            selectedIsVideo={selectedIsVideo}
+            dragOver={dragOver}
+            modelBlocked={modelBlocked}
+            canStart={canStart}
+            provider={providerLabel(config.asr_provider)}
+            urlMode={urlMode}
+            ytdlp={ytdlp}
+            processing={processing}
+            onUrlModeChange={setUrlMode}
+            onPick={() => void pickFile()}
+            onStart={() => void runTranscribe()}
+            onUrlStart={(url) => void runUrlDownloadAndTranscribe(url)}
+          />
+        </ModeSwitch>
       ) : null}
 
       {screen === "processing" ? (
-        <ProcessingPhase
-          fileName={processingName}
-          provider={providerLabel(config.asr_provider)}
-          languageLabel={languageLabel}
-          downloadPercent={downloadPercent}
-          downloadMessage={downloadMessage}
-          onCancel={() => void cancelProcessing()}
-        />
+        <ModeSwitch modeKey="processing">
+          <ProcessingPhase
+            fileName={processingName}
+            provider={providerLabel(config.asr_provider)}
+            languageLabel={languageLabel}
+            downloadPercent={downloadPercent}
+            downloadMessage={downloadMessage}
+            onCancel={() => void cancelProcessing()}
+          />
+        </ModeSwitch>
       ) : null}
 
       {screen === "result" ? (
-        <ResultPhase
-          activeEntry={activeEntry}
-          sessionEntries={sessionEntries}
-          languageLabel={languageLabel}
-          onSelect={selectEntry}
-          onDelete={(id) => void removeEntry(id)}
-          onNew={enterUpload}
-        />
+        <ModeSwitch modeKey="result">
+          <ResultPhase
+            activeEntry={activeEntry}
+            sessionEntries={sessionEntries}
+            languageLabel={languageLabel}
+            onSelect={selectEntry}
+            onDelete={(id) => void removeEntry(id)}
+            onNew={enterUpload}
+          />
+        </ModeSwitch>
       ) : null}
     </>
   );
@@ -1187,19 +1194,7 @@ function TranscriptResultModal({
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
-                <motion.span className="inline-flex" whileTap={{ scale: 0.94 }}>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onPress={() => {
-                      void navigator.clipboard.writeText(entry.text);
-                      toast.success(t("transcribe.copied"));
-                    }}
-                  >
-                    <Clipboard size={14} aria-hidden />
-                    {t("transcribe.copy")}
-                  </Button>
-                </motion.span>
+                <TranscriptExportMenu entry={entry} variant="copy-export" />
                 <motion.span className="inline-flex" whileTap={{ scale: 0.94 }}>
                   <Button
                     isIconOnly
@@ -1229,7 +1224,7 @@ function TranscriptResultModal({
                 <div className="flex min-h-0 flex-1">
                   {/* Left: media column — video player, or audio placeholder card */}
                   <motion.div
-                    className="flex w-[38%] shrink-0 flex-col border-r border-border bg-surface-secondary/60"
+                    className="flex w-[60%] shrink-0 flex-col border-r border-border bg-surface-secondary/60"
                     initial={{ opacity: 0, x: -16 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ ...springUI, delay: 0.08 }}
@@ -1373,10 +1368,10 @@ const HistoryRow = memo(function HistoryRow({
         size="sm"
         variant="ghost"
         className={cn(
-          "mt-0.5 shrink-0 transition-opacity",
+          "mt-0.5 shrink-0 btn-press transition-opacity",
           confirmingDelete
             ? "opacity-100 text-danger text-[12px] font-medium"
-            : "text-muted opacity-0 group-hover:opacity-100 hover:bg-danger/10 hover:text-danger data-[hovered=true]:bg-danger/10 data-[hovered=true]:text-danger",
+            : "text-muted opacity-70 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-danger/10 hover:text-danger data-[hovered=true]:bg-danger/10 data-[hovered=true]:text-danger",
         )}
         aria-label={confirmingDelete ? t("transcribe.confirmDelete") : t("transcribe.delete")}
         onPress={pressDelete}

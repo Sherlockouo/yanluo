@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Button } from "@heroui/react";
 import { duration, easeOut } from "@/lib/motion";
 import { useT } from "@/lib/i18n";
@@ -119,6 +119,7 @@ function measureAnchor(anchor: string): Hole | null {
 export function SpotlightTour() {
   const navigate = useNavigate();
   const t = useT();
+  const reduce = useReducedMotion();
   const [active, setActive] = useState(false);
   const [index, setIndex] = useState(0);
   const [hole, setHole] = useState<Hole | null>(null);
@@ -232,11 +233,12 @@ export function SpotlightTour() {
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: duration.normal, ease: easeOut }}
+        transition={{ duration: reduce ? 0.1 : duration.normal, ease: easeOut }}
       >
+        <div className="spotlight-blocker" aria-hidden />
         {hole ? (
           <div
-            className="spotlight-hole spotlight-hole-smooth"
+            className="spotlight-hole"
             style={{
               top: hole.top,
               left: hole.left,
@@ -252,9 +254,9 @@ export function SpotlightTour() {
           key={step.id}
           className="spotlight-tip"
           style={tipStyle}
-          initial={{ opacity: 0, y: 8 }}
+          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: duration.fast, ease: easeOut }}
+          transition={{ duration: reduce ? 0.1 : duration.fast, ease: easeOut }}
           role="dialog"
           aria-label={t(step.titleKey)}
         >

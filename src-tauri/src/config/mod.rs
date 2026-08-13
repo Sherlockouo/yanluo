@@ -252,6 +252,11 @@ pub(crate) struct AppConfig {
     /// Qwen streaming unfixed token count (`unfixed_token_num` / rollback_tokens).
     #[serde(default = "default_unfixed_token_num")]
     pub(crate) unfixed_token_num: usize,
+    /// Warm the mic on Fn key-down (discard buffer unless the release commits
+    /// a transcribe/translate/agent session). Trading a brief mic-indicator
+    /// flash during cancelled chords for ~30-80ms faster capture start.
+    #[serde(default = "default_speculative_mic")]
+    pub(crate) speculative_mic: bool,
     /// VAD backend: `webrtc` (default) or `energy`.
     #[serde(default = "default_vad_backend")]
     pub(crate) vad_backend: String,
@@ -346,12 +351,19 @@ pub(crate) fn default_translate_target_language() -> String {
 }
 
 pub(crate) fn default_chunk_size_sec() -> f64 {
-    // 1.5s: first hypothesis has enough audio; 1.0s felt weak on sentence starts.
-    1.5
+    // Settled partial cadence. First hypothesis timing is handled separately
+    // (0.5s bootstrap + early ramp in the mlx worker), so this only governs
+    // steady-state freshness — 1.0s keeps caption updates timely. The FE
+    // fallback (`?? 1.0`) matches.
+    1.0
 }
 
 pub(crate) fn default_unfixed_token_num() -> usize {
     5
+}
+
+pub(crate) fn default_speculative_mic() -> bool {
+    true
 }
 
 pub(crate) fn default_vad_backend() -> String {
@@ -445,6 +457,7 @@ impl Default for AppConfig {
             extra_languages: Vec::new(),
             chunk_size_sec: default_chunk_size_sec(),
             unfixed_token_num: default_unfixed_token_num(),
+            speculative_mic: default_speculative_mic(),
             vad_backend: default_vad_backend(),
             vad_aggression: default_vad_aggression(),
             vad_energy_threshold: default_vad_energy_threshold(),
@@ -542,14 +555,14 @@ pub(crate) fn app_data_dir() -> PathBuf {
     if legacy.exists() {
         match fs::rename(&legacy, &canonical) {
             Ok(()) => {
-                eprintln!(
+                crate::elog::elog!(
                     "[config] migrated data dir {:?} → {:?}",
                     legacy, canonical
                 );
                 return canonical;
             }
             Err(e) => {
-                eprintln!(
+                crate::elog::elog!(
                     "[config] migrate data dir failed ({e}); using legacy {:?}",
                     legacy
                 );

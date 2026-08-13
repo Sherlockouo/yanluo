@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Button, Input, TextField, toast } from "@heroui/react";
+import { Button, Input, TextField } from "@heroui/react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Check,
   ChevronDown,
-  Clipboard,
   Copy,
-  Download,
   MoreHorizontal,
   Pencil,
   RotateCcw,
@@ -25,6 +23,7 @@ import {
   SoftCollapse,
 } from "@/components/shared/page-shell";
 import { TranscriptViewer } from "@/components/ui/transcript-viewer";
+import { TranscriptExportMenu } from "@/components/ui/transcript-export-menu";
 import {
   hasRefineDiff,
   RefineDiff,
@@ -37,6 +36,7 @@ import { exportHistoryEntry, historyEntryTitle } from "@/lib/export-transcript";
 import { springUI, useCollapse } from "@/lib/motion";
 import { writePendingDispatchPrompt } from "@/lib/ui-session";
 import { useI18n, useT } from "@/lib/i18n";
+import { toast } from "@/lib/toast";
 import type { HistoryEntry } from "@/types";
 import { useApp } from "@/app-context";
 
@@ -99,6 +99,8 @@ export function HistoryPage({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [clearModalOpen, setClearModalOpen] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const collapse = useCollapse();
   const reducedMotion = useReducedMotion();
@@ -171,19 +173,29 @@ export function HistoryPage({
   };
 
   const runCleanup = async (label: string, action: () => Promise<void>) => {
-    await action();
-    setExpandedId(null);
-    setCleanupOpen(false);
-    toast.success(label);
+    if (cleaning) return;
+    setCleaning(true);
+    try {
+      await action();
+      setExpandedId(null);
+      setCleanupOpen(false);
+      toast.success(label);
+    } finally {
+      setCleaning(false);
+    }
   };
 
   const removeEntry = async (id: string) => {
+    if (deletingId) return;
+    setDeletingId(id);
     try {
       await deleteHistory(id);
       setExpandedId((cur) => (cur === id ? null : cur));
       toast.success(t("history.deleted"));
     } catch (error) {
       toast.danger(t("history.deleteFailed", { error: String(error) }));
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -198,8 +210,10 @@ export function HistoryPage({
           variant="secondary"
           aria-expanded={cleanupOpen}
           aria-haspopup="menu"
+          isDisabled={cleaning}
+          isPending={cleaning}
           onPress={() => setCleanupOpen((v) => !v)}
-          className="text-xs"
+          className="text-xs btn-press"
         >
           <Trash2 size={12} />
           {t("history.cleanup")}
@@ -222,6 +236,7 @@ export function HistoryPage({
             >
               <CleanupItem
                 label={t("history.keepRecent", { n: 100 })}
+                disabled={cleaning}
                 onPress={() =>
                   void runCleanup(t("history.keptRecent", { n: 100 }), () =>
                     pruneHistory(100),
@@ -230,6 +245,7 @@ export function HistoryPage({
               />
               <CleanupItem
                 label={t("history.keepRecent", { n: 500 })}
+                disabled={cleaning}
                 onPress={() =>
                   void runCleanup(t("history.keptRecent", { n: 500 }), () =>
                     pruneHistory(500),
@@ -238,6 +254,7 @@ export function HistoryPage({
               />
               <CleanupItem
                 label={t("history.deleteOlderThan", { n: 30 })}
+                disabled={cleaning}
                 onPress={() =>
                   void runCleanup(t("history.deletedOlderThan", { n: 30 }), () =>
                     pruneHistoryOlderThan(30),
@@ -246,6 +263,7 @@ export function HistoryPage({
               />
               <CleanupItem
                 label={t("history.deleteOlderThan", { n: 90 })}
+                disabled={cleaning}
                 onPress={() =>
                   void runCleanup(t("history.deletedOlderThan", { n: 90 }), () =>
                     pruneHistoryOlderThan(90),
@@ -256,6 +274,7 @@ export function HistoryPage({
               <CleanupItem
                 label={t("history.clearAll")}
                 danger
+                disabled={cleaning}
                 onPress={() => {
                   setCleanupOpen(false);
                   setClearModalOpen(true);
@@ -330,6 +349,7 @@ export function HistoryPage({
                       <HistoryRow
                         entry={entry}
                         open={open}
+                        deleting={deletingId === entry.id}
                         onToggle={() =>
                           setExpandedId((id) =>
                             id === entry.id ? null : entry.id,
@@ -397,16 +417,19 @@ function CleanupItem({
   label,
   onPress,
   danger,
+  disabled,
 }: {
   label: string;
   onPress: () => void;
   danger?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <Button
       variant="ghost"
+      isDisabled={disabled}
       className={cn(
-        "h-auto min-h-0 w-full justify-start rounded-none px-3.5 py-2 text-left text-[13px] font-normal shadow-none",
+        "h-auto min-h-0 w-full justify-start rounded-none px-3.5 py-2 text-left text-[13px] font-normal shadow-none btn-press",
         danger ? "text-danger" : "text-foreground",
       )}
       onPress={onPress}
@@ -495,12 +518,14 @@ function ClearAllModal({
 function HistoryRow({
   entry,
   open,
+  deleting,
   onToggle,
   onDelete,
   onDispatch,
 }: {
   entry: HistoryEntry;
   open: boolean;
+  deleting?: boolean;
   onToggle: () => void;
   onDelete: () => void;
   onDispatch: () => void;
@@ -531,6 +556,7 @@ function HistoryRow({
   );
 
   const pressDelete = () => {
+    if (deleting) return;
     if (confirmingDelete) {
       if (confirmTimer.current != null) {
         window.clearTimeout(confirmTimer.current);
@@ -585,8 +611,8 @@ function HistoryRow({
         variant="ghost"
         aria-label={t("history.copyAllAria")}
         className={cn(
-          "mt-0.5 shrink-0 text-muted transition-opacity group-hover:opacity-100 data-[hovered=true]:opacity-100",
-          copied ? "opacity-100 text-success" : "opacity-0",
+          "mt-0.5 shrink-0 text-muted btn-press transition-opacity data-[hovered=true]:opacity-100",
+          copied ? "opacity-100 text-success" : "opacity-70 sm:opacity-0 sm:group-hover:opacity-100",
         )}
         onPress={() => {
           void navigator.clipboard.writeText(entry.text || "").then(() => {
@@ -650,10 +676,25 @@ function HistoryRow({
                   exportHistoryEntry(entry, "txt");
                 }}
               />
+              <CleanupItem
+                label={t("history.exportSrt")}
+                onPress={() => {
+                  setMenuOpen(false);
+                  exportHistoryEntry(entry, "srt");
+                }}
+              />
+              <CleanupItem
+                label={t("history.exportRaw")}
+                onPress={() => {
+                  setMenuOpen(false);
+                  exportHistoryEntry(entry, "raw");
+                }}
+              />
               <div className="my-1 border-t border-border" />
               <CleanupItem
                 label={confirmingDelete ? t("history.confirmDelete") : t("history.delete")}
                 danger
+                disabled={deleting}
                 onPress={() => {
                   pressDelete();
                   if (confirmingDelete) setMenuOpen(false);
@@ -800,18 +841,7 @@ function ExpandedViewer({
             <Send size={14} />
             {t("history.dispatchThis")}
           </Button>
-          <ExportMenu entry={view} />
-          <Button
-            size="sm"
-            variant="secondary"
-            onPress={() => {
-              void navigator.clipboard.writeText(view.text);
-              toast.success(t("history.copied"));
-            }}
-          >
-            <Clipboard size={14} />
-            {t("history.copy")}
-          </Button>
+          <TranscriptExportMenu entry={view} variant="copy-export" />
         </div>
       </div>
 
@@ -832,50 +862,6 @@ function ExpandedViewer({
           </div>
         </div>
       </SoftCollapse>
-    </div>
-  );
-}
-
-function ExportMenu({ entry }: { entry: HistoryEntry }) {
-  const t = useT();
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <Button
-        size="sm"
-        variant="ghost"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onPress={() => setOpen((v) => !v)}
-      >
-        <Download size={14} />
-        {t("history.export")}
-      </Button>
-      {open ? (
-        <>
-          <div
-            role="presentation"
-            className="fixed inset-0 z-40 cursor-default"
-            onClick={() => setOpen(false)}
-          />
-          <div className="absolute right-0 z-50 mt-2 w-40 overflow-hidden rounded-2xl border border-border bg-surface py-1 shadow-lg">
-            <CleanupItem
-              label={t("history.exportMd")}
-              onPress={() => {
-                setOpen(false);
-                exportHistoryEntry(entry, "md", entry.text);
-              }}
-            />
-            <CleanupItem
-              label={t("history.exportTxt")}
-              onPress={() => {
-                setOpen(false);
-                exportHistoryEntry(entry, "txt", entry.text);
-              }}
-            />
-          </div>
-        </>
-      ) : null}
     </div>
   );
 }

@@ -98,7 +98,7 @@ export function App() {
           </Route>
         </Routes>
       </AppProvider>
-      <Toast.Provider placement="top end" />
+      <Toast.Provider placement="top end" maxVisibleToasts={2} />
     </HashRouter>
   );
 }

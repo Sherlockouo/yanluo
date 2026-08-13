@@ -475,7 +475,8 @@ html.light[data-floating="1"] .hud-agent-send:hover:not(:disabled):not([aria-dis
   .hud-agent-icon-btn,
   .hud-agent-send,
   .hud-agent-chip,
-  .hud-agent-chip-x {
+  .hud-agent-chip-x,
+  .hud-lang-chip {
     transition: transform 100ms ease-out;
   }
 
@@ -489,7 +490,8 @@ html.light[data-floating="1"] .hud-agent-send:hover:not(:disabled):not([aria-dis
     transform: scale(0.97);
   }
 
-  .hud-agent-chip:active {
+  .hud-agent-chip:active,
+  .hud-lang-chip:active:not(:disabled):not([aria-disabled="true"]):not([data-disabled="true"]) {
     transform: scale(0.96);
   }
 }
@@ -1080,7 +1082,6 @@ html.light[data-floating="1"] .hud-text-refining .hud-text-scroll {
 
 .hud-text-refined .hud-text-scroll {
   color: var(--success);
-  transition: color 200ms ease;
 }
 
 html.light[data-floating="1"] .hud-text-refined .hud-text-scroll {

@@ -38,6 +38,17 @@ pub(crate) fn request_permission(
     permissions::request_permission(&kind)
 }
 
+/// Relaunch after Screen Capture / Input Monitoring toggles (TCC often needs a fresh process).
+#[tauri::command]
+pub(crate) fn relaunch_app(app: AppHandle) -> Result<(), String> {
+    // Ack IPC first — `AppHandle::restart` never returns.
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(120));
+        app.restart();
+    });
+    Ok(())
+}
+
 #[derive(Clone, Serialize)]
 pub(crate) struct AppInfo {
     pub(crate) version: String,
@@ -54,7 +65,7 @@ pub(crate) fn get_app_info() -> AppInfo {
     let perms = permissions::get_permission_status();
     AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        name: "QuietType".to_string(),
+        name: "Yanluo".to_string(),
         platform: perms.platform,
         executable_path: perms.executable_path,
         apple_speech_available: cfg!(target_os = "macos"),
@@ -547,7 +558,7 @@ pub(crate) async fn test_llm_refinement(
         .lock()
         .map(|config| config.clone())
         .map_err(|e| e.to_string())?;
-    eprintln!(
+    crate::elog::elog!(
         "[llm] test_llm_refinement: enabled={} url={} model={} key={}",
         config.llm_enabled,
         if config.llm_api_base_url.trim().is_empty() {
@@ -597,15 +608,106 @@ pub(crate) fn load_model(engine: State<'_, AsrEngine>) -> Result<(), String> {
 #[cfg(feature = "qwen-local")]
 pub(crate) const MIN_PARTIAL_SAMPLES: usize = 16_000; // 1 second @ 16kHz
 
+/// True while capture is live (AtomicBool and/or recorder slot).
 #[tauri::command]
-pub(crate) fn start_recording(
+pub(crate) fn is_recording(engine: State<'_, AsrEngine>) -> bool {
+    if engine.inner().recording.load(Ordering::Acquire) {
+        return true;
+    }
+    engine
+        .inner()
+        .recorder
+        .lock()
+        .map(|g| g.is_some())
+        .unwrap_or(false)
+}
+
+/// Async command: runs on the Tauri runtime pool so cpal/ScreenCaptureKit
+/// startup never blocks the AppKit main thread (menu/tray/other windows).
+#[tauri::command]
+pub(crate) async fn start_recording(
     chunk_sec: Option<f64>,
     rollback_tokens: Option<usize>,
     language: Option<String>,
     mode: Option<String>,
     app: AppHandle,
-    engine: State<'_, AsrEngine>,
 ) -> Result<(), String> {
+    start_recording_impl(&app, chunk_sec, rollback_tokens, language, mode.as_deref())
+}
+
+/// Native Fn toggle — the hotkey tap's direct path. Mirrors what the webview
+/// `fn-key-down` listener used to decide, minus two IPC round-trips through a
+/// hidden WKWebView the OS may throttle (the old ~100-300ms pre-HUD delay).
+/// editing / refining / processing are already intercepted inside the tap
+/// (hud-confirm-request / hud-accept-preview-request), so only the
+/// recording→stop and idle→start transitions remain. Errors surface to the FE
+/// via `fn-toggle-error` (it owns i18n + toast).
+pub(crate) fn handle_fn_toggle(app: &AppHandle, intention: &str) {
+    let t0 = std::time::Instant::now();
+    let engine = app.state::<AsrEngine>();
+    let live = engine.inner().recording.load(Ordering::Acquire)
+        || floating_status_slot(app)
+            .lock()
+            .map(|s| s.state == "recording")
+            .unwrap_or(false);
+    if live {
+        if let Err(e) = stop_recording_impl(app) {
+            let _ = app.emit("fn-toggle-error", e);
+        }
+        return;
+    }
+
+    let mode = if intention == "translate" {
+        "translate"
+    } else {
+        "fn"
+    };
+    // Preflight the FE used to toast on — fail fast without opening the HUD.
+    let config = engine
+        .inner()
+        .config
+        .lock()
+        .map(|c| c.clone())
+        .ok()
+        .unwrap_or_default();
+    if matches!(config.asr_provider, AsrProvider::Qwen)
+        && !engine.inner().model_loaded.load(Ordering::Acquire)
+    {
+        crate::audio::discard_speculative_mic();
+        let _ = app.emit(
+            "fn-toggle-error",
+            "Model not loaded — 请先在设置 → 识别 加载 Qwen 模型",
+        );
+        return;
+    }
+    if mode == "translate"
+        && (config.llm_api_base_url.trim().is_empty() || config.llm_model.trim().is_empty())
+    {
+        crate::audio::discard_speculative_mic();
+        let _ = app.emit("fn-toggle-error", "toast.translateNeedsLlm");
+        return;
+    }
+
+    if let Err(e) = start_recording_impl(app, None, None, None, Some(mode)) {
+        crate::audio::discard_speculative_mic();
+        let _ = app.emit("fn-toggle-error", e);
+    }
+    crate::elog::elog!(
+        "[fn-toggle] native start ({mode}) done in {:.0}ms",
+        t0.elapsed().as_millis()
+    );
+}
+
+/// Core start path shared by the IPC command and the native Fn toggle:
+/// config/permission checks → HUD show → audio start → worker start.
+pub(crate) fn start_recording_impl(
+    app: &AppHandle,
+    chunk_sec: Option<f64>,
+    rollback_tokens: Option<usize>,
+    language: Option<String>,
+    mode: Option<&str>,
+) -> Result<(), String> {
+    let engine = app.state::<AsrEngine>();
     let config = engine
         .inner()
         .config
@@ -644,22 +746,22 @@ pub(crate) fn start_recording(
         );
     }
 
-    let session = match mode.as_deref() {
+    let session = match mode {
         Some("transcribe") => "transcribe",
         Some("translate") => "translate",
         Some("agent") => "agent",
         _ => "fn",
     };
-    AsrEngine::set_session_mode(&app, session);
-    reset_translate_stream(&app);
-    let _ = AsrEngine::bump_finalize_gen(&app);
-    AsrEngine::set_pending_hud_confirm(&app, None);
+    AsrEngine::set_session_mode(app, session);
+    reset_translate_stream(app);
+    let _ = AsrEngine::bump_finalize_gen(app);
+    AsrEngine::set_pending_hud_confirm(app, None);
 
     // Show HUD *before* ScreenCaptureKit start — that path can take seconds and
     // used to leave the UI frozen with no capsule until capture finished/failed.
     // Agent also uses the same floating HUD (with extras).
     let show_hud = session == "fn" || session == "translate" || session == "agent";
-    emit_floating_status(&app, show_hud, "recording", "", 0.0);
+    emit_floating_status(app, show_hud, "recording", "", 0.0);
 
     let rec = match AudioRecorder::start(
         config.audio_capture_mode,
@@ -667,7 +769,7 @@ pub(crate) fn start_recording(
     ) {
         Ok(rec) => rec,
         Err(e) => {
-            emit_floating_status(&app, false, "idle", "", 0.0);
+            emit_floating_status(app, false, "idle", "", 0.0);
             return Err(e.to_string());
         }
     };
@@ -690,7 +792,7 @@ pub(crate) fn start_recording(
     // older config.json causes unstable hypotheses and feels like "worse ASR".
     let raw_chunk = chunk_sec.unwrap_or(config.chunk_size_sec.max(0.2));
     let chunk_sec = if raw_chunk < 1.0 {
-        eprintln!(
+        crate::elog::elog!(
             "[asr] chunk_sec={raw_chunk:.2} too small for segmented streaming; clamping to 1.0s"
         );
         1.0
@@ -699,7 +801,7 @@ pub(crate) fn start_recording(
     };
     let raw_rollback = rollback_tokens.unwrap_or(config.unfixed_token_num.max(1));
     let rollback_tokens = if raw_rollback < 3 {
-        eprintln!(
+        crate::elog::elog!(
             "[asr] rollback_tokens={raw_rollback} too small; clamping to 3 (prefer 5)"
         );
         3
@@ -732,7 +834,7 @@ pub(crate) fn start_recording(
             locale,
         );
     }
-    eprintln!(
+    crate::elog::elog!(
         "[asr] recording started, provider={} mode={} chunk={}s rollback={}",
         config.asr_provider.label(),
         session,
@@ -785,7 +887,7 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
     if !was_recording && !has_recorder && !hud_busy {
         emit_floating_status(app, false, "idle", "", 0.0);
         let _ = app.emit("recording-cancelled", ());
-        eprintln!(
+        crate::elog::elog!(
             "[asr] cancelled noop reason={reason} session={session} (recording=false recorder=false hud_busy=false)"
         );
         return;
@@ -796,6 +898,8 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
         .lock()
         .map(|c| c.clone())
         .unwrap_or_default();
+    // Same double-press race guard as stop_recording_impl.
+    crate::audio::discard_speculative_mic();
     if !matches!(config.asr_provider, AsrProvider::Qwen) {
         let _ = AsrEngine::take_recorder_and_stop(app);
     }
@@ -806,7 +910,7 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
 
     emit_floating_status(app, false, "idle", "", 0.0);
     let _ = app.emit("recording-cancelled", ());
-    eprintln!(
+    crate::elog::elog!(
         "[asr] cancelled reason={reason} session={session} (recording={} recorder={} hud_busy={})",
         was_recording, has_recorder, hud_busy
     );
@@ -865,14 +969,14 @@ pub(crate) fn confirm_floating_transcript(
 
     let paste_failed = match inject_text_via_paste_on_main(&app, &confirmed) {
         Ok(()) => {
-            eprintln!(
+            crate::elog::elog!(
                 "[paste] confirmed {} chars (edited={edited} mode={mode})",
                 confirmed.chars().count()
             );
             false
         }
         Err(e) => {
-            eprintln!("[paste] injection failed: {e}");
+            crate::elog::elog!("[paste] injection failed: {e}");
             let _ = app.emit(
                 "partial-error",
                 format!("已写入剪切板，但粘贴失败（请检查辅助功能权限）: {e}"),
@@ -916,7 +1020,7 @@ pub(crate) fn confirm_floating_transcript(
                 }
             }
             if !learned_pairs.is_empty() {
-                eprintln!(
+                crate::elog::elog!(
                     "[learn] auto-extracted {} pairs from HUD edit",
                     learned_pairs.len()
                 );
@@ -963,7 +1067,7 @@ pub(crate) fn cancel_floating_transcript(app: AppHandle) -> Result<(), String> {
     let _ = AsrEngine::bump_finalize_gen(&app);
     emit_floating_status(&app, false, "idle", "", 0.0);
     let _ = app.emit("recording-cancelled", ());
-    eprintln!("[asr] hud confirm cancelled");
+    crate::elog::elog!("[asr] hud confirm cancelled");
     Ok(())
 }
 
@@ -1003,7 +1107,7 @@ pub(crate) fn accept_floating_preview(
     if confirmed.is_empty() {
         emit_floating_status(&app, false, "idle", "", 0.0);
         let _ = app.emit("recording-cancelled", ());
-        eprintln!("[asr] accept preview: empty — idle");
+        crate::elog::elog!("[asr] accept preview: empty — idle");
         return Ok(());
     }
 
@@ -1018,13 +1122,13 @@ pub(crate) fn accept_floating_preview(
 
     match inject_text_via_paste_on_main(&app, &confirmed) {
         Ok(()) => {
-            eprintln!(
+            crate::elog::elog!(
                 "[paste] accept preview {} chars (skipped mid-pipeline mode={mode})",
                 confirmed.chars().count()
             );
         }
         Err(e) => {
-            eprintln!("[paste] accept preview failed: {e}");
+            crate::elog::elog!("[paste] accept preview failed: {e}");
             let _ = app.emit(
                 "partial-error",
                 format!("已写入剪切板，但粘贴失败（请检查辅助功能权限）: {e}"),
@@ -1058,16 +1162,26 @@ pub(crate) fn accept_floating_preview(
 }
 
 #[tauri::command]
-pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Result<(), String> {
+pub(crate) fn stop_recording(app: AppHandle) -> Result<(), String> {
+    stop_recording_impl(&app)
+}
+
+/// Shared stop path for the IPC command and the native Fn toggle.
+pub(crate) fn stop_recording_impl(app: &AppHandle) -> Result<(), String> {
+    // Belt-and-braces: a double-press race (Fn pressed between release and the
+    // recording flag flipping) can leave a speculative warm stream alive —
+    // drop it here so the mic indicator dies with the session.
+    crate::audio::discard_speculative_mic();
+    let engine = app.state::<AsrEngine>();
     let config = engine
         .inner()
         .config
         .lock()
         .map(|config| config.clone())
         .map_err(|e| e.to_string())?;
-    let session = AsrEngine::session_mode(&app);
+    let session = AsrEngine::session_mode(app);
     let show_hud = session == "fn" || session == "translate" || session == "agent";
-    let finalize_gen = AsrEngine::finalize_gen(&app);
+    let finalize_gen = AsrEngine::finalize_gen(app);
 
     // Signal the worker's streaming loop to stop.
     // The worker will then do the final transcription automatically.
@@ -1081,29 +1195,30 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
     // Preserve live HUD text for fn/agent — wiping to "" made mid-pipeline Fn accept
     // read empty slot while FE still showed keepLive partials (no paste / no clipboard).
     let hud_text = if session == "translate" {
-        peek_translate_out(&app)
+        peek_translate_out(app)
     } else {
-        floating_status_slot(&app)
+        floating_status_slot(app)
             .lock()
             .map(|s| s.text.clone())
             .unwrap_or_default()
     };
-    emit_floating_status(&app, show_hud, "processing", &hud_text, 0.0);
+    emit_floating_status(app, show_hud, "processing", &hud_text, 0.0);
     if session == "agent" {
         let _ = app.emit("agent-voice-status", "processing");
         let _ = app.emit_to("floating", "agent-voice-status", "processing");
     }
 
     if matches!(config.asr_provider, AsrProvider::Qwen) {
-        eprintln!("[asr] stop signaled, worker will finish current partial then paste");
+        crate::elog::elog!("[asr] stop signaled, worker will finish current partial then paste");
         return Ok(());
     }
 
+    let app = app.clone();
     let samples = AsrEngine::take_recorder_and_stop(&app)
         .ok_or_else(|| "Recorder not found".to_string())?;
     std::thread::spawn(move || {
         if AsrEngine::finalize_aborted(&app, finalize_gen) {
-            eprintln!("[asr] stop aborted before provider ASR");
+            crate::elog::elog!("[asr] stop aborted before provider ASR");
             #[cfg(target_os = "macos")]
             apple_speech_ffi::cancel_stream();
             return;
@@ -1126,7 +1241,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
             }
             match apple_speech_ffi::stream_finish() {
                 Ok(text) => {
-                    eprintln!(
+                    crate::elog::elog!(
                         "[asr] apple stream finish ok chars={}",
                         text.chars().count()
                     );
@@ -1144,7 +1259,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
                     }
                 }
                 Err(stream_err) => {
-                    eprintln!("[asr] apple stream finish failed: {stream_err}; fallback file ASR");
+                    crate::elog::elog!("[asr] apple stream finish failed: {stream_err}; fallback file ASR");
                     transcribe_with_apple_speech(&config, &samples).unwrap_or_else(|error| {
                         TranscriptionResult {
                             text: String::new(),
@@ -1227,7 +1342,7 @@ pub(crate) fn stop_recording(app: AppHandle, engine: State<'_, AsrEngine>) -> Re
             AsrProvider::Qwen => unreachable!(),
         };
         if AsrEngine::finalize_aborted(&app, finalize_gen) {
-            eprintln!("[asr] stop aborted after provider ASR — suppress result");
+            crate::elog::elog!("[asr] stop aborted after provider ASR — suppress result");
             emit_floating_status(&app, false, "idle", "", 0.0);
             return;
         }
@@ -1523,7 +1638,7 @@ pub(crate) fn learn_from_edit(
     }
 
     if !learned.is_empty() {
-        eprintln!(
+        crate::elog::elog!(
             "[learn] auto-extracted {} pairs from edit (entry={})",
             learned.len(),
             entry_id

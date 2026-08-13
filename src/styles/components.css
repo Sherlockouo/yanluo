@@ -258,7 +258,8 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  padding-top: 0.25rem;
+  padding-top: 1.25rem;
+  margin-top: 0.5rem;
 }
 
 .form-actions-secondary {
@@ -275,6 +276,7 @@
 .form-actions-primary [data-slot="button"],
 button.form-actions-primary,
 .form-actions > .form-actions-primary {
+  border-radius: var(--radius-md);
   transition:
     transform 100ms ease-out,
     opacity 100ms ease-out;
@@ -376,11 +378,15 @@ button.form-actions-primary,
   border-radius: 0.9rem;
   background: color-mix(in oklab, var(--heroui-default) 55%, transparent);
   border: 1px solid transparent;
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity 0.15s ease, transform 100ms ease-out;
 }
 
 .onboard-choice:hover:not(:disabled) {
   background: color-mix(in oklab, var(--heroui-default) 75%, transparent);
+}
+
+.onboard-choice:active:not(:disabled) {
+  transform: scale(0.985);
 }
 
 .onboard-choice:disabled {
@@ -392,6 +398,12 @@ button.form-actions-primary,
   border-color: color-mix(in oklab, var(--heroui-foreground) 10%, transparent);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .onboard-choice:active:not(:disabled) {
+    transform: none;
+  }
+}
+
 /*
   Generic row inside a card (hotkeys, trusted dirs) — spacing hierarchy, no lines.
 */
@@ -399,8 +411,9 @@ button.form-actions-primary,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.85rem 0.25rem;
+  gap: 1.25rem;
+  padding: 1.1rem 0.35rem;
+  border-radius: var(--radius-sm);
   transition: background-color 140ms ease;
 }
 
@@ -424,7 +437,7 @@ button.form-actions-primary,
 .badge-soft {
   display: inline-flex;
   align-items: center;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 2px 6px;
   font-size: var(--text-micro);
   font-weight: 500;
@@ -539,7 +552,7 @@ button.form-actions-primary,
 .set {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
-  gap: 3rem;
+  gap: 3.5rem;
   align-items: stretch;
   /* Pinned two-pane: nav + title fixed, detail scrolls independently (v3.2) */
   flex: 1 1 auto;
@@ -549,12 +562,11 @@ button.form-actions-primary,
 .setnav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   padding-top: 0.25rem;
   max-height: 100%;
   overflow-y: auto;
-  scrollbar-width: thin;
-  /* Soft scroll-edge fade instead of a hard cut */
+  scrollbar-width: none; /* hide bar — scroll still works */
   mask-image: linear-gradient(
     to bottom,
     transparent 0,
@@ -564,15 +576,20 @@ button.form-actions-primary,
   );
 }
 
+.setnav::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 .setnav-item {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--muted);
   font-family: var(--font-sans);
@@ -670,10 +687,16 @@ button.form-actions-primary,
   min-height: 0;
   max-height: 100%;
   overflow-y: auto;
-  scrollbar-width: thin;
+  scrollbar-width: none; /* hide bar */
   display: flex;
   flex-direction: column;
-  gap: 1.625rem;
+  gap: 2.25rem;
+  padding-bottom: 0.5rem;
+}
+
+.setbody::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 /* Serif section heading atop the right detail pane — v3.1: 30px / -0.01em */
@@ -802,34 +825,63 @@ button.form-actions-primary,
 
 /* 13px muted 描述行 under the serif section head */
 .set-secdesc {
-  margin-top: 0.4rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.25rem;
   font-size: var(--text-meta);
   color: var(--muted);
+  max-width: 36rem;
+  line-height: 1.45;
 }
 
-/* Form-row group — spacing opens the group, no top rule */
+/* Form-row group — airy hairlines */
 .set-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
 }
 
 .set-row-line {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  gap: 1.5rem;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 2rem;
   align-items: center;
-  padding: 18px 4px;
+  padding: 1.35rem 0.5rem;
+  border-radius: var(--radius-sm);
+}
+
+.set-row-line + .set-row-line {
+  border-top: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .set-row-line-lab {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
   font-size: 14.5px;
   font-weight: 500;
   color: var(--foreground);
 }
 
+.set-row-line-lab-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.set-row-line-lab-title .set-row-ico {
+  flex-shrink: 0;
+  color: var(--muted);
+  opacity: 0.9;
+}
+
 .set-row-line-lab small {
   display: block;
-  margin-top: 3px;
+  margin-top: 0;
+  padding-left: calc(14px + 0.55rem); /* align under title text past icon */
   font-size: 12px;
   font-weight: 400;
+  line-height: 1.4;
   color: var(--faint);
 }
 
@@ -838,23 +890,23 @@ button.form-actions-primary,
   min-width: 0;
   align-items: center;
   justify-content: flex-end;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 /*
-  .qsel — quiet mono ▾ select trigger (识别语言). No border, no bg, no inset
-  shadow — mono text + chevron, hover 变 accent-fg. Unlayered so it beats
-  HeroUI's layered boxed-trigger styles.
+  .qsel — quiet mono ▾. Indicator must be in-flow (HeroUI defaults absolute +
+  pe-7; padding:0 killed the reserve → text under chevron).
 */
 .qsel {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  max-width: 100%;
   height: auto;
   min-height: 0;
-  padding: 0;
+  padding: 4px 2px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   background: transparent;
   box-shadow: none;
   font-family: var(--font-mono);
@@ -864,12 +916,13 @@ button.form-actions-primary,
   cursor: pointer;
   transition:
     color 140ms ease,
-    opacity 80ms ease-out;
+    opacity 80ms ease-out,
+    background 140ms ease;
 }
 
 .qsel:hover,
 .qsel[data-hovered="true"] {
-  background: transparent;
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
   color: var(--accent-soft-foreground);
 }
 
@@ -882,15 +935,66 @@ button.form-actions-primary,
   outline-offset: 2px;
 }
 
+/* Kill absolute indicator layout — sit beside value with gap */
+.qsel .select__indicator,
+.qsel .qsel-chev,
+.qsel [data-slot="indicator"] {
+  position: static !important;
+  inset: auto !important;
+  flex-shrink: 0;
+  margin: 0;
+  color: var(--muted);
+}
+
+.qsel .select__value,
+.qsel [data-slot="value"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .qsel .qsel-chev {
   color: var(--muted);
+}
+
+/* Boxed selects (ASR / VAD) — same in-flow chevron rule */
+.set-select-box {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.set-select-box .select__indicator,
+.set-select-box [data-slot="indicator"] {
+  position: static !important;
+  inset: auto !important;
+  flex-shrink: 0;
+}
+
+.set-select-box .select__value,
+.set-select-box [data-slot="value"] {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
 }
 
 /* .qswitch — quiet 文字开关: 「·」分隔, active = 600 + 2px accent 下划线, 无盒 */
 .qswitch {
   display: inline-flex;
   align-items: baseline;
-  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 16px;
   font-size: 14px;
 }
 
@@ -947,8 +1051,9 @@ button.form-actions-primary,
 .set-prov-line {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px 4px;
+  gap: 16px;
+  padding: 1.1rem 0.75rem;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: background-color 140ms ease;
 }
@@ -999,7 +1104,7 @@ button.form-actions-primary,
   white-space: nowrap;
 }
 
-/* 操作链接: 「编辑」accent-soft-fg / 「设为当前」muted→foreground */
+/* 操作链接: 「编辑」+ chevron — inline-flex so icon never overlaps text */
 .set-prov-act,
 .set-prov-ghost {
   flex-shrink: 0;
@@ -1012,7 +1117,15 @@ button.form-actions-primary,
 }
 
 .set-prov-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   color: var(--accent-soft-foreground);
+}
+
+.set-prov-act svg {
+  flex-shrink: 0;
+  display: block;
 }
 
 .set-prov-act:hover {
@@ -1122,20 +1235,14 @@ button.form-actions-primary,
   pointer-events: none;
   z-index: 1;
 }
-.spotlight-hole-smooth {
-  transition:
-    top 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    left 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    width 180ms cubic-bezier(0.22, 1, 0.36, 1),
-    height 180ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-@media (prefers-reduced-motion: reduce) {
-  .spotlight-hole-smooth {
-    transition: none;
-  }
+/* Hole position snaps — never tween top/left/width/height (layout thrash). */
+.spotlight-blocker {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
 }
 
-/* —— First-run brand intro (Arc-adjacent quiet chime + mark) —— */
+/* —— First-run brand intro (gradual reveal + linear particle dissolve) —— */
 .first-run-intro {
   position: fixed;
   inset: 0;
@@ -1143,9 +1250,14 @@ button.form-actions-primary,
   display: grid;
   place-content: center;
   place-items: center;
-  gap: 1rem;
   background: var(--background);
   pointer-events: auto;
+}
+.first-run-intro-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  gap: 1rem;
 }
 .first-run-intro-mark {
   font-family: var(--font-display, "Instrument Serif", "Noto Serif SC", serif);
@@ -1154,18 +1266,60 @@ button.form-actions-primary,
   letter-spacing: 0.04em;
   color: var(--foreground);
   line-height: 1;
+  will-change: transform, opacity;
 }
 .first-run-intro-rule {
   width: 3.5rem;
   height: 1px;
   background: var(--accent);
   transform-origin: center;
+  will-change: transform, opacity;
 }
 .first-run-intro-tag {
   font-family: var(--font-mono, "IBM Plex Mono", ui-monospace, monospace);
   font-size: 0.75rem;
   letter-spacing: 0.12em;
   color: var(--muted);
+  will-change: transform, opacity;
+}
+.first-run-intro-particles {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.first-run-intro-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent) 75%, var(--foreground));
+  opacity: 0;
+  transform: translate3d(0, 0, 0) scale(0.4);
+  will-change: transform, opacity;
+}
+.first-run-intro.is-out .first-run-intro-dot {
+  animation: intro-particle-scatter 0.78s linear forwards;
+  animation-delay: calc(var(--i, 0) * 22ms);
+}
+@keyframes intro-particle-scatter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.35);
+  }
+  12% {
+    opacity: 0.9;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--dx, 0), var(--dy, 0), 0) scale(calc(0.15 * var(--ds, 1)));
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .first-run-intro,
@@ -1173,6 +1327,9 @@ button.form-actions-primary,
   .first-run-intro-rule,
   .first-run-intro-tag {
     transition: none;
+  }
+  .first-run-intro-dot {
+    display: none;
   }
 }
 .spotlight-tip {

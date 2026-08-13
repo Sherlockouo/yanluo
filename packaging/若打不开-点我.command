@@ -1,6 +1,6 @@
 #!/bin/bash
-# QuietType（言落）· 清除 Gatekeeper 隔离属性（未公证包下载后可能报「已损坏」）
-# 双击本文件即可；会处理 /Applications/QuietType.app 或同目录下的 QuietType.app（兼容旧版 Yanluo.app）
+# Yanluo（言落）· 清除 Gatekeeper 隔离属性（未公证包下载后可能报「已损坏」）
+# 双击本文件即可；优先 Yanluo.app，兼容 QuietType.app / 旧路径
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -8,10 +8,10 @@ cd "$(dirname "$0")"
 pick_app() {
   local candidate
   for candidate in \
-    "/Applications/QuietType.app" \
-    "./QuietType.app" \
     "/Applications/Yanluo.app" \
-    "./Yanluo.app"; do
+    "./Yanluo.app" \
+    "/Applications/QuietType.app" \
+    "./QuietType.app"; do
     if [[ -d "${candidate}" ]]; then
       echo "${candidate}"
       return
@@ -28,14 +28,14 @@ pick_app() {
 }
 
 echo "========================================"
-echo "  QuietType · 修复「已损坏 / 无法打开」"
+echo "  Yanluo · 修复「已损坏 / 无法打开」"
 echo "========================================"
 echo
 
 APP="$(pick_app)" || {
-  echo "未找到 QuietType.app。"
-  echo "请先把 QuietType 拖到「应用程序」，再双击本脚本；"
-  echo "或把本脚本放到 QuietType.app 同一文件夹后再试。"
+  echo "未找到 Yanluo.app。"
+  echo "请先把 Yanluo 拖到「应用程序」，再双击本脚本；"
+  echo "或把本脚本放到 Yanluo.app 同一文件夹后再试。"
   echo
   read -r -p "按回车关闭…" _
   exit 1

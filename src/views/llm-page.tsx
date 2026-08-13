@@ -115,6 +115,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [distilling, setDistilling] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [testingLlm, setTestingLlm] = useState(false);
 
   // ─── Delete confirm state (two-step inline)
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
@@ -416,7 +417,13 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
               <Button
                 size="sm"
                 variant="secondary"
-                onPress={() => void testLlm()}
+                className="btn-press"
+                isPending={testingLlm}
+                isDisabled={testingLlm}
+                onPress={() => {
+                  setTestingLlm(true);
+                  void testLlm().finally(() => setTestingLlm(false));
+                }}
               >
                 <Sparkles size={14} aria-hidden />
                 {t("learn.test")}

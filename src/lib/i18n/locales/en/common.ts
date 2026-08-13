@@ -1,5 +1,5 @@
 export const common: Record<string, string> = {
-  "common.appName": "QuietType",
+  "common.appName": "Yanluo",
 
   // Generic actions
   "common.save": "Save",

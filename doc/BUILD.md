@@ -38,14 +38,14 @@ MLX error: Failed to load the default metallib. library not found
 
 **解决**（已接入打包）：
 
-- **权威步骤**：`beforeBundleCommand` → `scripts/stage-mlx-metallib.mjs --bundle`，cargo **整编完成后**把 metallib 塞进 `QuietType.app/Contents/MacOS/`
+- **权威步骤**：`beforeBundleCommand` → `scripts/stage-mlx-metallib.mjs --bundle`，cargo **整编完成后**把 metallib 塞进 `Yanluo.app/Contents/MacOS/`
 - `build.rs` 只做 best-effort（给 `tauri:dev:local`）；CI 里若出现 `mlx.metallib not staged yet` **可忽略**，bundle hook 会再拷
 - 已装坏的包可手动修：
 
 ```bash
-node scripts/stage-mlx-metallib.mjs --app /Applications/QuietType.app
-codesign --force --deep --sign - /Applications/QuietType.app
-xattr -cr /Applications/QuietType.app
+node scripts/stage-mlx-metallib.mjs --app /Applications/Yanluo.app
+codesign --force --deep --sign - /Applications/Yanluo.app
+xattr -cr /Applications/Yanluo.app
 ```
 ## Gatekeeper「已损坏 / 无法验证」
 
@@ -58,13 +58,13 @@ xattr -cr /Applications/QuietType.app
 
 **当前策略**：`tauri.macos.conf.json` 里 `hardenedRuntime: false`（无证书时避免 hardened+adhoc 互撕）。有证书后应在 CI 配 `APPLE_CERTIFICATE*` 并重新打开 hardened + notarize（见 `RELEASE.md`）。
 
-**DMG 里自带修复脚本**：拖完 QuietType 到「应用程序」后，双击同卷上的 `若打不开-点我.command`（会跑 `xattr -cr` + 本机 adhoc 重签）。本地打包后也会生成在 `bundle/macos/`。
+**DMG 里自带修复脚本**：拖完 Yanluo 到「应用程序」后，双击同卷上的 `若打不开-点我.command`（会跑 `xattr -cr` + 本机 adhoc 重签）。本地打包后也会生成在 `bundle/macos/`。
 
 临时绕过（终端）：
 
 ```bash
-xattr -cr /Applications/QuietType.app
-codesign --force --deep --sign - /Applications/QuietType.app
+xattr -cr /Applications/Yanluo.app
+codesign --force --deep --sign - /Applications/Yanluo.app
 ```
 
 ## Metal Toolchain 缺失 → `bfloat16_t` 未识别

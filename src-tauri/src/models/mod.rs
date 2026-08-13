@@ -178,7 +178,7 @@ fn download_file(
 
     let mut response = client
         .get(url)
-        .header("User-Agent", "QuietType")
+        .header("User-Agent", "Yanluo")
         .send()
         .map_err(|e| format!("下载失败 {file_label}: {e}"))?;
 
@@ -306,7 +306,7 @@ fn download_qwen_asr_model_blocking(
         let name = spec.save_as.unwrap_or(spec.file);
         let dest = dest_dir.join(name);
         let url = hf_resolve(spec.repo, spec.file);
-        eprintln!("[model-dl] {} → {}", url, dest.display());
+        crate::elog::elog!("[model-dl] {} → {}", url, dest.display());
         download_file(app, model_id, &url, &dest, name, i + 1, file_count)?;
     }
 

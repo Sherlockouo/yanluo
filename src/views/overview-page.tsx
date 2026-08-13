@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import { PageShell } from "@/components/shared/page-shell";
 import { WordCloud } from "@/components/home/word-cloud";
-import { duration, easeOut, springBounce } from "@/lib/motion";
+import { duration, easeOut, springUI } from "@/lib/motion";
 import {
   aggregateWordFreq,
   CLOUD_SOURCES,
@@ -74,7 +74,7 @@ export function OverviewPage() {
         <motion.div
           initial={reduceMotion ? false : { opacity: 0.92, y: 14, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={springBounce}
+          transition={springUI}
         >
           <NavLink
             to={needsInstall ? "#" : "/draft"}
@@ -92,7 +92,7 @@ export function OverviewPage() {
               {needsInstall ? (
                 <NavLink
                   to="/settings?tab=asr"
-                  className="mt-2 inline-block font-mono text-xs text-muted transition-colors hover:text-foreground"
+                  className="mt-2 inline-block font-mono text-xs text-muted chip-press transition-colors hover:text-foreground"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {t("home.modelNotReady")}
@@ -108,7 +108,7 @@ export function OverviewPage() {
         <motion.div
           initial={reduceMotion ? false : { opacity: 0.92, y: 14, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ ...springBounce, delay: 0.07 }}
+          transition={{ ...springUI, delay: 0.05 }}
         >
           <NavLink to="/dispatch" className="dest-card card-press h-full">
             <div>
@@ -165,9 +165,9 @@ export function OverviewPage() {
         initial={reduceMotion ? false : { opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{
-          duration: duration.slow,
+          duration: duration.fast,
           ease: easeOut,
-          delay: reduceMotion ? 0 : 0.18,
+          delay: reduceMotion ? 0 : 0.06,
         }}
       >
         <span>

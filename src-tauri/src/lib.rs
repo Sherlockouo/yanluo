@@ -1,4 +1,4 @@
-//! QuietType (言落) backend — Tauri application wiring.
+//! Yanluo (言落) backend — Tauri application wiring.
 
 mod agent;
 mod agent_kit;
@@ -6,6 +6,7 @@ mod audio;
 mod commands;
 mod config;
 mod download;
+mod elog;
 mod history;
 mod hotkey;
 mod hud;
@@ -54,7 +55,7 @@ pub fn main() {
                     .set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
             if let Err(e) = create_floating_window(&handle) {
-                eprintln!("[floating] create window failed: {e}");
+                crate::elog::elog!("[floating] create window failed: {e}");
             }
             #[cfg(target_os = "macos")]
             {
@@ -74,10 +75,10 @@ pub fn main() {
 
             app.manage(AsrEngine::new(handle.clone()));
             if let Err(e) = install_app_menu(&handle) {
-                eprintln!("[menu] install failed: {e}");
+                crate::elog::elog!("[menu] install failed: {e}");
             }
             if let Err(e) = install_tray(&handle) {
-                eprintln!("[tray] install failed: {e}");
+                crate::elog::elog!("[tray] install failed: {e}");
             }
 
             let summon_handle = handle.clone();
@@ -85,10 +86,26 @@ pub fn main() {
                 agent::handle_agent_summon(&summon_handle);
             });
 
+            // Fn toggle fast path: the tap emits this natively so start/stop no
+            // longer round-trips through the (possibly throttled, hidden) main
+            // webview. Runs off the tap thread — startup can take seconds in
+            // system-audio mode (ScreenCaptureKit), which would trip the
+            // event-tap watchdog and disable the Fn listener entirely.
+            let fn_handle = handle.clone();
+            let _ = app.listen("fn-toggle-native", move |event| {
+                // Payload is a bare JSON string: "transcribe" | "translate".
+                let intention = serde_json::from_str::<String>(event.payload())
+                    .unwrap_or_else(|_| "transcribe".into());
+                let fn_handle = fn_handle.clone();
+                std::thread::spawn(move || {
+                    commands::handle_fn_toggle(&fn_handle, &intention);
+                });
+            });
+
             start_fn_event_tap(handle.clone());
             agent::schedule_agent_models_refresh(&handle);
             if let Err(e) = agent_kit::sync_agent_kit() {
-                eprintln!("[agent-kit] sync failed: {e}");
+                crate::elog::elog!("[agent-kit] sync failed: {e}");
             }
             Ok(())
         })
@@ -160,10 +177,12 @@ pub fn main() {
             commands::open_permission_settings,
             commands::open_path_in_system,
             commands::request_permission,
+            commands::relaunch_app,
             commands::get_app_info,
             commands::get_platform,
             commands::start_recording,
             commands::stop_recording,
+            commands::is_recording,
             commands::cancel_recording,
             commands::confirm_floating_transcript,
             commands::cancel_floating_transcript,
@@ -233,7 +252,7 @@ fn prepend_bundled_libtorch_path() {
         .filter(|p| p.is_dir())
         .collect();
     if existing.is_empty() {
-        eprintln!(
+        crate::elog::elog!(
             "[asr] no bundled libtorch found beside binary; set LIBTORCH if local Qwen fails to load"
         );
         return;
@@ -262,5 +281,5 @@ fn prepend_bundled_libtorch_path() {
     unsafe {
         env::set_var(key, &merged);
     }
-    eprintln!("[asr] {key} prepended with bundled libtorch ({})", existing[0].display());
+    crate::elog::elog!("[asr] {key} prepended with bundled libtorch ({})", existing[0].display());
 }

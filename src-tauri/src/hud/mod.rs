@@ -110,7 +110,7 @@ fn finish_floating_hide_inner(app: &AppHandle) {
         }
         if let Some(window) = app.get_webview_window("floating") {
             let _ = window.hide();
-            eprintln!("[floating] hide()");
+            crate::elog::elog!("[floating] hide()");
         }
         sync_floating_lang_chip(&app, false);
         restore_previous_frontmost_app(true);
@@ -134,57 +134,76 @@ pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
             .unwrap_or(false);
     let app = app.clone();
     // Window show/hide must run on the AppKit main thread.
+    // catch_unwind: never let HUD show/hide abort the process (broken stderr
+    // from eprintln!, ObjC edge cases, etc. — see crash in set_floating_window_visible).
     let _ = app.clone().run_on_main_thread(move || {
-        if let Some(window) = app.get_webview_window("floating") {
-            if visible {
-                // Invalidate any dismiss fade so re-summon isn't stuck at alpha 0.
-                let _ = crate::platform::bump_floating_fade_gen();
-                // Do NOT toggle Accessory/Regular here — that steals focus and
-                // makes Fn/cancel "jump back" to QuietType. HUD was created
-                // under Accessory once at launch so FullScreenAuxiliary sticks.
-                remember_frontmost_app();
-                // Place only on hide→show. Mid-session emits (RMS / state) must
-                // not re-resolve — that snaps HUD away from drag / resize anchor.
-                let need_place = !hud_native_up().swap(true, Ordering::AcqRel);
-                if need_place {
-                    let width = window
-                        .inner_size()
-                        .ok()
-                        .and_then(|s| {
-                            window
-                                .scale_factor()
-                                .ok()
-                                .map(|scale| s.width as f64 / scale.max(1.0))
-                        })
-                        .unwrap_or(FLOATING_HUD_MIN_W);
-                    let (x, y) = resolve_hud_logical_position(&app, width);
-                    mark_hud_programmatic_move();
-                    let _ = window.set_position(tauri::LogicalPosition::new(x, y));
-                    eprintln!("[floating] place at logical ({x:.0}, {y:.0})");
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Some(window) = app.get_webview_window("floating") {
+                if visible {
+                    // Invalidate any dismiss fade so re-summon isn't stuck at alpha 0.
+                    let _ = crate::platform::bump_floating_fade_gen();
+                    // Do NOT toggle Accessory/Regular here — that steals focus and
+                    // makes Fn/cancel "jump back" to Yanluo. HUD was created
+                    // under Accessory once at launch so FullScreenAuxiliary sticks.
+                    remember_frontmost_app();
+                    // Place only on hide→show. Mid-session emits (RMS / state) must
+                    // not re-resolve — that snaps HUD away from drag / resize anchor.
+                    let need_place = !hud_native_up().swap(true, Ordering::AcqRel);
+                    if need_place {
+                        let width = window
+                            .inner_size()
+                            .ok()
+                            .and_then(|s| {
+                                window
+                                    .scale_factor()
+                                    .ok()
+                                    .map(|scale| s.width as f64 / scale.max(1.0))
+                            })
+                            .unwrap_or(FLOATING_HUD_MIN_W);
+                        let (x, y) = resolve_hud_logical_position(&app, width);
+                        mark_hud_programmatic_move();
+                        let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+                        crate::elog::elog!(
+                            "[floating] place at logical ({x:.0}, {y:.0})"
+                        );
+                    }
+                    let _ = window.set_always_on_top(true);
+                    // Prefer orderFrontRegardless over Tauri show()/set_focus —
+                    // those activate the app and steal keyboard focus.
+                    #[cfg(target_os = "macos")]
+                    {
+                        raise_floating_hud_level(&window, true);
+                        crate::elog::elog!("[floating] orderFront (HUD natively visible)");
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    match window.show() {
+                        Ok(()) => {}
+                        Err(e) => {
+                            crate::elog::elog!("[floating] show() failed: {e}")
+                        }
+                    }
+                    sync_floating_lang_chip(&app, show_lang);
+                } else {
+                    hud_native_up().store(false, Ordering::Release);
+                    persist_floating_hud_position(&window);
+                    // Fade native window alpha in lockstep with FE exit (220ms),
+                    // then orderOut — do not wait for FE onExitComplete IPC lag.
+                    let gen = crate::platform::bump_floating_fade_gen();
+                    crate::platform::fade_out_floating_hud(&app, gen);
                 }
-                let _ = window.set_always_on_top(true);
-                // Prefer orderFrontRegardless over Tauri show()/set_focus —
-                // those activate the app and steal keyboard focus.
-                #[cfg(target_os = "macos")]
-                {
-                    raise_floating_hud_level(&window, true);
-                }
-                #[cfg(not(target_os = "macos"))]
-                match window.show() {
-                    Ok(()) => {}
-                    Err(e) => eprintln!("[floating] show() failed: {e}"),
-                }
-                sync_floating_lang_chip(&app, show_lang);
             } else {
-                hud_native_up().store(false, Ordering::Release);
-                persist_floating_hud_position(&window);
-                // Fade native window alpha in lockstep with FE exit (220ms),
-                // then orderOut — do not wait for FE onExitComplete IPC lag.
-                let gen = crate::platform::bump_floating_fade_gen();
-                crate::platform::fade_out_floating_hud(&app, gen);
+                crate::elog::elog!(
+                    "[floating] window missing when toggling visible={visible}"
+                );
             }
-        } else {
-            eprintln!("[floating] window missing when toggling visible={visible}");
+        }));
+        if let Err(payload) = result {
+            let msg = payload
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_string())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "unknown panic".into());
+            crate::elog::elog!("[floating] set_visible({visible}) panicked: {msg}");
         }
     });
 }
@@ -265,7 +284,10 @@ pub(crate) const FLOATING_HUD_H: f64 = 56.0;
 pub(crate) const FLOATING_HUD_MIN_W: f64 = 400.0;
 pub(crate) const FLOATING_HUD_MAX_W: f64 = 560.0;
 /// Gap from monitor bottom to capsule bottom — clear Dock / taskbar.
-pub(crate) const FLOATING_HUD_BOTTOM_INSET: f64 = 120.0;
+/// Floor only; default Y also uses a proportional lower-third offset.
+pub(crate) const FLOATING_HUD_BOTTOM_INSET: f64 = 160.0;
+/// Default vertical bias: fraction of monitor height from top (lower-middle).
+const FLOATING_HUD_DEFAULT_Y_FRAC: f64 = 0.78;
 pub(crate) const FLOATING_HUD_CORNER_RADIUS: f64 = 28.0;
 /// Separate translate-target chip appended after the capsule.
 pub(crate) const FLOATING_LANG_W: f64 = 54.0;
@@ -371,28 +393,64 @@ fn monitor_key(monitor: &tauri::Monitor) -> String {
         })
 }
 
+/// In-memory mirror of hud-position.json. The HUD show path resolves the
+/// position on the AppKit main thread; reading the file synchronously every
+/// summon added avoidable latency (and a disk stall would freeze the popup).
+/// Single-process writer → cache is authoritative once warmed.
+fn hud_position_cache() -> &'static Mutex<Option<HudPositionFile>> {
+    static CACHE: std::sync::OnceLock<Mutex<Option<HudPositionFile>>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(None))
+}
+
 fn load_hud_position_file() -> HudPositionFile {
+    // Hot path: cached copy (clone — the file is a handful of monitor keys).
+    if let Ok(cache) = hud_position_cache().lock() {
+        if let Some(file) = cache.as_ref() {
+            return file.clone();
+        }
+    }
     let Ok(data) = fs::read_to_string(hud_position_path()) else {
         return HudPositionFile::default();
     };
-    serde_json::from_str(&data).unwrap_or_default()
+    let mut file: HudPositionFile = serde_json::from_str(&data).unwrap_or_default();
+    // Drop corrupt top-left junk (often from wrong-scale persist on external displays).
+    let before = file.by_monitor.len();
+    file.by_monitor
+        .retain(|_, p| saved_offset_usable(p.x, p.y));
+    if file.by_monitor.len() != before {
+        save_hud_position_file(&file);
+        crate::elog::elog!(
+            "[hud/position] purged {} corrupt top-left monitor offset(s)",
+            before - file.by_monitor.len()
+        );
+    }
+    if let Ok(mut cache) = hud_position_cache().lock() {
+        *cache = Some(file.clone());
+    }
+    file
 }
 
 fn save_hud_position_file(file: &HudPositionFile) {
+    if let Ok(mut cache) = hud_position_cache().lock() {
+        *cache = Some(file.clone());
+    }
     let _ = fs::create_dir_all(app_data_dir());
     if let Ok(data) = serde_json::to_string_pretty(file) {
         let _ = fs::write(hud_position_path(), data);
     }
 }
 
-/// Capsule centered above bottom inset on this monitor (logical coords).
+/// Capsule centered horizontally; vertically lower-middle (not flush to bottom).
 fn hud_default_on_monitor(monitor: &tauri::Monitor, win_w: f64) -> (f64, f64) {
     let win_w = win_w.clamp(FLOATING_HUD_MIN_W, FLOATING_HUD_MAX_W);
     let (lx, ly, lw, lh) = monitor_logical_rect(monitor);
-    (
-        lx + ((lw - win_w) / 2.0).max(12.0),
-        ly + (lh - FLOATING_HUD_H - FLOATING_HUD_BOTTOM_INSET).max(12.0),
-    )
+    let x = lx + ((lw - win_w) / 2.0).max(12.0);
+    // Prefer ~78% down the screen; never closer to bottom than BOTTOM_INSET.
+    let by_frac = ly + lh * FLOATING_HUD_DEFAULT_Y_FRAC - FLOATING_HUD_H / 2.0;
+    let by_inset = ly + (lh - FLOATING_HUD_H - FLOATING_HUD_BOTTOM_INSET).max(12.0);
+    let y = by_frac.min(by_inset).max(ly + 12.0);
+    (x, y)
 }
 
 /// Monitor containing the mouse cursor.
@@ -469,7 +527,7 @@ fn cursor_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
     let hit_id = match hit_id {
         Some(id) => id,
         None => {
-            eprintln!(
+            crate::elog::elog!(
                 "[hud/position] no CG display contains cursor ({:.1}, {:.1})",
                 cg_point.x, cg_point.y
             );
@@ -495,7 +553,7 @@ fn cursor_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
     });
 
     if matched.is_none() {
-        eprintln!(
+        crate::elog::elog!(
             "[hud/position] CG display {} at ({:.0},{:.0}) has no matching Tauri Monitor",
             hit_id, hit_origin_lx, hit_origin_ly
         );
@@ -509,13 +567,13 @@ fn cursor_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
     let pos = match app.cursor_position() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[hud/position] cursor_position failed: {e}");
+            crate::elog::elog!("[hud/position] cursor_position failed: {e}");
             return None;
         }
     };
     let mon = app.monitor_from_point(pos.x, pos.y).ok().flatten();
     if mon.is_none() {
-        eprintln!(
+        crate::elog::elog!(
             "[hud/position] no monitor found at cursor ({:.0}, {:.0})",
             pos.x, pos.y
         );
@@ -526,6 +584,42 @@ fn cursor_monitor(app: &AppHandle) -> Option<tauri::Monitor> {
 fn monitor_contains_logical(monitor: &tauri::Monitor, x: f64, y: f64) -> bool {
     let (lx, ly, lw, lh) = monitor_logical_rect(monitor);
     x >= lx && x < lx + lw && y >= ly && y < ly + lh
+}
+
+/// Hit-test in **physical** pixels (`Monitor::position` / `size` space).
+/// Safer than converting with `window.scale_factor()` first (wrong scale → miss → junk offsets).
+fn monitor_from_physical(app: &AppHandle, px: i32, py: i32) -> Option<tauri::Monitor> {
+    let monitors = app.available_monitors().ok()?;
+    monitors.into_iter().find(|m| {
+        let p = m.position();
+        let s = m.size();
+        let w = s.width as i32;
+        let h = s.height as i32;
+        px >= p.x && px < p.x + w && py >= p.y && py < p.y + h
+    })
+}
+
+/// Convert window outer physical position → CG logical using the **containing monitor** scale.
+fn outer_logical_xy(
+    app: &AppHandle,
+    window: &tauri::WebviewWindow,
+) -> Option<(f64, f64, f64, tauri::Monitor)> {
+    let pos = window.outer_position().ok()?;
+    let mon = monitor_from_physical(app, pos.x, pos.y).or_else(|| cursor_monitor(app))?;
+    let scale = mon.scale_factor().max(1.0);
+    let wx = pos.x as f64 / scale;
+    let wy = pos.y as f64 / scale;
+    Some((wx, wy, scale, mon))
+}
+
+/// Saved offset usable? Reject negatives (scale bug) and top-left junk.
+/// Real user drags sit mid/lower; (0,~30) is the classic external-display bug.
+fn saved_offset_usable(x: f64, y: f64) -> bool {
+    x.is_finite()
+        && y.is_finite()
+        && x >= 0.0
+        && y >= 0.0
+        && !(x < 48.0 && y < 80.0)
 }
 
 pub(crate) fn floating_hud_logical_position(app: &AppHandle, win_w: f64) -> (f64, f64) {
@@ -600,14 +694,24 @@ pub(crate) fn resolve_hud_logical_position(app: &AppHandle, win_w: f64) -> (f64,
     let max_y = (lh - FLOATING_HUD_H).max(0.0);
 
     if let Some(saved) = file.by_monitor.get(&key) {
-        let x = lx + saved.x.clamp(0.0, max_x);
-        let y = ly + saved.y.clamp(0.0, max_y);
-        return (x, y);
+        if saved_offset_usable(saved.x, saved.y) {
+            let x = lx + saved.x.clamp(0.0, max_x);
+            let y = ly + saved.y.clamp(0.0, max_y);
+            return (x, y);
+        }
+        crate::elog::elog!(
+            "[hud/position] ignore corrupt offset on '{key}' ({:.0},{:.0}) → default",
+            saved.x, saved.y
+        );
     }
 
-    // Fallback: last absolute point if it still lands on this monitor.
+    // Fallback: last absolute point if it still lands on this monitor (not top-left junk).
     if let (Some(sx), Some(sy)) = (file.last_x.or(file.x), file.last_y.or(file.y)) {
-        if sx.is_finite() && sy.is_finite() && monitor_contains_logical(&cm, sx, sy) {
+        if sx.is_finite()
+            && sy.is_finite()
+            && monitor_contains_logical(&cm, sx, sy)
+            && saved_offset_usable(sx - lx, sy - ly)
+        {
             return (sx.clamp(lx, lx + max_x), sy.clamp(ly, ly + max_y));
         }
     }
@@ -617,34 +721,25 @@ pub(crate) fn resolve_hud_logical_position(app: &AppHandle, win_w: f64) -> (f64,
 }
 
 pub(crate) fn persist_floating_hud_position(window: &tauri::WebviewWindow) {
-    let Ok(pos) = window.outer_position() else {
-        return;
-    };
-    let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
-    // outer_position() is physical (CG_logical × window_scale); divide to get CG logical.
-    let wx = pos.x as f64 / scale;
-    let wy = pos.y as f64 / scale;
     let app = window.app_handle().clone();
-    // Find which monitor contains the window's logical top-left.
-    // Do NOT use app.monitor_from_point(physical_x, physical_y) — see cursor_monitor() comment.
-    let mon = app
-        .available_monitors()
-        .ok()
-        .into_iter()
-        .flatten()
-        .find(|m| monitor_contains_logical(m, wx, wy))
-        .or_else(|| cursor_monitor(&app));
-    let Some(mon) = mon else {
+    let Some((wx, wy, _scale, mon)) = outer_logical_xy(&app, window) else {
         return;
     };
     let (lx, ly, _, _) = monitor_logical_rect(&mon);
+    let ox = wx - lx;
+    let oy = wy - ly;
+    // Never persist top-left junk / negative offsets (wrong-scale artifacts).
+    if !saved_offset_usable(ox, oy) {
+        crate::elog::elog!(
+            "[hud/position] skip persist junk offset ({ox:.0},{oy:.0}) on {}",
+            monitor_key(&mon)
+        );
+        return;
+    }
     let mut file = load_hud_position_file();
     file.by_monitor.insert(
         monitor_key(&mon),
-        HudMonitorPos {
-            x: wx - lx,
-            y: wy - ly,
-        },
+        HudMonitorPos { x: ox, y: oy },
     );
     file.last_x = Some(wx);
     file.last_y = Some(wy);
@@ -660,7 +755,7 @@ pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let (x, y) = resolve_hud_logical_position(app, FLOATING_HUD_MIN_W);
-    eprintln!("[floating] creating HUD at logical ({x:.0}, {y:.0})");
+    crate::elog::elog!("[floating] creating HUD at logical ({x:.0}, {y:.0})");
 
     // Frontend detects this window via label + initialization script flag.
     // Do not put query params in PathBuf — they are not reliably preserved.
@@ -724,7 +819,7 @@ pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
         }
     });
 
-    eprintln!("[floating] ASR HUD window created");
+    crate::elog::elog!("[floating] ASR HUD window created");
     let _ = create_floating_lang_window(app);
     let _ = create_floating_agent_menu_window(app);
     Ok(())
@@ -787,7 +882,7 @@ fn create_floating_lang_window(app: &AppHandle) -> Result<(), String> {
     }
 
     let _ = window.hide();
-    eprintln!("[floating-lang] translate target chip window created");
+    crate::elog::elog!("[floating-lang] translate target chip window created");
     Ok(())
 }
 
@@ -970,27 +1065,25 @@ pub(crate) fn recenter_floating_hud(app: AppHandle, width: f64) {
     let _ = app_clone.run_on_main_thread(move || {
         if let Some(window) = app.get_webview_window("floating") {
             let width = width.clamp(FLOATING_HUD_MIN_W, 560.0);
-            let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
-            let (x, y) = match (window.outer_position(), window.outer_size()) {
-                (Ok(pos), Ok(size)) => {
-                    let cur_x = pos.x as f64 / scale;
-                    let cur_y = pos.y as f64 / scale;
+            let (x, y, height) = match (
+                outer_logical_xy(&app, &window),
+                window.outer_size(),
+            ) {
+                (Some((cur_x, cur_y, scale, _)), Ok(size)) => {
                     let cur_w = size.width as f64 / scale;
-                    let cur_h = size.height as f64 / scale;
-                    let height = cur_h.clamp(FLOATING_HUD_H, 280.0);
-                    anchored_resize_xy(cur_x, cur_y, cur_w, cur_h, width, height)
+                    let cur_h = (size.height as f64 / scale).clamp(FLOATING_HUD_H, 280.0);
+                    let (x, y) =
+                        anchored_resize_xy(cur_x, cur_y, cur_w, cur_h, width, cur_h);
+                    (x, y, cur_h)
                 }
-                _ => resolve_hud_logical_position(&app, width),
+                _ => {
+                    let (x, y) = resolve_hud_logical_position(&app, width);
+                    (x, y, FLOATING_HUD_H)
+                }
             };
-            let height = window
-                .outer_size()
-                .ok()
-                .map(|s| (s.height as f64 / scale).clamp(FLOATING_HUD_H, 280.0))
-                .unwrap_or(FLOATING_HUD_H);
             mark_hud_programmatic_move();
             let _ = window.set_size(tauri::LogicalSize::new(width, height));
             let _ = window.set_position(tauri::LogicalPosition::new(x, y));
-            // Do not persist here — programmatic; user-drag / hide persist.
         }
     });
 }
@@ -1003,16 +1096,21 @@ pub(crate) fn resize_floating_hud(app: AppHandle, width: f64, height: f64) {
         if let Some(window) = app.get_webview_window("floating") {
             let width = width.clamp(FLOATING_HUD_MIN_W, 560.0);
             let height = height.clamp(FLOATING_HUD_H, 280.0);
-            let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
-            let (x, y) = match (window.outer_position(), window.outer_size()) {
-                (Ok(pos), Ok(size)) => {
-                    let cur_x = pos.x as f64 / scale;
-                    let cur_y = pos.y as f64 / scale;
-                    let cur_w = size.width as f64 / scale;
-                    let cur_h = size.height as f64 / scale;
+            let (x, y) = match outer_logical_xy(&app, &window) {
+                Some((cur_x, cur_y, scale, _)) => {
+                    let cur_w = window
+                        .outer_size()
+                        .ok()
+                        .map(|s| s.width as f64 / scale)
+                        .unwrap_or(width);
+                    let cur_h = window
+                        .outer_size()
+                        .ok()
+                        .map(|s| s.height as f64 / scale)
+                        .unwrap_or(FLOATING_HUD_H);
                     anchored_resize_xy(cur_x, cur_y, cur_w, cur_h, width, height)
                 }
-                _ => resolve_hud_logical_position(&app, width),
+                None => resolve_hud_logical_position(&app, width),
             };
             mark_hud_programmatic_move();
             let _ = window.set_size(tauri::LogicalSize::new(width, height));
@@ -1166,7 +1264,7 @@ fn create_floating_agent_menu_window(app: &AppHandle) -> Result<(), String> {
         let _ = window.hide();
     }
     let _ = window.hide();
-    eprintln!("[floating-agent-menu] picker window created");
+    crate::elog::elog!("[floating-agent-menu] picker window created");
     Ok(())
 }
 

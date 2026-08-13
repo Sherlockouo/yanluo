@@ -57,6 +57,17 @@ static SFSpeechRecognizer *asr_speech_pick_recognizer(const char *locale,
     SFSpeechRecognizer *r =
         [[SFSpeechRecognizer alloc] initWithLocale:[NSLocale localeWithLocaleIdentifier:localeId]];
     if (r && r.isAvailable) {
+      // Prefer on-device when supported: kills the server round-trip so
+      // partial hypotheses land noticeably sooner (and work offline).
+      // `requiresOnDeviceRecognition` is declared iOS-only in some SDKs, so
+      // set it via KVC — no-op (caught) where the property doesn't exist.
+      if (r.supportsOnDeviceRecognition) {
+        @try {
+          [r setValue:@YES forKey:@"requiresOnDeviceRecognition"];
+        } @catch (NSException *e) {
+          // SDK/runtime without the setter — server recognition still works.
+        }
+      }
       if (used_out) {
         *used_out = localeId;
       }
@@ -88,7 +99,7 @@ static int asr_speech_check_auth(char *err_buf, size_t err_len) {
     switch (auth) {
     case SFSpeechRecognizerAuthorizationStatusDenied:
       hint = @"denied — 系统设置 → 隐私与安全性 → 语音识别，打开 "
-             @"QuietType";
+             @"Yanluo";
       break;
     case SFSpeechRecognizerAuthorizationStatusRestricted:
       hint = @"restricted by system policy";

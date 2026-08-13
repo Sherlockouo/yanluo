@@ -33,6 +33,8 @@ export const history: Record<string, string> = {
   "history.dispatchThis": "派这段",
   "history.exportMd": "导出为 Markdown",
   "history.exportTxt": "导出为 TXT",
+  "history.exportSrt": "导出为 SRT",
+  "history.exportRaw": "导出 Raw（模型原文）",
   "history.confirmDelete": "确定删除？",
   "history.delete": "删除",
   "history.revertedToRaw": "已改回原文",

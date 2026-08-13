@@ -27,13 +27,28 @@ const RAIL_ITEMS: { id: Page; labelKey: string }[] = [
   { id: "dispatch", labelKey: "nav.dispatch" },
 ];
 
+function RailIndicator({ active }: { active: boolean }) {
+  const reduce = useReducedMotion();
+  if (!active) return null;
+  // Opacity-only enter — no layoutId (shared-layout nav jank).
+  return (
+    <motion.span
+      className="rail-item-indicator"
+      initial={reduce ? false : { opacity: 0.55 }}
+      animate={{ opacity: 1 }}
+      transition={
+        reduce ? { duration: 0 } : { type: "tween", duration: 0.14, ease: easeOut }
+      }
+    />
+  );
+}
+
 /**
  * Narrow icon rail — 言 mark (home) + 出稿 / 派活 + 设置 footer.
  * Not a wide labeled workbench sidebar (DESIGN.md IA).
  */
 export function Sidebar() {
   const { theme, setTheme } = useApp();
-  const reduce = useReducedMotion();
   const t = useT();
 
   return (
@@ -57,17 +72,7 @@ export function Sidebar() {
             >
               {({ isActive }) => (
                 <>
-                  {isActive ? (
-                    <motion.span
-                      className="rail-item-indicator"
-                      layoutId="rail-mark"
-                      transition={
-                        reduce
-                          ? { duration: 0 }
-                          : { type: "tween", duration: 0.18, ease: easeOut }
-                      }
-                    />
-                  ) : null}
+                  <RailIndicator active={isActive} />
                   <Icon size={16} className="relative z-10 shrink-0" />
                   <span className="rail-item-label relative z-10">
                     {t(item.labelKey)}
@@ -90,17 +95,7 @@ export function Sidebar() {
         >
           {({ isActive }) => (
             <>
-              {isActive ? (
-                <motion.span
-                  className="rail-item-indicator"
-                  layoutId="rail-mark"
-                  transition={
-                    reduce
-                      ? { duration: 0 }
-                      : { type: "tween", duration: 0.18, ease: easeOut }
-                  }
-                />
-              ) : null}
+              <RailIndicator active={isActive} />
               <Settings size={16} className="relative z-10" />
               <span className="rail-item-label relative z-10">{t("nav.settings")}</span>
             </>

@@ -40,7 +40,11 @@ import { cn } from "@/lib/cn";
 import { easeOut, springBounce } from "@/lib/motion";
 import { useT } from "@/lib/i18n";
 import { lookupRustMsg } from "@/lib/i18n/rust-msg";
-import { playSfx, unlockSfx } from "@/lib/sfx";
+import { playSfx, unlockSfx, warmSfx } from "@/lib/sfx";
+
+// HUD webview loads once at app startup (window stays hidden) — pre-create the
+// AudioContext here so the first Fn summon doesn't pay its construction cost.
+warmSfx();
 
 const CAPSULE_W = 420;
 const CAPSULE_H = 56;
@@ -864,7 +868,7 @@ export function AsrHud() {
 
   return (
     <div
-      className="hud-root"
+      className={cn("hud-root", !show && "pointer-events-none")}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         const t = event.target as HTMLElement;
@@ -885,7 +889,7 @@ export function AsrHud() {
         {show ? (
           <motion.div
             className={cn(
-              "flex h-full w-full items-center justify-center",
+              "flex h-full w-full items-center justify-center pointer-events-none",
               isAgent && "px-0",
             )}
             initial={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.35 }}
@@ -899,6 +903,7 @@ export function AsrHud() {
               : { opacity: 0, scale: 0.7, transition: { type: "tween", duration: 0.15, ease: easeOut } }
             }
           >
+          <div className="pointer-events-auto flex h-full w-full items-center justify-center">
           {isAgent ? (
             <AgentCapsule
               payload={payload}
@@ -941,6 +946,7 @@ export function AsrHud() {
               onCancel={cancelTranscript}
             />
           )}
+          </div>
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -1380,11 +1386,14 @@ function FloatingCapsule({
   );
 
   useEffect(() => {
+    // Size only — do NOT recenter here. Rust place-on-show owns position;
+    // FE recenter used window.scale_factor and shoved HUD to external top-left.
     if (sizedRef.current) return;
     sizedRef.current = true;
-    const win = getCurrentWindow();
-    void win.setSize(new LogicalSize(CAPSULE_W, CAPSULE_H)).catch(() => {});
-    void invoke("recenter_floating_hud", { width: CAPSULE_W }).catch(() => {});
+    void invoke("resize_floating_hud", {
+      width: CAPSULE_W,
+      height: CAPSULE_H,
+    }).catch(() => {});
   }, []);
 
   useEffect(() => {

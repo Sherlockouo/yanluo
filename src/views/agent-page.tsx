@@ -528,6 +528,7 @@ export function AgentPage() {
               aria-label={t("agent.sendEnter")}
               className="agent-composer-send btn-press h-7 w-7 min-h-7 min-w-7 p-0"
               isDisabled={!canSend}
+              isPending={sending}
               onPress={() => void dispatch()}
             >
               <Send size={13} strokeWidth={2.4} />

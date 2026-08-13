@@ -11,7 +11,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { toast } from "@heroui/react";
+import { toast } from "@/lib/toast";
 import { useNavigate } from "react-router-dom";
 import type {
   AgentJob,
@@ -309,9 +309,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     Promise.all([
       listen<FloatingPayload>("floating-status", (event) => {
-        setState(event.payload.state);
+        // Keep ref in lockstep — Fn toggle reads stateRef, not React state.
+        const next = event.payload.state;
+        stateRef.current = next;
+        setState(next);
       }),
       listen<TranscriptionResult>("transcription-result", (event) => {
+        // Late finalize from a prior take must not wipe an active recording.
+        if (stateRef.current === "recording") {
+          return;
+        }
         const result = event.payload;
         setState("idle");
         stateRef.current = "idle";
@@ -319,22 +326,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           toast.danger(lookupRustMsg(result.error, tRef.current));
           return;
         }
-        const mode = sessionModeRef.current;
-        if (mode === "translate") {
-          toast.success(
-            result.refined
-              ? tRef.current("toast.translatedPasted")
-              : tRef.current("toast.pasted"),
-          );
-        } else if (mode === "transcribe") {
-          toast.success(
-            result.refined
-              ? tRef.current("toast.transcribeDoneRefined")
-              : tRef.current("toast.transcribeDone"),
-          );
-        } else {
-          toast.success(tRef.current("toast.clipboardPasted"));
-        }
+        // Success: HUD / result UI is enough — no toast every take.
         sessionModeRef.current = "fn";
         void loadHistory();
       }),
@@ -429,92 +421,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const id = event.payload;
         if (id) navigate(`/dispatch/${id}`);
       }),
-      listen<{ shift?: boolean; intention?: string }>("fn-key-down", async (event) => {
-        // Confirm-wait: Fn is handled in floating via hud-confirm-request (hotkey tap).
-        if (stateRef.current === "editing") return;
-
-        // Mid-pipeline spinner: Fn = accept HUD text now + abort in-flight LLM/ASR.
-        if (
-          stateRef.current === "refining" ||
-          stateRef.current === "processing"
-        ) {
-          try {
-            await invoke("accept_floating_preview");
-            setState("idle");
-            stateRef.current = "idle";
-          } catch (error) {
-            toast.danger(
-              tRef.current("toast.skipFailed", {
-                error: lookupRustMsg(String(error), tRef.current),
-              }),
-            );
-          }
-          return;
-        }
-
-        const current = configRef.current;
-        const intention =
-          event.payload?.intention === "translate" || event.payload?.shift
-            ? "translate"
-            : "transcribe";
-        const shift = intention === "translate";
-        // Toggle: hotkey press starts when idle, stops when recording.
-        if (stateRef.current === "recording") {
-          setState("processing");
-          stateRef.current = "processing";
-          try {
-            await invoke("stop_recording");
-          } catch (error) {
-            setState("idle");
-            stateRef.current = "idle";
-            toast.danger(
-              tRef.current("toast.stopRecFailed", {
-                error: lookupRustMsg(String(error), tRef.current),
-              }),
-            );
-          }
-          return;
-        }
-        if (stateRef.current !== "idle") return;
-        if (
-          (current.asr_provider as string) === "elevenlabs"
-        ) {
-          toast.warning(tRef.current("toast.elevenlabsRemoved"));
-          return;
-        }
-        if (current.asr_provider === "qwen" && !modelLoadedRef.current) {
-          toast.warning(tRef.current("toast.loadQwenFirst"));
-          return;
-        }
-        if (shift) {
-          if (
-            !current.llm_api_base_url?.trim() ||
-            !current.llm_model?.trim()
-          ) {
-            toast.warning(tRef.current("toast.translateNeedsLlm"));
-            return;
-          }
-        }
-        const mode = shift ? "translate" : "fn";
-        setState("recording");
-        stateRef.current = "recording";
-        sessionModeRef.current = mode;
-        try {
-          await invoke("start_recording", {
-            chunkSec: current.chunk_size_sec ?? 1.0,
-            rollbackTokens: current.unfixed_token_num ?? 5,
-            language: current.language === "auto" ? null : current.language,
-            mode,
-          });
-        } catch (error) {
-          setState("idle");
-          stateRef.current = "idle";
-          toast.danger(
-            tRef.current("toast.startRecFailed", {
-              error: lookupRustMsg(String(error), tRef.current),
-            }),
-          );
-        }
+      // Fn toggle is handled natively now (hotkey tap → fn-toggle-native →
+      // handle_fn_toggle): start/stop decisions read Rust-side truth directly
+      // instead of round-tripping through this (possibly throttled, hidden)
+      // webview. Session state stays in lockstep via floating-status above.
+      // Errors from the native path land here for i18n + toast.
+      listen<string>("fn-toggle-error", (event) => {
+        const raw = event.payload ?? "";
+        const msg = raw.startsWith("toast.")
+          ? tRef.current(raw)
+          : lookupRustMsg(raw, tRef.current);
+        toast.danger(msg);
       }),
       listen("escape-key-down", async () => {
         if (stateRef.current === "editing") {
@@ -522,7 +439,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             await invoke("cancel_floating_transcript");
             setState("idle");
             stateRef.current = "idle";
-            toast.info(tRef.current("toast.cancelled"));
+            // Silent — HUD dismiss is the feedback.
           } catch (error) {
             toast.danger(
               tRef.current("toast.cancelFailed", {
@@ -539,17 +456,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ) {
           return;
         }
-        const midPipeline =
-          stateRef.current === "processing" || stateRef.current === "refining";
         try {
           await invoke("cancel_recording", { reason: "escape-key" });
           setState("idle");
           stateRef.current = "idle";
-          toast.info(
-            midPipeline
-              ? tRef.current("toast.abortedPipeline")
-              : tRef.current("toast.cancelledRecording"),
-          );
         } catch (error) {
           toast.danger(
             tRef.current("toast.cancelFailed", {

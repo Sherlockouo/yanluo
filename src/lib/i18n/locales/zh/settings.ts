@@ -164,9 +164,12 @@ export const settings: Record<string, string> = {
   "settings.perm.granted": "已授权",
   "settings.perm.notGranted": "未授权",
   "settings.perm.authorize": "去授权",
+  "settings.perm.relaunch": "重启应用",
   "settings.perm.helpTitle": "说明",
-  "settings.perm.helpLine1": "· 签名安装包权限随 Bundle ID 保留",
-  "settings.perm.helpLine2": "· 辅助功能 / 输入监视按可执行路径",
+  "settings.perm.helpLine1": "· 系统设置里找 Yanluo（不是「言落」）",
+  "settings.perm.helpLine2": "· 正式签名安装包：麦克风 / 语音识别 / 屏幕录制随 Bundle ID 保留",
+  "settings.perm.helpLine3": "· 辅助功能 / 输入监视跟可执行路径绑定，换路径或重装常需再开一次",
+  "settings.perm.helpLine4": "· 临时签名 / 开发包每次 codesign 身份不同，权限会清掉",
   "settings.perm.openSystemSettings": "打开系统设置",
 
   // Updates panel

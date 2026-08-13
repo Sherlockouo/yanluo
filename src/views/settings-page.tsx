@@ -22,8 +22,8 @@ import {
   Switch,
   TextArea,
   TextField,
-  toast,
 } from "@heroui/react";
+import { toast } from "@/lib/toast";
 import {
   Bot,
   CheckCircle2,
@@ -34,15 +34,21 @@ import {
   Ear,
   ExternalLink,
   FolderOpen,
+  Globe,
   Keyboard,
+  Languages,
   Mic,
   Monitor,
+  Palette,
+  Plus,
   RefreshCw,
   RotateCcw,
   Save,
   Shield,
   SlidersHorizontal,
+  Sparkles,
   Trash2,
+  Volume2,
   Wand2,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
@@ -175,6 +181,7 @@ type PermissionRequestResult = {
   message: string;
   granted: boolean;
   open_settings: boolean;
+  needs_relaunch?: boolean;
 };
 
 type PermKind =
@@ -386,6 +393,8 @@ export function SettingsPage() {
   );
   const [tab, setTab] = useState<SettingsTab>(seeded.current.tab);
   const [sub, setSub] = useState<string | undefined>(seeded.current.sub);
+  /** Pointer-down paint before React commit — left nav feels instant. */
+  const [navPaint, setNavPaint] = useState<SettingsTab | null>(null);
   const scroll = useTabScroll(readSettingsUi()?.scroll ?? {});
   const tabRef = useRef(tab);
   const subRef = useRef(sub);
@@ -492,7 +501,11 @@ export function SettingsPage() {
 
   const selectTab = (id: SettingsTab) => {
     // Same primary tab with no sub already open — no-op.
-    if (id === tab && sub == null) return;
+    if (id === tab && sub == null) {
+      setNavPaint(null);
+      return;
+    }
+    setNavPaint(id);
     applyNav(id, undefined);
     urlFromClick.current = true;
     if (id === "general") {
@@ -509,10 +522,16 @@ export function SettingsPage() {
     setSearchParams({ tab, sub: nextSub }, { replace: true });
   };
 
+  // Clear optimistic paint once URL/state caught up.
+  useEffect(() => {
+    if (navPaint != null && navPaint === tab) setNavPaint(null);
+  }, [tab, navPaint]);
+
   const fade = useFade();
   const t = useT();
 
-  const activeTabDef = TABS.find((item) => item.id === tab);
+  const paintedTab = navPaint ?? tab;
+  const activeTabDef = TABS.find((item) => item.id === paintedTab);
   const activeLabel = activeTabDef ? t(activeTabDef.labelKey) : t("settings.title");
 
   return (
@@ -523,7 +542,7 @@ export function SettingsPage() {
       <div className="set">
         <nav className="setnav" aria-label={t("settings.navAria")}>
           {TABS.map((item) => {
-            const active = tab === item.id;
+            const active = paintedTab === item.id;
             const Icon = item.icon;
             return (
               <button
@@ -538,6 +557,7 @@ export function SettingsPage() {
                       : undefined
                 }
                 className={cn("setnav-item", active && "setnav-item-active")}
+                onPointerDown={() => setNavPaint(item.id)}
                 onClick={() => selectTab(item.id)}
               >
                 <Icon size={14} className="setnav-icon" aria-hidden />
@@ -548,17 +568,18 @@ export function SettingsPage() {
         </nav>
 
         <div className="setbody">
-          <div>
-            <h2 className="set-sechead">{activeLabel}</h2>
-            <p className="set-secdesc">{t(TAB_DESC_KEYS[tab])}</p>
-          </div>
           <motion.div
             key={tab}
             initial={fade.initial}
             animate={fade.animate}
             transition={fade.transition}
             style={{ willChange: "opacity" }}
+            className="flex flex-col gap-4"
           >
+            <div>
+              <h2 className="set-sechead">{activeLabel}</h2>
+              <p className="set-secdesc">{t(TAB_DESC_KEYS[tab])}</p>
+            </div>
             {tab === "general" ? <GeneralPanel /> : null}
             {tab === "asr" ? <AsrProviderPanel /> : null}
             {tab === "polish" ? (
@@ -760,9 +781,9 @@ function AsrProviderPanel() {
           }}
         >
           <Label>{t("settings.asr.engine")}</Label>
-          <Select.Trigger className="flex items-center justify-between p-4">
+          <Select.Trigger className="set-select-box">
             <Select.Value />
-            <Select.Indicator />
+            <ChevronDown size={14} className="shrink-0 text-muted opacity-70" />
           </Select.Trigger>
           <Select.Popover>
             <ListBox className="gap-3 p-3">
@@ -800,9 +821,9 @@ function AsrProviderPanel() {
               }}
             >
               <Label>{t("settings.asr.model")}</Label>
-              <Select.Trigger className="flex items-center justify-between p-4">
+              <Select.Trigger className="set-select-box">
                 <Select.Value />
-                <Select.Indicator />
+                <ChevronDown size={14} className="shrink-0 text-muted opacity-70" />
               </Select.Trigger>
               <Select.Popover>
                 <ListBox className="gap-2 p-2">
@@ -1195,9 +1216,9 @@ function VadAdvancedFields({
           }}
         >
           <Label>{t("settings.vad.backend")}</Label>
-          <Select.Trigger className="flex items-center justify-between p-3">
+          <Select.Trigger className="set-select-box">
             <Select.Value />
-            <Select.Indicator />
+            <ChevronDown size={14} className="shrink-0 text-muted opacity-70" />
           </Select.Trigger>
           <Select.Popover>
             <ListBox className="gap-2 p-2">
@@ -1399,7 +1420,10 @@ function LlmProviderPanel() {
       <div className="set-lines">
         <div className="set-row-line">
           <div className="set-row-line-lab">
-            {t("settings.llm.enableRefine")}
+            <span className="set-row-line-lab-title">
+              <Wand2 size={14} className="set-row-ico" aria-hidden />
+              {t("settings.llm.enableRefine")}
+            </span>
             <small>{t("settings.llm.enableRefineBlurb")}</small>
           </div>
           <div className="set-row-line-ctl">
@@ -1475,12 +1499,10 @@ function LlmProviderPanel() {
                       toggle();
                     }}
                   >
-                    {isOpen ? t("common.collapse") : t("common.edit")}
+                    <span>{isOpen ? t("common.collapse") : t("common.edit")}</span>
                     <ChevronDown
                       size={12}
                       style={{
-                        display: "inline-block",
-                        marginLeft: 2,
                         transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
                         transition: "transform 150ms ease",
                       }}
@@ -1852,7 +1874,10 @@ function GeneralPanel() {
       {/* 语言 / Language — interface locale, applies immediately (not persisted in config) */}
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          {t("settings.general.uiLanguage")}
+          <span className="set-row-line-lab-title">
+            <Languages size={14} className="set-row-ico" aria-hidden />
+            {t("settings.general.uiLanguage")}
+          </span>
           <small>{t("settings.general.uiLanguageBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
@@ -1866,7 +1891,7 @@ function GeneralPanel() {
           >
             <Select.Trigger className="qsel">
               <Select.Value />
-              <Select.Indicator className="qsel-chev" />
+              <ChevronDown size={12} className="qsel-chev shrink-0" />
             </Select.Trigger>
             <Select.Popover>
               <ListBox>
@@ -1887,7 +1912,10 @@ function GeneralPanel() {
       {/* 识别语言 — quiet mono ▾ 触发器, 无盒 */}
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          {t("settings.general.asrLanguage")}
+          <span className="set-row-line-lab-title">
+            <Globe size={14} className="set-row-ico" aria-hidden />
+            {t("settings.general.asrLanguage")}
+          </span>
           <small>{t("settings.general.asrLanguageBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
@@ -1901,7 +1929,7 @@ function GeneralPanel() {
           >
             <Select.Trigger className="qsel">
               <Select.Value />
-              <Select.Indicator className="qsel-chev" />
+              <ChevronDown size={12} className="qsel-chev shrink-0" />
             </Select.Trigger>
             <Select.Popover>
               <ListBox>
@@ -1919,7 +1947,10 @@ function GeneralPanel() {
 
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          {t("settings.general.addLanguage")}
+          <span className="set-row-line-lab-title">
+            <Plus size={14} className="set-row-ico" aria-hidden />
+            {t("settings.general.addLanguage")}
+          </span>
           <small>{t("settings.general.addLanguageBlurb")}</small>
         </div>
         <div className="set-row-line-ctl flex flex-col items-end gap-2">
@@ -1957,7 +1988,7 @@ function GeneralPanel() {
               >
                 <Select.Trigger className="qsel">
                   <Select.Value />
-                  <Select.Indicator className="qsel-chev" />
+                  <ChevronDown size={12} className="qsel-chev shrink-0" />
                 </Select.Trigger>
                 <Select.Popover>
                   <ListBox>
@@ -1989,7 +2020,10 @@ function GeneralPanel() {
       {/* 录音源 — quiet 文字开关, 无盒 */}
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          {t("settings.general.audioSource")}
+          <span className="set-row-line-lab-title">
+            <Mic size={14} className="set-row-ico" aria-hidden />
+            {t("settings.general.audioSource")}
+          </span>
           <small>{t("settings.general.audioSourceBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
@@ -2009,7 +2043,10 @@ function GeneralPanel() {
       {/* 外观 — quiet 文字开关 (即时生效, 不写 config) */}
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          {t("settings.general.appearance")}
+          <span className="set-row-line-lab-title">
+            <Palette size={14} className="set-row-ico" aria-hidden />
+            {t("settings.general.appearance")}
+          </span>
           <small>{t("settings.general.appearanceBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
@@ -2027,7 +2064,10 @@ function GeneralPanel() {
 
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          {t("settings.general.sfx")}
+          <span className="set-row-line-lab-title">
+            <Volume2 size={14} className="set-row-ico" aria-hidden />
+            {t("settings.general.sfx")}
+          </span>
           <small>{t("settings.general.sfxBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
@@ -2053,7 +2093,10 @@ function GeneralPanel() {
 
       <div className="set-row-line">
         <div className="set-row-line-lab">
-          {t("settings.general.tour")}
+          <span className="set-row-line-lab-title">
+            <Sparkles size={14} className="set-row-ico" aria-hidden />
+            {t("settings.general.tour")}
+          </span>
           <small>{t("settings.general.tourBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
@@ -2410,6 +2453,7 @@ function PermissionsPanel() {
   const [perms, setPerms] = useState<PermissionStatus | null>(null);
   const [busy, setBusy] = useState<PermKind | null>(null);
   const [hint, setHint] = useState<string | null>(null);
+  const [needsRelaunch, setNeedsRelaunch] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const lastOpenAt = useRef<Record<string, number>>({});
 
@@ -2454,17 +2498,25 @@ function PermissionsPanel() {
         kind,
       });
       setHint(result.message);
-      // Only open Settings when the OS dialog cannot finish the grant
-      // (e.g. mic/speech previously denied). Never stack on top of Apple prompts.
+      setNeedsRelaunch(Boolean(result.needs_relaunch));
+      // Open the matching Privacy pane when grant cannot finish in-dialog
+      // (denied mic/speech, or AX/IM/Screen still off after the OS request).
       if (result.open_settings) {
         await openSettingsOnce(kind);
       }
       window.setTimeout(() => void refresh(), 1200);
     } catch (error) {
       setHint(error instanceof Error ? error.message : String(error));
+      setNeedsRelaunch(false);
     } finally {
       setBusy(null);
     }
+  };
+
+  const relaunch = () => {
+    void invoke("relaunch_app").catch((error) => {
+      setHint(error instanceof Error ? error.message : String(error));
+    });
   };
 
   const isMac = (perms?.platform ?? "macos") === "macos";
@@ -2539,6 +2591,16 @@ function PermissionsPanel() {
         {hint ? (
           <p className="mt-3 whitespace-pre-wrap type-meta">{hint}</p>
         ) : null}
+        {needsRelaunch ? (
+          <Button
+            size="sm"
+            variant="primary"
+            className="btn-press mt-3"
+            onPress={relaunch}
+          >
+            {t("settings.perm.relaunch")}
+          </Button>
+        ) : null}
       </SectionCard>
 
       <div className="rounded-2xl bg-surface px-3 py-1">
@@ -2553,25 +2615,31 @@ function PermissionsPanel() {
             <ul className="flex flex-col gap-2 type-meta">
               <li>{t("settings.perm.helpLine1")}</li>
               <li>{t("settings.perm.helpLine2")}</li>
+              <li>{t("settings.perm.helpLine3")}</li>
+              <li>{t("settings.perm.helpLine4")}</li>
             </ul>
             {exePath ? (
               <p className="mt-3 break-all rounded-xl bg-default/40 px-3 py-2 font-mono type-micro !normal-case !tracking-normal text-foreground">
                 {exePath}
               </p>
             ) : null}
-            <Button
-              size="sm"
-              variant="secondary"
-              className="mt-3"
-              onPress={() =>
-                void openSettingsOnce("accessibility").then(() =>
-                  window.setTimeout(() => void refresh(), 800),
-                )
-              }
-            >
-              <ExternalLink size={14} />
-              {t("settings.perm.openSystemSettings")}
-            </Button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onPress={() =>
+                  void openSettingsOnce(firstUngranted ?? "accessibility").then(
+                    () => window.setTimeout(() => void refresh(), 800),
+                  )
+                }
+              >
+                <ExternalLink size={14} />
+                {t("settings.perm.openSystemSettings")}
+              </Button>
+              <Button size="sm" variant="secondary" onPress={relaunch}>
+                {t("settings.perm.relaunch")}
+              </Button>
+            </div>
           </div>
         </SoftCollapse>
       </div>
@@ -2673,15 +2741,9 @@ function UpdatesPanel() {
       : CHANGELOG;
 
   const percent = progress?.percent ?? null;
-  const fade = useFade();
 
   return (
-    <motion.div
-      className="flex flex-col gap-4"
-      initial={fade.initial}
-      animate={fade.animate}
-      transition={fade.transition}
-    >
+    <div className="flex flex-col gap-4">
       <SectionCard className="flex flex-col gap-4" title={t("settings.updates.currentVersion")}>
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
@@ -2842,7 +2904,7 @@ function UpdatesPanel() {
           ))}
         </div>
       </SectionCard>
-    </motion.div>
+    </div>
   );
 }
 

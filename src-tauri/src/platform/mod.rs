@@ -152,9 +152,7 @@ pub(crate) fn restore_previous_frontmost_app(clear: bool) {
         app.yieldActivationToApplication(&prev);
     }
     let ok = prev.activateWithOptions(NSApplicationActivationOptions::empty());
-    eprintln!(
-        "[focus] restore pid={pid} ok={ok} clear={clear}"
-    );
+    crate::elog::elog!("[focus] restore pid={pid} ok={ok} clear={clear}");
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -314,7 +312,7 @@ fn finish_fade_hide(app: &AppHandle, gen: u64) {
                 ns_window.setAlphaValue(1.0);
             }
         }
-        eprintln!("[floating] hide()");
+        crate::elog::elog!("[floating] hide()");
     }
     if let Some(lang) = app.get_webview_window("floating-lang") {
         let _ = lang.hide();
@@ -349,7 +347,7 @@ pub(crate) fn fade_out_floating_hud(app: &AppHandle, gen: u64) {
         let _ = app.clone().run_on_main_thread(move || {
             if let Some(window) = app.get_webview_window("floating") {
                 let _ = window.hide();
-                eprintln!("[floating] hide()");
+                crate::elog::elog!("[floating] hide()");
             }
             sync_floating_lang_chip(&app, false);
         });
@@ -440,7 +438,7 @@ fn configure_floating_overlay_panel(
     let _ = window.set_always_on_top(true);
 
     let Ok(ns_ptr) = window.ns_window() else {
-        eprintln!("[floating] ns_window() failed");
+        crate::elog::elog!("[floating] ns_window() failed");
         return;
     };
 
@@ -474,7 +472,7 @@ fn configure_floating_overlay_panel(
     }
 
     if !with_vibrancy {
-        eprintln!("[floating] overlay panel without vibrancy/shadow");
+        crate::elog::elog!("[floating] overlay panel without vibrancy/shadow");
         return;
     }
 
@@ -484,9 +482,9 @@ fn configure_floating_overlay_panel(
         Some(NSVisualEffectState::Active),
         Some(corner_radius),
     ) {
-        eprintln!("[floating] apply_vibrancy failed: {e}");
+        crate::elog::elog!("[floating] apply_vibrancy failed: {e}");
     } else {
-        eprintln!("[floating] HudWindow vibrancy applied (radius {corner_radius})");
+        crate::elog::elog!("[floating] HudWindow vibrancy applied (radius {corner_radius})");
     }
 }
 
@@ -501,7 +499,7 @@ pub(crate) fn write_clipboard_text(text: &str) -> Result<(), String> {
     if !pb.setString_forType(&ns, unsafe { NSPasteboardTypeString }) {
         return Err("failed to write NSPasteboard".into());
     }
-    eprintln!("[paste] clipboard written ({} chars)", text.chars().count());
+    crate::elog::elog!("[paste] clipboard written ({} chars)", text.chars().count());
     Ok(())
 }
 
@@ -589,14 +587,14 @@ pub(crate) fn post_cmd_v() -> Result<(), String> {
 
     key_down.post(CGEventTapLocation::HID);
     key_up.post(CGEventTapLocation::HID);
-    eprintln!("[paste] Cmd+V posted via CGEvent");
+    crate::elog::elog!("[paste] Cmd+V posted via CGEvent");
     Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
 pub(crate) fn post_cmd_v() -> Result<(), String> {
     // Auto-paste (synthetic keystroke) is macOS-only; text remains on the clipboard.
-    eprintln!("[paste] auto-paste skipped (non-macOS); text is on clipboard");
+    crate::elog::elog!("[paste] auto-paste skipped (non-macOS); text is on clipboard");
     Ok(())
 }
 

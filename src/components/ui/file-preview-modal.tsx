@@ -2,12 +2,12 @@ import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { Button, toast } from "@heroui/react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ExternalLink, X } from "lucide-react";
 import { AttachMediaBody } from "@/components/ui/attach-media-body";
 import { MarkdownBody } from "@/components/shared/markdown-body";
 import { toolResultToMarkdown } from "@/lib/agent-tool-md";
-import { duration, easeOut } from "@/lib/motion";
+import { duration, easeOut, springUI } from "@/lib/motion";
 import { useT } from "@/lib/i18n";
 import type { AgentPathInfo } from "@/types";
 
@@ -71,6 +71,7 @@ type Props = {
  */
 export function FilePreviewModal({ item, onClose }: Props) {
   const t = useT();
+  const reduce = useReducedMotion();
   const open = Boolean(item);
 
   useEffect(() => {
@@ -111,10 +112,10 @@ export function FilePreviewModal({ item, onClose }: Props) {
             aria-modal="true"
             aria-label={item.name}
             className="agent-file-preview-panel flex h-[min(85vh,44rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl"
-            initial={{ opacity: 0, scale: 0.95, y: 24 }}
+            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.95, y: 24 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 16 }}
-            transition={{ type: "spring", bounce: 0.2, duration: 0.3 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 16 }}
+            transition={reduce ? { duration: 0.14, ease: easeOut } : springUI}
           >
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-3">
               <div className="min-w-0">

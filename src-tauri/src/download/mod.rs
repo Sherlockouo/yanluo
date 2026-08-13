@@ -248,7 +248,7 @@ fn download_url_media_blocking(
     })?;
     args.push("--ffmpeg-location".into());
     args.push(ff_dir.to_string_lossy().to_string());
-    eprintln!(
+    crate::elog::elog!(
         "[yt-dlp] --ffmpeg-location {}",
         ff_dir.display()
     );

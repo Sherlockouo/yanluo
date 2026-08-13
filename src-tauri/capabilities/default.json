@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicegoodcode/tauri-2.0/main/crates/tauri/permissions/schemas/cap.schema.json",
   "identifier": "default",
-  "description": "Default capability for the QuietType (言落) app",
+  "description": "Default capability for the Yanluo (言落) app",
   "windows": ["main", "floating", "floating-lang", "floating-agent-menu"],
   "permissions": [
     "core:default",
