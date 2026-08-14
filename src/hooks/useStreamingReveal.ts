@@ -16,14 +16,22 @@ import { useEffect, useRef, useState } from "react";
  * size or cadence. Small bursts (user speaking slowly) drain at MIN_CPS, which
  * also matches their rhythm — burst sizes are auto-correlated with speech.
  *
- * Hypothesis revisions (mid-string changes) snap immediately: smoothing would
- * only keep wrong text on screen longer. `prefers-reduced-motion`: target is
- * returned unchanged.
+ * Revisions are diff-aware: a segment commit re-decodes the whole sentence,
+ * so its text almost always differs from the drip mid-flight by a few
+ * characters near the tail. Snapping the whole line on every commit is what
+ * makes later words "jump" after a fluent opening. Instead, keep the stable
+ * prefix, snap only the changed region, and keep dripping the new tail.
+ * Deep rewrites (beyond the drip tail — language relock, LLM refine) snap
+ * wholesale; smoothing those would reshuffle the line anyway.
+ * `prefers-reduced-motion`: target is returned unchanged.
  */
 
 /** Inter-burst interval estimates are clamped before entering the EMA. */
 const MIN_INTERVAL = 0.2;
-const MAX_INTERVAL = 1.0;
+/** Long segments decode slower (KV growth + rollback re-encode) — bursts can
+ * legitimately space out past 1s; clamping lower than real cadence makes the
+ * backlog drain early and reintroduces flow-stall-flow. */
+const MAX_INTERVAL = 1.5;
 /** Fallback before any measurement (matches the backend cadence ballpark). */
 const DEFAULT_INTERVAL = 0.6;
 /** Slowest drip (chars/sec) — small/slow bursts still move visibly. */
@@ -32,6 +40,9 @@ const MIN_CPS = 6;
 const MAX_CPS = 90;
 /** EMA smoothing factor for the interval estimate. */
 const EMA_ALPHA = 0.3;
+/** Revisions within this many chars of the drip tail get a smooth re-drip;
+ * deeper rewrites snap (the line is being reshuffled anyway). */
+const REVISE_TAIL_CHARS = 8;
 
 function prefersReducedMotion(): boolean {
   try {
@@ -93,25 +104,6 @@ export function useStreamingReveal(target: string, enabled: boolean): string {
       return;
     }
 
-    // Hypothesis revision / shrink → snap now, drip only future growth.
-    if (!target.startsWith(s.revealed)) {
-      snap(target);
-      return;
-    }
-
-    if (target.length > prevTarget.length) {
-      // New burst: update the cadence model from its arrival interval, then
-      // size the drain rate so this backlog finishes as the next one lands.
-      const now = performance.now() / 1000;
-      if (s.lastGrowthAt > 0) {
-        const sample = clamp(now - s.lastGrowthAt, MIN_INTERVAL, MAX_INTERVAL);
-        s.intervalEma += (sample - s.intervalEma) * EMA_ALPHA;
-      }
-      s.lastGrowthAt = now;
-      const backlog = target.length - s.revealed.length;
-      s.cps = clamp(backlog / s.intervalEma, MIN_CPS, MAX_CPS);
-    }
-
     const tick = (now: number) => {
       rafRef.current = 0;
       const st = stateRef.current;
@@ -136,6 +128,51 @@ export function useStreamingReveal(target: string, enabled: boolean): string {
         lastTsRef.current = 0;
       }
     };
+
+    // Revision (commit re-decode, rollback, language relock): diff-aware.
+    if (!target.startsWith(s.revealed)) {
+      let p = 0;
+      const min = Math.min(s.revealed.length, target.length);
+      while (p < min && s.revealed.charCodeAt(p) === target.charCodeAt(p)) p++;
+      p = skipLowSurrogate(target, p);
+      const deepRewrite = p + REVISE_TAIL_CHARS < s.revealed.length;
+      if (deepRewrite) {
+        snap(target);
+        return;
+      }
+      // Tail revision: keep the stable prefix, snap the changed region up to
+      // the divergence point, and keep dripping from there.
+      s.revealed = target.slice(0, p);
+      s.cursor = p;
+      setRevealed(s.revealed);
+      if (target.length > prevTarget.length) {
+        const now = performance.now() / 1000;
+        if (s.lastGrowthAt > 0) {
+          const sample = clamp(now - s.lastGrowthAt, MIN_INTERVAL, MAX_INTERVAL);
+          s.intervalEma += (sample - s.intervalEma) * EMA_ALPHA;
+        }
+        s.lastGrowthAt = now;
+      }
+      const backlog = target.length - s.revealed.length;
+      if (backlog > 0) {
+        s.cps = clamp(backlog / s.intervalEma, MIN_CPS, MAX_CPS);
+        if (!rafRef.current) rafRef.current = requestAnimationFrame(tick);
+      }
+      return;
+    }
+
+    if (target.length > prevTarget.length) {
+      // New burst: update the cadence model from its arrival interval, then
+      // size the drain rate so this backlog finishes as the next one lands.
+      const now = performance.now() / 1000;
+      if (s.lastGrowthAt > 0) {
+        const sample = clamp(now - s.lastGrowthAt, MIN_INTERVAL, MAX_INTERVAL);
+        s.intervalEma += (sample - s.intervalEma) * EMA_ALPHA;
+      }
+      s.lastGrowthAt = now;
+      const backlog = target.length - s.revealed.length;
+      s.cps = clamp(backlog / s.intervalEma, MIN_CPS, MAX_CPS);
+    }
 
     if (target.length > s.revealed.length && !rafRef.current) {
       rafRef.current = requestAnimationFrame(tick);
