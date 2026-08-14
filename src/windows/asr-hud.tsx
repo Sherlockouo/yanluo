@@ -35,6 +35,7 @@ import type {
 import { defaultConfig } from "@/lib/constants";
 import { friendlyAgentError } from "@/lib/agent-errors";
 import { useSmoothedRms } from "@/hooks/useAudioBars";
+import { useStreamingReveal } from "@/hooks/useStreamingReveal";
 import { AudioBars } from "@/components/ui/audio-bars";
 import { cn } from "@/lib/cn";
 import { easeOut, springBounce } from "@/lib/motion";
@@ -1008,10 +1009,12 @@ function AgentCapsule({
 
   const committed = (payload.committed ?? "").trim();
   const active = (payload.active ?? "").trim();
-  const live =
+  const liveRaw =
     committed || active
       ? `${committed}${committed && active ? " " : ""}${active}`
       : payload.text;
+  // Drip streamed chars in — same chunky-burst problem as the fn HUD.
+  const live = useStreamingReveal(liveRaw, recording);
 
   const flowKey = live.trim();
   const overflowing = useFlowShift(
@@ -1375,8 +1378,36 @@ function FloatingCapsule({
   const loading =
     !editing && (refining || switching || (processing && !justRefined));
 
+  // Streaming reveal: partials arrive in bursts — drip the chars in so the
+  // caption reads as a continuous stream instead of chunk-by-chunk jumps.
+  // Reveal runs over the combined committed+active string, so a sentence
+  // settle (active → committed) recolors in place instead of reflowing.
+  const combinedLive =
+    committed && active
+      ? `${committed} ${active}`
+      : committed || active || "";
+  const revealedLive = useStreamingReveal(
+    combinedLive,
+    hasSplit && recording && !loading && !editing,
+  );
+  let committedShown = committed;
+  let activeShown = active;
+  if (revealedLive !== combinedLive) {
+    if (!committed) {
+      committedShown = "";
+      activeShown = revealedLive;
+    } else if (revealedLive.length <= committed.length) {
+      committedShown = revealedLive;
+      activeShown = "";
+    } else {
+      committedShown = committed;
+      const rest = revealedLive.slice(committed.length);
+      activeShown = rest.startsWith(" ") ? rest.slice(1) : rest;
+    }
+  }
+
   const flowKey = hasSplit
-    ? `${committed}\u0001${active}`
+    ? `${committedShown}\u0001${activeShown}`
     : displayText;
   const overflowing = useFlowShift(
     textViewportRef,
@@ -1523,12 +1554,12 @@ function FloatingCapsule({
                 t("hud.switching")
               ) : hasSplit && recording && !loading ? (
                 <>
-                  {committed ? (
-                    <span className="hud-text-committed">{committed}</span>
+                  {committedShown ? (
+                    <span className="hud-text-committed">{committedShown}</span>
                   ) : null}
-                  {committed && active ? " " : null}
-                  {active ? (
-                    <span className="hud-text-active">{active}</span>
+                  {committedShown && activeShown ? " " : null}
+                  {activeShown ? (
+                    <span className="hud-text-active">{activeShown}</span>
                   ) : null}
                 </>
               ) : (

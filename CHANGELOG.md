@@ -4,6 +4,11 @@ All notable changes to Yanluo（言落）are documented in this file.
 
 ## Unreleased
 
+### Fixed（流式观感）
+- HUD 吐字改为**平滑逐字渐显**：ASR 假设以 ~0.6s 批次到达，此前整串直出造成「一段一段」跳变；现按自适应速率滴入（小批次 ~0.3s 流完、大追赶加速），假设修正即时吸附不拖延错字
+- 句子定稿（active → committed）文字**原地沉降变色**，不再整句重排跳动；agent 语音字幕同样接入
+- 尊重 `prefers-reduced-motion`（直接显示全文）
+
 ### Changed（吐字响应性）
 - **说话中**：稳态吐字节奏 chunk 默认 1.0s → **0.6s**（段首 0.5s ramp 不变），文字跟读更「直播」
 - **说完定稿更快**：静音判定 900+500ms → **650+250ms（~0.9s 定稿）**；「迅速」预设升级为 450/150ms（~0.6s）

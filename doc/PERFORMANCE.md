@@ -15,6 +15,7 @@
 | 吐字更新粒度（段内前 3 个 partial） | 1.0–1.5s | **0.5s** | 早期节奏 ramp（质量地板不动） |
 | 吐字更新粒度（稳态） | 1.5s（默认） | **0.6s** | 默认 chunk 与前端对齐 |
 | 说完停顿 → 文字定稿（commit） | ~1.4s（且短句永不自动定稿） | **~0.9s**（迅速档 ~0.6s） | 静音/hold/min_segment 参数重调 |
+| 文字上屏观感 | partial 整串直出（0.5–1s 一跳，3–5 字/跳） | **逐字渐显**（自适应滴入，~0.3s 流完小批次） | FE `useStreamingReveal` |
 | Apple 路径首字 | 可能含网络往返 | on-device（设备支持时） | requiresOnDeviceRecognition |
 
 ---
