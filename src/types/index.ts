@@ -144,6 +144,8 @@ export type AppConfig = {
   vad_min_segment_ms: number;
   vad_max_segment_sec: number;
   vad_overlap_ms: number;
+  /** VAD 响应速度预设: default（均衡） | fast（迅速）。 */
+  vad_speed_preset: "default" | "fast" | string;
   /** Cross-segment committed text prefix tokens (0 = off). */
   cross_segment_prefix_tokens: number;
   hotkey_transcribe: HotkeyBinding;

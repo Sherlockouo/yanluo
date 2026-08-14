@@ -358,7 +358,7 @@ export function AsrHud() {
       );
       setProfileId(cfg.agent_profile_id || "claude");
       await invoke("start_recording", {
-        chunkSec: cfg.chunk_size_sec ?? 1.5,
+        chunkSec: cfg.chunk_size_sec ?? 0.6,
         rollbackTokens: cfg.unfixed_token_num ?? 5,
         language: cfg.language === "auto" ? null : cfg.language,
         mode: "agent",

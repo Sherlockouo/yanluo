@@ -788,14 +788,15 @@ pub(crate) fn start_recording_impl(
 
     spawn_audio_level_pump(app.clone(), engine.inner().recording.clone());
 
-    // Segmented streaming quality floors (S1.1). Tiny chunk/rollback from
-    // older config.json causes unstable hypotheses and feels like "worse ASR".
+    // Segmented streaming quality floor. Below ~0.5s the rollback window can't
+    // stabilize a hypothesis between partials (text flickers instead of
+    // streaming); 0.5s is also the early-ramp cadence, so it stays useful.
     let raw_chunk = chunk_sec.unwrap_or(config.chunk_size_sec.max(0.2));
-    let chunk_sec = if raw_chunk < 1.0 {
+    let chunk_sec = if raw_chunk < 0.5 {
         crate::elog::elog!(
-            "[asr] chunk_sec={raw_chunk:.2} too small for segmented streaming; clamping to 1.0s"
+            "[asr] chunk_sec={raw_chunk:.2} too small for segmented streaming; clamping to 0.5s"
         );
-        1.0
+        0.5
     } else {
         raw_chunk
     };

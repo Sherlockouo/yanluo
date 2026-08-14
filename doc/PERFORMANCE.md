@@ -13,7 +13,8 @@
 | 按下→松开之间的语音 | 丢失 | **保留**（进正式转写） | 预热缓冲无缝转正 |
 | 首次录音首字延迟（Qwen） | 0.5s + **~2s Metal JIT** + 推理 | 0.5s + 推理 | LoadModel 后 GPU 预热 |
 | 吐字更新粒度（段内前 3 个 partial） | 1.0–1.5s | **0.5s** | 早期节奏 ramp（质量地板不动） |
-| 吐字更新粒度（稳态） | 1.5s（默认） | 1.0s | 默认 chunk 与前端对齐 |
+| 吐字更新粒度（稳态） | 1.5s（默认） | **0.6s** | 默认 chunk 与前端对齐 |
+| 说完停顿 → 文字定稿（commit） | ~1.4s（且短句永不自动定稿） | **~0.9s**（迅速档 ~0.6s） | 静音/hold/min_segment 参数重调 |
 | Apple 路径首字 | 可能含网络往返 | on-device（设备支持时） | requiresOnDeviceRecognition |
 
 ---
@@ -117,8 +118,22 @@ Fn 按下（CGEventTap arm）
 | 文件 | 改动 |
 |---|---|
 | `src-tauri/src/transcription/mod.rs` | LoadModel 后 `warmup_asr_inference`；partial 门限早期 ramp（`seg_partial_count`）；段开/重开归零 |
-| `src-tauri/src/config/mod.rs` | `chunk_size_sec` 默认 1.5 → 1.0；新增 `speculative_mic`（默认 true） |
+| `src-tauri/src/config/mod.rs` | 吐字节奏与 VAD 响应默认值（见下表）；新增 `speculative_mic`（默认 true） |
+| `src-tauri/src/audio/vad.rs` | 质量下限放宽；「迅速」预设 450/150ms |
 | `src-tauri/src/macos_speech.m` | on-device 优先 |
+
+### 吐字与定稿节奏参数（v0.11.x 响应性批次）
+
+| 参数 | 旧默认 | 新默认 | 下限 | 说明 |
+|---|---|---|---|---|
+| `chunk_size_sec` | 1.5 → 1.0 | **0.6** | 0.5 | 稳态 partial 节奏；partial 为增量计算，0.6s 开销小且读感「直播」 |
+| `vad_min_silence_ms` | 900 | **650** | 500 | 静音多久成为定稿候选 |
+| `vad_commit_hold_ms` | 500 | **250** | 150 | 候选后再 hold 的时长 |
+| `vad_min_segment_ms` | 2500 | **1200** | 800 | **只计语音样本**——旧值导致 <2s 的短句永不自动定稿 |
+| 「迅速」预设 | 600/200 | **450/150** | — | 设置 → 识别 → 响应速度（新增 UI 开关） |
+
+效果：说完一句话 → 停顿 ~0.9s 文字定稿（迅速档 ~0.6s）；说话中每 ~0.5–0.6s 刷新一次假设。
+按 Fn 停止的路径不受这些参数影响（立即 commit + 定稿）。
 
 ## 推测性开麦（新机制）
 

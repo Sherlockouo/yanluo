@@ -43,16 +43,19 @@ pub(crate) struct SegmentConfig {
 
 impl Default for SegmentConfig {
     fn default() -> Self {
-        // Conservative defaults (S1.1): prefer longer segments over early cuts.
+        // Responsive dictation defaults: a finished sentence + natural pause
+        // commits in ~0.9s (650ms silence + 250ms hold); min_segment counts
+        // speech only, so short sentences settle too. See config defaults —
+        // keep the two in sync.
         Self {
-            frame_samples: SAMPLE_RATE / 50,           // 20 ms
+            frame_samples: SAMPLE_RATE / 50,              // 20 ms
             energy_enter: 0.010,
             energy_exit: 0.004,
-            min_silence_samples: SAMPLE_RATE * 9 / 10, // 900 ms
-            commit_hold_samples: SAMPLE_RATE / 2,      // 500 ms → ~1.4s quiet to commit
-            min_segment_samples: SAMPLE_RATE * 5 / 2,  // 2.5 s
-            max_segment_samples: SAMPLE_RATE * 90,     // 90 s hard cap
-            overlap_samples: SAMPLE_RATE / 2,          // 500 ms
+            min_silence_samples: SAMPLE_RATE * 65 / 100,  // 650 ms
+            commit_hold_samples: SAMPLE_RATE / 4,         // 250 ms → ~0.9s quiet to commit
+            min_segment_samples: SAMPLE_RATE * 12 / 10,   // 1.2 s of speech
+            max_segment_samples: SAMPLE_RATE * 90,        // 90 s hard cap
+            overlap_samples: SAMPLE_RATE / 2,             // 500 ms
         }
     }
 }
@@ -67,10 +70,12 @@ impl SegmentConfig {
         overlap_ms: u64,
     ) -> Self {
         let ms = |ms: u64| (SAMPLE_RATE as u64 * ms / 1000) as usize;
-        // Floor persisted aggressive config (S1.1 quality).
-        let min_silence_ms = min_silence_ms.max(700);
-        let commit_hold_ms = commit_hold_ms.max(400);
-        let min_segment_ms = min_segment_ms.max(2000);
+        // Floor persisted aggressive config (S1.1 quality): below these the
+        // clock commits inside natural speech pauses / mid-word and the
+        // rollback window can't stabilize a hypothesis.
+        let min_silence_ms = min_silence_ms.max(500);
+        let commit_hold_ms = commit_hold_ms.max(150);
+        let min_segment_ms = min_segment_ms.max(800);
         let overlap_ms = overlap_ms.max(400);
         let enter = energy_threshold.clamp(1e-6, 0.02);
         Self {
@@ -86,13 +91,15 @@ impl SegmentConfig {
     }
 
     /// Apply speed preset overrides (called after from_app_ms).
-    /// "fast" preset: silence=600ms, hold=200ms for rapid dictation.
+    /// "fast" preset: silence=450ms, hold=150ms → ~0.6s to settle (rapid
+    /// dictation; trades a slightly higher chance of cutting at brief
+    /// breath pauses for snappier finalization).
     pub(crate) fn apply_speed_preset(mut self, preset: &str) -> Self {
         match preset {
             "fast" => {
                 let ms = |ms: u64| (SAMPLE_RATE as u64 * ms / 1000) as usize;
-                self.min_silence_samples = ms(600).max(1);
-                self.commit_hold_samples = ms(200);
+                self.min_silence_samples = ms(450).max(1);
+                self.commit_hold_samples = ms(150);
             }
             _ => {} // "default" — keep configured values
         }

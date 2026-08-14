@@ -1181,11 +1181,27 @@ function VadAdvancedFields({
         ) : null}
       </div>
 
+      <div className="flex flex-col gap-1.5">
+        <span className="type-meta">{t("settings.vad.speed")}</span>
+        <QSwitch
+          ariaLabel={t("settings.vad.speedAria")}
+          value={config.vad_speed_preset === "fast" ? "fast" : "balanced"}
+          onChange={(id) => {
+            updateConfig("vad_speed_preset", id === "fast" ? "fast" : "default");
+          }}
+          options={[
+            { id: "balanced" as const, label: t("settings.vad.speedBalanced") },
+            { id: "fast" as const, label: t("settings.vad.speedFast") },
+          ]}
+        />
+        <p className="type-meta">{t("settings.vad.speedHint")}</p>
+      </div>
+
       <div className="grid grid-cols-2 gap-3">
         <ConfigNumberField
           label={t("settings.vad.chunkSizeSec")}
-          value={config.chunk_size_sec ?? 1.5}
-          min={0.2}
+          value={config.chunk_size_sec ?? 0.6}
+          min={0.5}
           max={5}
           step={0.1}
           onCommit={(n) => updateConfig("chunk_size_sec", n)}
@@ -1250,15 +1266,15 @@ function VadAdvancedFields({
       <div className="grid grid-cols-2 gap-3">
         <ConfigNumberField
           label={t("settings.vad.minSilenceMs")}
-          value={config.vad_min_silence_ms ?? 900}
-          min={400}
+          value={config.vad_min_silence_ms ?? 650}
+          min={500}
           step={50}
           onCommit={(n) => updateConfig("vad_min_silence_ms", Math.round(n))}
         />
         <ConfigNumberField
           label={t("settings.vad.commitHoldMs")}
-          value={config.vad_commit_hold_ms ?? 500}
-          min={200}
+          value={config.vad_commit_hold_ms ?? 250}
+          min={150}
           step={50}
           onCommit={(n) => updateConfig("vad_commit_hold_ms", Math.round(n))}
         />
@@ -1267,8 +1283,8 @@ function VadAdvancedFields({
       <div className="grid grid-cols-2 gap-3">
         <ConfigNumberField
           label={t("settings.vad.minSegmentMs")}
-          value={config.vad_min_segment_ms ?? 2500}
-          min={1000}
+          value={config.vad_min_segment_ms ?? 1200}
+          min={800}
           step={100}
           onCommit={(n) => updateConfig("vad_min_segment_ms", Math.round(n))}
         />

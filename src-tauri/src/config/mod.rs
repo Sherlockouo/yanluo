@@ -351,11 +351,12 @@ pub(crate) fn default_translate_target_language() -> String {
 }
 
 pub(crate) fn default_chunk_size_sec() -> f64 {
-    // Settled partial cadence. First hypothesis timing is handled separately
-    // (0.5s bootstrap + early ramp in the mlx worker), so this only governs
-    // steady-state freshness — 1.0s keeps caption updates timely. The FE
-    // fallback (`?? 1.0`) matches.
-    1.0
+    // Steady-state partial cadence. First hypothesis timing is handled separately
+    // (0.5s bootstrap + early ramp in the mlx worker); partial decode is
+    // incremental (Δ-mel/encoder + rollback re-encode + ≤32 tokens), so 0.6s
+    // reads as "live" while leaving the rollback window room to settle —
+    // shorter cadences make hypotheses flicker instead of stream.
+    0.6
 }
 
 pub(crate) fn default_unfixed_token_num() -> usize {
@@ -380,15 +381,21 @@ pub(crate) fn default_vad_energy_threshold() -> f32 {
 }
 
 pub(crate) fn default_vad_min_silence_ms() -> u64 {
-    900
+    // 650ms + 250ms hold ≈ 0.9s of quiet before a segment commits — prompt
+    // enough that finished sentences settle visibly, without cutting at
+    // mid-sentence thinking pauses (those rarely reach 0.9s).
+    650
 }
 
 pub(crate) fn default_vad_commit_hold_ms() -> u64 {
-    500
+    250
 }
 
 pub(crate) fn default_vad_min_segment_ms() -> u64 {
-    2500
+    // Counts *speech* samples only. 1.2s: a short spoken sentence + a natural
+    // pause now commits (HUD text settles) instead of waiting for 2.5s of
+    // accumulated speech. Cross-segment context prefix absorbs the boundary.
+    1200
 }
 
 pub(crate) fn default_vad_max_segment_sec() -> f64 {
