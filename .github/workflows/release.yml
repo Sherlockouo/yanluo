@@ -94,7 +94,9 @@ jobs:
             libssl-dev \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
-            libasound2-dev
+            libasound2-dev \
+            squashfs-tools \
+            file
 
       - name: Free disk space (Linux AppImage staging)
         if: runner.os == 'Linux'
@@ -169,6 +171,20 @@ jobs:
             cat release-notes.md
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Linux AppImage preflight (linuxdeploy smoke)
+        # tauri-bundler swallows linuxdeploy's stderr at Error log level;
+        # smoke-test the exact binary it downloads so failures surface here.
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -x
+          command -v file patchelf mksquashfs || true
+          curl -sL -o /tmp/linuxdeploy.AppImage \
+            https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage
+          chmod +x /tmp/linuxdeploy.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 /tmp/linuxdeploy.AppImage --version
+          echo "linuxdeploy smoke exit: $?"
 
       - name: Publish GitHub Release (tagged)
         if: steps.ver.outputs.publish == 'true'
