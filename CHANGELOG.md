@@ -4,6 +4,14 @@ All notable changes to Yanluo（言落）are documented in this file.
 
 ## Unreleased
 
+### Changed（push-then-refine：说话即出字）
+- **HUD 展示与 commit 解耦**：字幕全部视为临时假设——识别出非空文本**立刻上屏**，
+  后续 partial / 定稿 / LLM refine 直接覆盖（`streaming_hypothesis_warm` 压制移除）
+- 首解码门槛 0.5s → **0.3s**（encoder 尾块零填充已验证无最小长度约束）：
+  说话 onset 后 **~0.5s 内**首字上屏（此前 ~0.7–1.2s）
+- 首解码为空（语音太短）→ **0.15s 后快速重试**，不再空等一整拍
+- 段内前 3 拍 0.3s 密集节奏（ramp 联动），之后 0.6s 稳态；定稿/回滚质量地板不动
+
 ### Fixed（流式观感）
 - HUD 吐字改为**平滑逐字渐显**：ASR 假设以 ~0.6s 批次到达，此前整串直出造成「一段一段」跳变；现按自适应速率滴入（小批次 ~0.3s 流完、大追赶加速），假设修正即时吸附不拖延错字
 - 句子定稿（active → committed）文字**原地沉降变色**，不再整句重排跳动；agent 语音字幕同样接入

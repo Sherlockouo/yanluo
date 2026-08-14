@@ -2423,26 +2423,6 @@ fn is_cjk_char(c: char) -> bool {
     )
 }
 
-/// HUD may emit after the first streaming decode.
-///
-/// Older gate waited for `unfixed_chunk_num` (2) or 2.0s — that hid the first
-/// hypothesis for ~1 extra `chunk_sec` and felt like slow 吐字. Filler-only
-/// text is still stripped before emit. Raising `unfixed_chunk_num` still
-/// delays HUD by at most one fewer chunk than before.
-///
-/// Lowered segment_secs threshold from 1.5→0.5 to minimise TTFT: the encoder
-/// produces valid tokens at 0.5s (BOOTSTRAP_SAMPLES=8000) so the very first
-/// decode can surface on HUD immediately. Early hypotheses may revise on the
-/// next tick — that's acceptable for "一有字就显示" UX.
-pub(crate) fn streaming_hypothesis_warm(
-    chunk_id: usize,
-    unfixed_chunk_num: usize,
-    segment_secs: f64,
-) -> bool {
-    let min_chunks = unfixed_chunk_num.saturating_sub(1).max(1);
-    chunk_id >= min_chunks || segment_secs >= 0.5
-}
-
 pub(crate) fn language_for_apple(language: &str) -> String {
     match language.trim() {
         "" | "auto" => "zh-CN".into(),
@@ -2949,6 +2929,8 @@ pub(crate) fn mlx_worker(
                 // Partials emitted within the *current* segment (drives the
                 // early-ramp gate below; reset on every segment open/reopen).
                 let mut seg_partial_count = 0usize;
+                // Re-probe soon when the last hypothesis came back empty.
+                let mut fast_retry = false;
                 let mut last_language = String::new();
                 // Consecutive warm empties → drop cross-seg context and re-init once.
                 let mut empty_active_streak = 0usize;
@@ -3113,6 +3095,7 @@ pub(crate) fn mlx_worker(
                                     seg_start = Some(start_sample);
                                     last_partial_abs = start_sample;
                                     seg_partial_count = 0;
+                                    fast_retry = false;
                                     active_text.clear();
                                     empty_active_streak = 0;
                                     context_rescue_used = false;
@@ -3239,6 +3222,7 @@ pub(crate) fn mlx_worker(
                                         seg_start = Some(reopen_at);
                                         last_partial_abs = reopen_at;
                                         seg_partial_count = 0;
+                                        fast_retry = false;
                                         active_text.clear();
                                         empty_active_streak = 0;
                                         context_rescue_used = false;
@@ -3273,21 +3257,31 @@ pub(crate) fn mlx_worker(
                         continue;
                     }
                     let new_in_seg = session_len.saturating_sub(last_partial_abs);
-                    // 0.5s @ 16kHz. Encoder conv2d stride=2 ×3 yields 6 tokens for 48
-                    // mel frames (8000 samples) — verified safe (no min-length assert).
-                    const BOOTSTRAP_SAMPLES: usize = 8_000;
+                    // 0.3s @ 16kHz speech in-segment before the first decode.
+                    // Encoder tails are zero-padded to the chunk with valid-token
+                    // masking (no min-length assert), so ~29 mel frames / 3-4
+                    // audio tokens decode fine — a rough onset hypothesis that
+                    // later partials overwrite beats a silent HUD (push-then-
+                    // refine is the HUD contract).
+                    const BOOTSTRAP_SAMPLES: usize = 4_800;
+                    // After an *empty* hypothesis (speech too short to decode),
+                    // re-probe after only this much new audio instead of a full
+                    // gate — otherwise first visible text waits a whole extra
+                    // cadence beat.
+                    const EMPTY_RETRY_SAMPLES: usize = 2_400; // 0.15s
                     let first_tick = last_partial_abs <= start;
-                    // Early-ramp: the first few partials of a segment use the 0.5s
-                    // gate so the caption starts flowing and keeps moving quickly
-                    // (perceived latency), then settles to the chunk_sec cadence
-                    // (hypothesis stability floor). Commit/rollback untouched.
+                    // Early-ramp: the first few partials of a segment use the
+                    // bootstrap gate so the caption starts flowing and keeps
+                    // moving quickly, then settles to the chunk_sec cadence.
+                    // Commit/rollback untouched.
                     const EARLY_RAMP_PARTIALS: usize = 2;
-                    let gate_samples =
-                        if first_tick || seg_partial_count <= EARLY_RAMP_PARTIALS {
-                            BOOTSTRAP_SAMPLES.min(chunk_samples)
-                        } else {
-                            chunk_samples
-                        };
+                    let gate_samples = if fast_retry {
+                        EMPTY_RETRY_SAMPLES.min(chunk_samples)
+                    } else if first_tick || seg_partial_count <= EARLY_RAMP_PARTIALS {
+                        BOOTSTRAP_SAMPLES.min(chunk_samples)
+                    } else {
+                        chunk_samples
+                    };
                     if session_len.saturating_sub(start) < gate_samples
                         || new_in_seg < gate_samples
                     {
@@ -3374,40 +3368,31 @@ pub(crate) fn mlx_worker(
                                     empty_active_streak =
                                         empty_active_streak.saturating_add(1);
                                 }
-                                let warm = streaming_hypothesis_warm(
-                                    stream_state.chunk_id,
-                                    stream_state.unfixed_chunk_num,
-                                    seg_secs,
+                                // Push-then-refine: the HUD caption is provisional.
+                                // Every hypothesis goes out the moment it exists —
+                                // commits / later partials / LLM refine just overwrite.
+                                // Empty → re-probe after the short retry gate.
+                                fast_retry = active_text.is_empty();
+                                crate::elog::elog!(
+                                    "[mlx-worker] partial #{} done: lang={} active_len={} committed_len={} fast_retry={}",
+                                    partial_count,
+                                    last_language,
+                                    active_text.len(),
+                                    committed_text.len(),
+                                    fast_retry
                                 );
-                                if warm {
-                                    crate::elog::elog!(
-                                        "[mlx-worker] partial #{} done: lang={} active_len={} committed_len={}",
-                                        partial_count,
-                                        last_language,
-                                        active_text.len(),
-                                        committed_text.len()
-                                    );
-                                    emit_partial(
-                                        &app,
-                                        &committed_text,
-                                        &active_text,
-                                        segment_index,
-                                    );
-                                } else {
-                                    crate::elog::elog!(
-                                        "[mlx-worker] partial #{} warming (HUD suppressed): lang={} seg={seg_secs:.1}s chunk={}",
-                                        partial_count,
-                                        last_language,
-                                        stream_state.chunk_id
-                                    );
-                                }
+                                emit_partial(
+                                    &app,
+                                    &committed_text,
+                                    &active_text,
+                                    segment_index,
+                                );
 
                                 // Context-poison rescue: warm empties with growing audio →
                                 // re-init without cross-seg prefix and re-decode once.
                                 // Thresholds kept tight — post-commit empty-active otherwise
                                 // looks like a dead HUD for seconds.
-                                if warm
-                                    && !context_rescue_used
+                                if !context_rescue_used
                                     && empty_active_streak >= 2
                                     && seg_secs >= 1.5
                                     && active_text.trim().is_empty()
@@ -4402,7 +4387,7 @@ mod apply_vocabulary_tests {
 
 #[cfg(test)]
 mod streaming_lang_tests {
-    use super::{sticky_language_decision, streaming_hypothesis_warm};
+    use super::sticky_language_decision;
 
     #[test]
     fn cjk_forces_chinese_even_if_labeled_english() {
@@ -4422,21 +4407,5 @@ mod streaming_lang_tests {
             sticky_language_decision("English", "hello world", 3.2, 3, 2),
             Some("english")
         );
-    }
-
-    #[test]
-    fn warm_after_first_decode_or_half_second() {
-        // With 0.5s threshold: first decode at ~0.5s is immediately warm.
-        assert!(streaming_hypothesis_warm(0, 2, 0.5));
-        assert!(streaming_hypothesis_warm(1, 2, 0.5));
-        assert!(streaming_hypothesis_warm(0, 2, 1.5));
-        assert!(streaming_hypothesis_warm(2, 2, 0.5));
-        // unfixed=3 → need chunk_id>=2 unless time escape (0.5s)
-        assert!(streaming_hypothesis_warm(1, 3, 1.0));
-        assert!(streaming_hypothesis_warm(2, 3, 0.5));
-        assert!(streaming_hypothesis_warm(1, 3, 1.5));
-        // Only suppressed when both chunk_id too low AND seg_secs < 0.5
-        assert!(!streaming_hypothesis_warm(0, 3, 0.3));
-        assert!(!streaming_hypothesis_warm(0, 5, 0.4));
     }
 }

@@ -12,6 +12,7 @@
 | Fn 松开 → 麦克风出数据 | +30–80ms（cpal 冷启动） | **≈0**（按下已预热） | Fn keydown 推测性开麦，松开转正 |
 | 按下→松开之间的语音 | 丢失 | **保留**（进正式转写） | 预热缓冲无缝转正 |
 | 首次录音首字延迟（Qwen） | 0.5s + **~2s Metal JIT** + 推理 | 0.5s + 推理 | LoadModel 后 GPU 预热 |
+| 说话 onset → 首字上屏（Qwen） | ~0.7–1.2s（0.5s bootstrap + 空假设再等一拍 + warm 压制） | **~0.45–0.6s** | bootstrap 0.3s + push-then-refine + 空假设 0.15s 重试 |
 | 吐字更新粒度（段内前 3 个 partial） | 1.0–1.5s | **0.5s** | 早期节奏 ramp（质量地板不动） |
 | 吐字更新粒度（稳态） | 1.5s（默认） | **0.6s** | 默认 chunk 与前端对齐 |
 | 说完停顿 → 文字定稿（commit） | ~1.4s（且短句永不自动定稿） | **~0.9s**（迅速档 ~0.6s） | 静音/hold/min_segment 参数重调 |
@@ -97,9 +98,12 @@ Fn 按下（CGEventTap arm）
 ```
 （同上采集链路）
 → VAD 开段
-→ 段内 partial #1：0.5s 门槛（不变，编码器最小长度）
-→ 段内 partial #2、#3：0.5s 门槛（新增 ramp，首字后快速跟进）
-→ partial #4 起：chunk_sec 节奏（默认 1.0s）
+→ 段内 partial #1：0.3s 门槛（bootstrap 4.8k samples；encoder 尾块零填充 + valid-token 掩码，无最小长度断言）
+   ⚠ warm 压制已移除 —— push-then-refine：HUD 文字全部视为临时假设，
+     识别出非空文本立刻 emit；后续 partial / commit / LLM refine 直接覆盖
+→ 空假设 → 仅 0.15s 后快速重试（不再等一整拍）
+→ 段内 #2、#3：0.3s 节奏（ramp 联动 bootstrap）
+→ #4 起：chunk_sec 节奏（默认 0.6s）
 → VAD commit / rollback / min_silence 等质量地板：完全未动
 ```
 
