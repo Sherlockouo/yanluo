@@ -123,10 +123,10 @@ jobs:
           # so pull the matching NVIDIA wheels and put their lib dirs on the path.
           if [[ "${{ matrix.libtorch }}" == "cuda" && "$RUNNER_OS" == "Linux" ]]; then
             python3 -m pip install --quiet \
-              nvidia-cuda-runtime-cu12 nvidia-cuda-nvrtc-cu12 nvidia-cuda-nvtx-cu12 \
+              nvidia-cuda-runtime-cu12 nvidia-cuda-nvrtc-cu12 \
               nvidia-cudnn-cu12 nvidia-cublas-cu12 nvidia-cufft-cu12 nvidia-curand-cu12 \
               nvidia-cusolver-cu12 nvidia-cusparse-cu12 nvidia-cusparselt-cu12 \
-              nvidia-nccl-cu12 nvidia-nvjitlink-cu12 nvidia-cufile-cu12
+              nvidia-nccl-cu12 nvidia-nvjitlink-cu12
             # nvidia.* are namespace packages (__file__ is None) — locate via
             # site-packages; glob every wheel's lib dir so recursive dep
             # resolution can't miss one (each miss costs a 13-min CI round).
