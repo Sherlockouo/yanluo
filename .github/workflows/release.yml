@@ -122,17 +122,23 @@ jobs:
           # dies on the first miss ("Could not find dependency: libcudnn.so.9"),
           # so pull the matching NVIDIA wheels and put their lib dirs on the path.
           if [[ "${{ matrix.libtorch }}" == "cuda" && "$RUNNER_OS" == "Linux" ]]; then
-            python3 -m pip install --quiet \
+            python3 -m pip install \
               nvidia-cuda-runtime-cu12 nvidia-cuda-nvrtc-cu12 \
               nvidia-cudnn-cu12 nvidia-cublas-cu12 nvidia-cufft-cu12 nvidia-curand-cu12 \
               nvidia-cusolver-cu12 nvidia-cusparse-cu12 nvidia-cusparselt-cu12 \
               nvidia-nccl-cu12 nvidia-nvjitlink-cu12
-            # nvidia.* are namespace packages (__file__ is None) — locate via
-            # site-packages; glob every wheel's lib dir so recursive dep
-            # resolution can't miss one (each miss costs a 13-min CI round).
-            SITE=$(python3 -c "import site; print(site.getsitepackages()[0])")
-            EXTRA_PATHS=$(ls -d "$SITE"/nvidia/*/lib 2>/dev/null | tr '\n' ':' | sed 's/:$//')
-            [[ -n "$EXTRA_PATHS" ]] && EXTRA_PATHS=":$EXTRA_PATHS"
+            # nvidia.* are namespace packages (__file__ is None); ask pip where
+            # it actually installed them, then glob every wheel's lib dir onto
+            # LD_LIBRARY_PATH (a missed DT_NEEDED costs a 13-min CI round).
+            SITE=$(python3 -m pip show nvidia-cudnn-cu12 | sed -n 's/^Location: //p')
+            if [[ -z "$SITE" ]]; then
+              echo "::error::pip did not report nvidia-cudnn-cu12 location"; exit 1
+            fi
+            EXTRA_PATHS=""
+            for d in "$SITE"/nvidia/*/lib; do
+              if [[ -d "$d" ]]; then EXTRA_PATHS="${EXTRA_PATHS}:${d}"; fi
+            done
+            echo "nvidia wheel libs:${EXTRA_PATHS}"
           fi
           # linuxdeploy resolves the app's ELF deps via ldd/LD_LIBRARY_PATH;
           # without libtorch's dir in it, AppImage bundling dies with
