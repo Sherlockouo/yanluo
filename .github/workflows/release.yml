@@ -84,6 +84,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # torch-sys's build script doesn't rerun on LIBTORCH env changes
+          # (no rerun-if-env-changed), so a cache saved against the CUDA
+          # libtorch poisons CPU builds with a stale `-ltorch_cuda` link.
+          # Scope the cache per libtorch variant.
+          key: libtorch-${{ matrix.libtorch }}
 
       - name: Install Linux deps
         if: runner.os == 'Linux'
