@@ -111,17 +111,27 @@ jobs:
         shell: bash
         run: |
           EXTRA=""
+          EXTRA_PATHS=""
           if [[ "${{ matrix.libtorch }}" == "cuda" ]]; then EXTRA="--cuda"; fi
           node scripts/fetch-libtorch.mjs $EXTRA
           echo "LIBTORCH=${GITHUB_WORKSPACE}/src-tauri/libtorch" >> "$GITHUB_ENV"
           echo "LIBTORCH_BYPASS_VERSION_CHECK=1" >> "$GITHUB_ENV"
+          # The second-state libtorch repack + CUDA toolkit cover most DT_NEEDED
+          # of libtorch_cuda.so, but NOT cuDNN / NCCL (not part of the toolkit).
+          # linuxdeploy resolves deps recursively via ldd/LD_LIBRARY_PATH and
+          # dies on the first miss ("Could not find dependency: libcudnn.so.9"),
+          # so pull the matching NVIDIA wheels and put their lib dirs on the path.
+          if [[ "${{ matrix.libtorch }}" == "cuda" && "$RUNNER_OS" == "Linux" ]]; then
+            python3 -m pip install --quiet nvidia-cudnn-cu12 nvidia-nccl-cu12
+            EXTRA_PATHS=$(python3 -c "import nvidia.cudnn,nvidia.nccl,os;print(':'+':'.join(os.path.join(os.path.dirname(m.__file__),'lib') for m in (nvidia.cudnn,nvidia.nccl)))")
+          fi
           # linuxdeploy resolves the app's ELF deps via ldd/LD_LIBRARY_PATH;
           # without libtorch's dir in it, AppImage bundling dies with
           # "Could not find dependency: libtorch_cpu.so".
           if [[ -d /usr/local/cuda/lib64 ]]; then
-            echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:${GITHUB_WORKSPACE}/src-tauri/libtorch/lib" >> "$GITHUB_ENV"
+            echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:${GITHUB_WORKSPACE}/src-tauri/libtorch/lib${EXTRA_PATHS}" >> "$GITHUB_ENV"
           else
-            echo "LD_LIBRARY_PATH=${GITHUB_WORKSPACE}/src-tauri/libtorch/lib" >> "$GITHUB_ENV"
+            echo "LD_LIBRARY_PATH=${GITHUB_WORKSPACE}/src-tauri/libtorch/lib${EXTRA_PATHS}" >> "$GITHUB_ENV"
           fi
 
       - name: Install CUDA toolkit (link CUDA libtorch)
