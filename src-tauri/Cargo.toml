@@ -1,6 +1,6 @@
 [package]
 name = "yanluo"
-version = "0.11.0"
+version = "0.11.1"
 description = "Desktop app for Qwen3-ASR, built with Tauri 2.0"
 authors = ["Sherlockouo"]
 edition = "2021"
@@ -66,3 +66,10 @@ custom-protocol = ["tauri/custom-protocol"]
 qwen-local = ["dep:qwen3-asr-rs"]
 # Silero VAD (ONNX). Enable with: --features qwen-local,silero-vad
 silero-vad = ["dep:voice_activity_detector"]
+
+# Vendored patch: esaxx-rs 0.1.10 (tokenizers dep) hardcodes static_crt(true),
+# which compiles its C++ with /MT on MSVC and collides with libtorch's /MD at
+# link time (LNK2038) on Windows qwen-local builds. Patch drops static_crt so
+# all C++ deps share the dynamic CRT. See vendor/esaxx-rs/build.rs.
+[patch.crates-io]
+esaxx-rs = { path = "vendor/esaxx-rs" }

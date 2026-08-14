@@ -96,6 +96,14 @@ jobs:
             libayatana-appindicator3-dev \
             libasound2-dev
 
+      - name: Free disk space (Linux AppImage staging)
+        if: runner.os == 'Linux'
+        run: |
+          # CUDA libtorch + linuxdeploy staging can exceed the 14GB runner disk.
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/powershell
+          df -h / | tail -1
+
       - name: Fetch libtorch (Linux / Windows local Qwen)
         if: matrix.libtorch != ''
         shell: bash
@@ -170,6 +178,10 @@ jobs:
           LIBTORCH: ${{ env.LIBTORCH }}
           LIBTORCH_BYPASS_VERSION_CHECK: "1"
           LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH }}
+          # linuxdeploy on GitHub runners: no FUSE → extract-and-run; CUDA .so
+          # carry .relr.dyn sections that linuxdeploy's embedded strip chokes on.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "true"
         with:
           tagName: ${{ steps.ver.outputs.tag }}
           releaseName: Yanluo ${{ steps.ver.outputs.tag }}
@@ -187,6 +199,8 @@ jobs:
           LIBTORCH: ${{ env.LIBTORCH }}
           LIBTORCH_BYPASS_VERSION_CHECK: "1"
           LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          NO_STRIP: "true"
         run: pnpm tauri build ${{ matrix.args }}
 
       - name: Embed Gatekeeper fix into macOS DMG

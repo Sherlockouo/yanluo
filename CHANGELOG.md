@@ -4,6 +4,17 @@ All notable changes to Yanluo（言落）are documented in this file.
 
 ## Unreleased
 
+## [0.11.1] — 2026-08-14
+
+### Fixed（CI 打包）
+- **Windows qwen-local 打包**：esaxx-rs 0.1.10 硬编码 `static_crt`（MSVC /MT）
+  与 libtorch 的 /MD 冲突（LNK2038）——vendored patch（`src-tauri/vendor/esaxx-rs`）
+  去掉 static_crt，动态 CRT 统一（Apache-2.0 许可保留）
+- **Linux AppImage 打包**：linuxdeploy 无 FUSE / CUDA 库 `.relr.dyn` strip 失败——
+  CI 设 `APPIMAGE_EXTRACT_AND_RUN=1` + `NO_STRIP=true`，并释放 runner 磁盘空间
+  （CUDA libtorch + staging 超过 14GB 默认盘）
+- 0.11.0 起 Windows / Linux 资产随 v0.11.1 补齐（macOS 不受影响）
+
 ## [0.11.0] — 2026-08-13
 
 ### Performance（macOS 交互延迟优化批次）
