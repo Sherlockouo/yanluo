@@ -3,22 +3,35 @@ import { useEffect, useRef, useState } from "react";
 /**
  * Smooth character reveal for streaming captions (typewriter).
  *
- * ASR partials arrive in bursts (every ~0.5-0.6s, several characters each).
- * Rendering them verbatim reads as "chunk by chunk". This hook drips newly
- * appended characters in at an adaptive rate — small bursts drain before the
- * next one lands, large catch-ups pour faster — so the caption reads as one
- * continuous stream. Hypothesis revisions (mid-string changes) snap
- * immediately: smoothing would only keep wrong text on screen longer.
+ * ASR partials arrive in bursts (every ~0.3-0.6s, several characters each).
+ * Rendering them verbatim reads as "chunk by chunk"; draining each burst on a
+ * fixed timer merely chops the jumpiness into "flow … stall … flow …".
  *
- * `prefers-reduced-motion`: returns the target unchanged.
+ * The cadence model here is the one streaming captions actually need: the
+ * reveal rate tracks the *character arrival rate*. When a burst lands we
+ * measure the inter-burst interval (EMA, clamped), then drain the backlog at
+ * backlog/interval characters per second — i.e. the burst finishes revealing
+ * exactly when the next burst is predicted to land. Bursts chain seamlessly,
+ * so the caption advances like a constant-rate stream regardless of burst
+ * size or cadence. Small bursts (user speaking slowly) drain at MIN_CPS, which
+ * also matches their rhythm — burst sizes are auto-correlated with speech.
+ *
+ * Hypothesis revisions (mid-string changes) snap immediately: smoothing would
+ * only keep wrong text on screen longer. `prefers-reduced-motion`: target is
+ * returned unchanged.
  */
 
-/** Slowest drip (chars/sec) — below this the stream feels choppy again. */
-const MIN_CPS = 16;
-/** Reveal rate targets draining the current backlog in this long (sec). */
-const DRAIN_SEC = 0.42;
-/** Cap for huge catch-ups (chars/sec). */
-const MAX_CPS = 110;
+/** Inter-burst interval estimates are clamped before entering the EMA. */
+const MIN_INTERVAL = 0.2;
+const MAX_INTERVAL = 1.0;
+/** Fallback before any measurement (matches the backend cadence ballpark). */
+const DEFAULT_INTERVAL = 0.6;
+/** Slowest drip (chars/sec) — small/slow bursts still move visibly. */
+const MIN_CPS = 6;
+/** Cap for large catch-ups (chars/sec). */
+const MAX_CPS = 90;
+/** EMA smoothing factor for the interval estimate. */
+const EMA_ALPHA = 0.3;
 
 function prefersReducedMotion(): boolean {
   try {
@@ -26,6 +39,10 @@ function prefersReducedMotion(): boolean {
   } catch {
     return false;
   }
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
 }
 
 /** `n` must not land inside a surrogate pair (emoji). */
@@ -40,12 +57,20 @@ function skipLowSurrogate(text: string, n: number): number {
 
 export function useStreamingReveal(target: string, enabled: boolean): string {
   const [revealed, setRevealed] = useState(target);
-  const stateRef = useRef({ target, revealed: target, cursor: target.length });
+  const stateRef = useRef({
+    target,
+    revealed: target,
+    cursor: target.length,
+    intervalEma: DEFAULT_INTERVAL,
+    lastGrowthAt: 0,
+    cps: MIN_CPS,
+  });
   const rafRef = useRef(0);
   const lastTsRef = useRef(0);
 
   useEffect(() => {
     const s = stateRef.current;
+    const prevTarget = s.target;
     s.target = target;
 
     const stop = () => {
@@ -56,21 +81,35 @@ export function useStreamingReveal(target: string, enabled: boolean): string {
       lastTsRef.current = 0;
     };
 
-    if (!enabled || prefersReducedMotion()) {
+    const snap = (text: string) => {
       stop();
-      s.revealed = target;
-      s.cursor = target.length;
-      setRevealed(target);
+      s.revealed = text;
+      s.cursor = text.length;
+      setRevealed(text);
+    };
+
+    if (!enabled || prefersReducedMotion()) {
+      snap(target);
       return;
     }
 
     // Hypothesis revision / shrink → snap now, drip only future growth.
     if (!target.startsWith(s.revealed)) {
-      stop();
-      s.revealed = target;
-      s.cursor = target.length;
-      setRevealed(target);
+      snap(target);
       return;
+    }
+
+    if (target.length > prevTarget.length) {
+      // New burst: update the cadence model from its arrival interval, then
+      // size the drain rate so this backlog finishes as the next one lands.
+      const now = performance.now() / 1000;
+      if (s.lastGrowthAt > 0) {
+        const sample = clamp(now - s.lastGrowthAt, MIN_INTERVAL, MAX_INTERVAL);
+        s.intervalEma += (sample - s.intervalEma) * EMA_ALPHA;
+      }
+      s.lastGrowthAt = now;
+      const backlog = target.length - s.revealed.length;
+      s.cps = clamp(backlog / s.intervalEma, MIN_CPS, MAX_CPS);
     }
 
     const tick = (now: number) => {
@@ -85,8 +124,7 @@ export function useStreamingReveal(target: string, enabled: boolean): string {
         return;
       }
       if (st.cursor < st.revealed.length) st.cursor = st.revealed.length;
-      const cps = Math.min(MAX_CPS, Math.max(MIN_CPS, pending / DRAIN_SEC));
-      st.cursor = Math.min(st.target.length, st.cursor + cps * dt);
+      st.cursor = Math.min(st.target.length, st.cursor + st.cps * dt);
       const n = skipLowSurrogate(st.target, Math.floor(st.cursor));
       if (n > st.revealed.length) {
         st.revealed = st.target.slice(0, n);
