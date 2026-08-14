@@ -10,9 +10,12 @@ All notable changes to Yanluo（言落）are documented in this file.
 - **Windows qwen-local 打包**：esaxx-rs 0.1.10 硬编码 `static_crt`（MSVC /MT）
   与 libtorch 的 /MD 冲突（LNK2038）——vendored patch（`src-tauri/vendor/esaxx-rs`）
   去掉 static_crt，动态 CRT 统一（Apache-2.0 许可保留）
-- **Linux AppImage 打包**：linuxdeploy 无 FUSE / CUDA 库 `.relr.dyn` strip 失败——
-  CI 设 `APPIMAGE_EXTRACT_AND_RUN=1` + `NO_STRIP=true`，并释放 runner 磁盘空间
-  （CUDA libtorch + staging 超过 14GB 默认盘）
+- **Linux AppImage 打包**：linuxdeploy 递归解析依赖需要 libtorch（及 CUDA 版的
+  cuDNN/cuSparseLt 等全套 NVIDIA 库）在 `LD_LIBRARY_PATH` 上——已补齐；runner
+  装 squashfs-tools/file 并预释放磁盘
+- **Linux 发行包改用 CPU libtorch**（与 Windows 策略对齐）：CUDA 版 AppImage 需捆绑
+  整个 NVIDIA 栈，超出 GitHub Release 单资产 2GB 上限；NVIDIA 用户本地
+  `node scripts/fetch-libtorch.mjs --cuda` 自建即可
 - 0.11.0 起 Windows / Linux 资产随 v0.11.1 补齐（macOS 不受影响）
 
 ## [0.11.0] — 2026-08-13

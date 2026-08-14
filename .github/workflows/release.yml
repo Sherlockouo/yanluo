@@ -26,9 +26,11 @@ jobs:
             libtorch: ""
           - platform: linux-x86_64
             os: ubuntu-22.04
-            # CUDA libtorch → NVIDIA GPU when drivers present; CPU fallback at load.
+            # CPU libtorch, same policy as Windows: a CUDA AppImage bundles the
+            # whole NVIDIA stack (cudnn/cublas/…) and blows past GitHub's 2GB
+            # per-asset limit. NVIDIA users: node scripts/fetch-libtorch.mjs --cuda
             args: --config src-tauri/tauri.linux.conf.json --features qwen-local --bundles deb,appimage
-            libtorch: cuda
+            libtorch: cpu
           - platform: windows-x86_64
             os: windows-latest
             # Official Win CUDA link needs full VS+CUDA toolkit; ship CPU libtorch.
