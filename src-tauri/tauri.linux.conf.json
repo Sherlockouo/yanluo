@@ -5,6 +5,9 @@
   "bundle": {
     "resources": {
       "libtorch/lib": "libtorch/lib"
+    },
+    "appimage": {
+      "bundleMediaFramework": false
     }
   }
 }

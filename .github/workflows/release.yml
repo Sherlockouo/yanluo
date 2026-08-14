@@ -217,7 +217,7 @@ jobs:
           LD_LIBRARY_PATH: ${{ env.LD_LIBRARY_PATH }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
           NO_STRIP: "true"
-        run: pnpm tauri build ${{ matrix.args }}
+        run: pnpm tauri build -v ${{ matrix.args }}
 
       - name: Embed Gatekeeper fix into macOS DMG
         if: runner.os == 'macOS'
