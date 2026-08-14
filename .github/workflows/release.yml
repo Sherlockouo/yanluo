@@ -115,8 +115,13 @@ jobs:
           node scripts/fetch-libtorch.mjs $EXTRA
           echo "LIBTORCH=${GITHUB_WORKSPACE}/src-tauri/libtorch" >> "$GITHUB_ENV"
           echo "LIBTORCH_BYPASS_VERSION_CHECK=1" >> "$GITHUB_ENV"
+          # linuxdeploy resolves the app's ELF deps via ldd/LD_LIBRARY_PATH;
+          # without libtorch's dir in it, AppImage bundling dies with
+          # "Could not find dependency: libtorch_cpu.so".
           if [[ -d /usr/local/cuda/lib64 ]]; then
-            echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+            echo "LD_LIBRARY_PATH=/usr/local/cuda/lib64:${GITHUB_WORKSPACE}/src-tauri/libtorch/lib" >> "$GITHUB_ENV"
+          else
+            echo "LD_LIBRARY_PATH=${GITHUB_WORKSPACE}/src-tauri/libtorch/lib" >> "$GITHUB_ENV"
           fi
 
       - name: Install CUDA toolkit (link CUDA libtorch)
