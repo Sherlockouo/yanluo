@@ -16,14 +16,15 @@ import { useEffect, useRef, useState } from "react";
  * size or cadence. Small bursts (user speaking slowly) drain at MIN_CPS, which
  * also matches their rhythm — burst sizes are auto-correlated with speech.
  *
- * Revisions are diff-aware: a segment commit re-decodes the whole sentence,
- * so its text almost always differs from the drip mid-flight by a few
- * characters near the tail. Snapping the whole line on every commit is what
- * makes later words "jump" after a fluent opening. Instead, keep the stable
- * prefix, snap only the changed region, and keep dripping the new tail.
- * Deep rewrites (beyond the drip tail — language relock, LLM refine) snap
- * wholesale; smoothing those would reshuffle the line anyway.
- * `prefers-reduced-motion`: target is returned unchanged.
+ * Revisions are diff-aware and forward-only — the display length never
+ * shrinks except in one decisive snap. A segment commit re-decodes the whole
+ * sentence, so its text almost always differs from the mid-drip partial by a
+ * few characters near the tail; the changed region swaps in place instantly
+ * (a correction should land, not re-drip — re-dripping reads as text flowing
+ * backwards), while any new growth past the current position keeps dripping
+ * at cadence pace. Net shrink (LLM refine trimming words) or deep rewrites
+ * (language relock) snap wholesale. `prefers-reduced-motion`: target is
+ * returned unchanged.
  */
 
 /** Inter-burst interval estimates are clamped before entering the EMA. */
@@ -136,23 +137,25 @@ export function useStreamingReveal(target: string, enabled: boolean): string {
       while (p < min && s.revealed.charCodeAt(p) === target.charCodeAt(p)) p++;
       p = skipLowSurrogate(target, p);
       const deepRewrite = p + REVISE_TAIL_CHARS < s.revealed.length;
-      if (deepRewrite) {
+      if (deepRewrite || target.length < s.revealed.length) {
+        // Net shrink (refine trimming) or deep rewrite: one decisive snap.
+        // Re-dripping a shorter line reads as text flowing backwards.
         snap(target);
         return;
       }
-      // Tail revision: keep the stable prefix, snap the changed region up to
-      // the divergence point, and keep dripping from there.
-      s.revealed = target.slice(0, p);
-      s.cursor = p;
+      // Tail revision, forward-only: swap the changed region in place up to
+      // the current display length (corrections land instantly; length never
+      // regresses), then keep dripping the new growth beyond it.
+      const keep = skipLowSurrogate(target, s.revealed.length);
+      s.revealed = target.slice(0, keep);
+      s.cursor = keep;
       setRevealed(s.revealed);
-      if (target.length > prevTarget.length) {
-        const now = performance.now() / 1000;
-        if (s.lastGrowthAt > 0) {
-          const sample = clamp(now - s.lastGrowthAt, MIN_INTERVAL, MAX_INTERVAL);
-          s.intervalEma += (sample - s.intervalEma) * EMA_ALPHA;
-        }
-        s.lastGrowthAt = now;
+      const now = performance.now() / 1000;
+      if (s.lastGrowthAt > 0) {
+        const sample = clamp(now - s.lastGrowthAt, MIN_INTERVAL, MAX_INTERVAL);
+        s.intervalEma += (sample - s.intervalEma) * EMA_ALPHA;
       }
+      s.lastGrowthAt = now;
       const backlog = target.length - s.revealed.length;
       if (backlog > 0) {
         s.cps = clamp(backlog / s.intervalEma, MIN_CPS, MAX_CPS);
