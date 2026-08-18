@@ -39,6 +39,13 @@ pub(crate) struct SegmentConfig {
     pub max_segment_samples: usize,
     /// Overlap into the next segment after a cut.
     pub overlap_samples: usize,
+    /// Audio kept *before* the detected speech onset when opening a segment.
+    /// Plosive onsets (声母爆破音 / word-initial plosives) ramp up over tens
+    /// of ms, so VAD triggers 1-3 frames late and clips the first consonant —
+    /// the classic "first word misrecognized" cause. Backing the open point
+    /// off keeps the attack transient in the decode window; the extra lead-in
+    /// silence is harmless to the encoder.
+    pub pre_roll_samples: usize,
 }
 
 impl Default for SegmentConfig {
@@ -56,6 +63,7 @@ impl Default for SegmentConfig {
             min_segment_samples: SAMPLE_RATE * 12 / 10,   // 1.2 s of speech
             max_segment_samples: SAMPLE_RATE * 90,        // 90 s hard cap
             overlap_samples: SAMPLE_RATE / 2,             // 500 ms
+            pre_roll_samples: SAMPLE_RATE * 16 / 100,     // 160 ms onset guard
         }
     }
 }
@@ -87,6 +95,7 @@ impl SegmentConfig {
             min_segment_samples: ms(min_segment_ms).max(1),
             max_segment_samples: ((max_segment_sec.max(5.0)) * SAMPLE_RATE as f64) as usize,
             overlap_samples: ms(overlap_ms),
+            pre_roll_samples: SAMPLE_RATE * 16 / 100,
         }
     }
 
@@ -430,7 +439,12 @@ impl SegmentClock {
 
         if self.seg_start.is_none() {
             if speech {
-                let start = abs_start.max(self.cursor);
+                // Pre-roll: keep the onset attack (plosives ramp over tens of
+                // ms before VAD fires) inside the segment window. Clamped to
+                // the cursor — can't reach before un-drained audio.
+                let start = abs_start
+                    .saturating_sub(self.cfg.pre_roll_samples)
+                    .max(self.cursor);
                 self.seg_start = Some(start);
                 self.silence_run = 0;
                 self.speech_in_seg = frame_len;
@@ -483,11 +497,17 @@ impl SegmentClock {
         self.speech_in_seg = 0;
     }
 
-    pub(crate) fn force_open(&mut self, start: usize) {
-        let start = start.max(self.cursor);
+    pub(crate) fn force_open(&mut self, start: usize) -> usize {
+        // Same onset pre-roll as a natural Open (clamped to undrained audio —
+        // post-commit the region before `start` may already be drained, in
+        // which case this degrades gracefully to no pre-roll).
+        let start = start
+            .saturating_sub(self.cfg.pre_roll_samples)
+            .max(self.cursor);
         self.seg_start = Some(start);
         self.silence_run = 0;
         self.speech_in_seg = 0;
+        start
     }
 
     pub(crate) fn next_start_after_cut(&self, end: usize) -> usize {
@@ -628,6 +648,7 @@ mod tests {
             min_silence_samples: 640,
             commit_hold_samples: 0,
             min_segment_samples: 320,
+            pre_roll_samples: 0,
             max_segment_samples: 16000 * 90,
             overlap_samples: 0,
         };
@@ -655,6 +676,7 @@ mod tests {
             min_silence_samples: 10_000,
             commit_hold_samples: 0,
             min_segment_samples: 320,
+            pre_roll_samples: 0,
             max_segment_samples: 960,
             overlap_samples: 0,
         };

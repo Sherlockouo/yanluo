@@ -1871,16 +1871,23 @@ pub(crate) mod apple_speech_ffi {
                     if let Err(e) = stream_append(&chunk) {
                         crate::elog::elog!("[asr] apple stream append: {e}");
                     }
-                    // After stream_append succeeds, notify so stop-side can wake early
-                    {
-                        let (lock, cvar) = &**crate::audio::audio_chunk_notify();
-                        if let Ok(mut ready) = lock.lock() {
-                            *ready = true;
+                }
+                // Event-driven: wake on the next captured chunk (process_chunk
+                // signals the condvar) instead of a fixed 40ms poll — cuts the
+                // average feed latency by ~20ms. Timeout keeps the loop honest
+                // if audio ever stalls.
+                {
+                    let (lock, cvar) = &**crate::audio::audio_chunk_notify();
+                    if let Ok(mut ready) = lock.lock() {
+                        if *ready {
+                            *ready = false;
+                        } else if let Ok((mut guard, _)) =
+                            cvar.wait_timeout(ready, std::time::Duration::from_millis(40))
+                        {
+                            *guard = false;
                         }
-                        cvar.notify_one();
                     }
                 }
-                std::thread::sleep(std::time::Duration::from_millis(40));
             }
             // Notify stop thread that pump has exited
             {
@@ -2942,11 +2949,25 @@ pub(crate) fn mlx_worker(
                                     committed: &str,
                                     active: &str,
                                     segment_index: usize| {
-                    let text = display_text(committed, active);
+                    // Vocabulary on partials too: deterministic 错词→正确
+                    // replacements are cheap (string pass) and users expect
+                    // the HUD to show corrected terms immediately, not after
+                    // commit/refine. Idempotent with the finalize pass.
+                    let vocabulary = app
+                        .state::<AsrEngine>()
+                        .inner()
+                        .config
+                        .lock()
+                        .ok()
+                        .map(|c| c.vocabulary.clone())
+                        .unwrap_or_default();
+                    let committed = apply_vocabulary(committed, &vocabulary);
+                    let active = apply_vocabulary(active, &vocabulary);
+                    let text = display_text(&committed, &active);
                     if text.is_empty() {
                         return;
                     }
-                    handle_asr_partial_ex(app, &text, committed, active, segment_index);
+                    handle_asr_partial_ex(app, &text, &committed, &active, segment_index);
                     tick_translate_stable(app);
                 };
 
