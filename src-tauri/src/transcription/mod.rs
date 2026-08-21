@@ -2124,7 +2124,7 @@ pub(crate) fn transcribe_file_samples(
             }
             Err(e) => {
                 let mut partial = TranscriptionResult {
-                    text: texts.join(join_sep_for_align_lang(&align_lang_owned)),
+                    text: join_file_chunks(&mut texts, &join_sep_for_align_lang(&align_lang_owned)),
                     raw_text: String::new(),
                     llm_text: None,
                     language,
@@ -2148,7 +2148,7 @@ pub(crate) fn transcribe_file_samples(
     }
 
     let join_sep = join_sep_for_align_lang(&align_lang_owned);
-    let text = texts.join(join_sep);
+    let text = join_file_chunks(&mut texts, join_sep);
     let mut result = TranscriptionResult {
         text: text.clone(),
         raw_text: text,
@@ -2253,6 +2253,220 @@ fn join_sep_for_align_lang(align_lang: &str) -> &'static str {
     } else {
         ""
     }
+}
+
+// ---------------------------------------------------------------------------
+// File-chunk boundary dedup
+//
+// Long files are split every 60s with a 0.8s overlap (FILE_CHUNK_SEC /
+// FILE_CHUNK_OVERLAP_SEC) so words straddling the cut are never lost. The
+// overlap audio is transcribed by BOTH neighbouring chunks, so a few words
+// of the previous chunk's tail reappear verbatim at the head of the next
+// chunk. Detect and strip that duplicated head (and the occasional truncated
+// trailing fragment, e.g. "understa" + "understand").
+// ---------------------------------------------------------------------------
+
+/// CJK ideographs (Han + kana + Hangul), strictly excluding CJK punctuation
+/// (0x3000–0x303F) so contiguous "word" runs never swallow a sentence-ending
+/// mark. Unlike [`is_cjk_char`] (used for word-splitting), this is for
+/// boundary-overlap matching where punctuation must not join runs.
+#[cfg(feature = "qwen-local")]
+fn is_cjk_ideograph(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x4E00..=0x9FFF | 0x3400..=0x4DBF | 0xF900..=0xFAFF | 0x3040..=0x30FF
+            | 0x31F0..=0x31FF | 0xAC00..=0xD7AF | 0x1100..=0x11FF
+    )
+}
+
+/// Punctuation that may attach to a word edge (compared after trimming).
+#[cfg(feature = "qwen-local")]
+fn is_edge_punct(c: char) -> bool {
+    c.is_ascii_punctuation()
+        || matches!(
+            c,
+            '，' | '。' | '！' | '？' | '、' | '；' | '：' | '…' | '—' | '（' | '）' | '《'
+                | '》' | '“' | '”' | '‘' | '’'
+        )
+}
+
+/// Byte ranges of whitespace-separated "words".
+#[cfg(feature = "qwen-local")]
+fn word_spans(s: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut start: Option<usize> = None;
+    for (i, c) in s.char_indices() {
+        if c.is_whitespace() {
+            if let Some(st) = start.take() {
+                spans.push((st, i));
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if let Some(st) = start {
+        spans.push((st, s.len()));
+    }
+    spans
+}
+
+/// Strip duplicated overlap text at one chunk boundary.
+///
+/// Returns the (possibly trimmed) `prev` and `next`. Two rules, in order:
+///
+/// 1. **Duplicate head** — the next chunk starts with words/chars that end
+///    the previous chunk (the re-transcribed 0.8s overlap). Matched at word
+///    level for Latin script (case/punctuation-insensitive, bounded by how
+///    much speech fits in the overlap) and at character level for CJK.
+/// 2. **Fragment absorption** — the previous chunk ends with a truncated
+///    word ("understa") that the next chunk completes ("understand");
+///    drop the fragment.
+///
+/// Conservative on purpose: a missed dedup leaves a visible double word, but
+/// a false match deletes real speech. Single short common words ("the",
+/// "的"…) never match alone; only exact repeats within the overlap bound do.
+#[cfg(feature = "qwen-local")]
+fn dedup_chunk_boundary(prev: &str, next: &str) -> (String, String) {
+    /// Max words of the duplicate head (~0.8s of English speech).
+    const MAX_LATIN_WORDS: usize = 3;
+    /// Max CJK chars of the duplicate head (~0.8s of Mandarin speech).
+    const MAX_CJK_CHARS: usize = 6;
+    /// A single-word match must be at least this long (chars, punctuation
+    /// excluded) to count — "the"/"and" alone are coincidence-prone.
+    const MIN_SINGLE_WORD_CHARS: usize = 4;
+    /// Min length of a truncated fragment to absorb ("understa" ≥ 4).
+    const MIN_FRAGMENT_CHARS: usize = 4;
+    /// Min CJK chars for a duplicate-head match ("的" alone never matches).
+    const MIN_CJK_MATCH: usize = 2;
+
+    let mut prev = prev.trim().to_string();
+    let mut next = next.trim().to_string();
+    if prev.is_empty() || next.is_empty() {
+        return (prev, next);
+    }
+
+    // --- Rule 1a: Latin word-level duplicate head ---
+    let prev_spans = word_spans(&prev);
+    let next_spans = word_spans(&next);
+    let norm = |s: &str| -> String {
+        s.trim_matches(is_edge_punct).to_lowercase()
+    };
+    let max_k = MAX_LATIN_WORDS
+        .min(prev_spans.len())
+        .min(next_spans.len());
+    'word_match: for k in (1..=max_k).rev() {
+        let mut single_len = usize::MAX;
+        for j in 0..k {
+            let (ps, pe) = prev_spans[prev_spans.len() - k + j];
+            let (qs, qe) = next_spans[j];
+            let p = norm(&prev[ps..pe]);
+            let q = norm(&next[qs..qe]);
+            if p.is_empty() || p != q {
+                continue 'word_match;
+            }
+            if j == 0 {
+                single_len = p.chars().count();
+            }
+        }
+        if k == 1 && single_len < MIN_SINGLE_WORD_CHARS {
+            continue 'word_match;
+        }
+        // Strip the first k words (incl. attached punctuation) from next.
+        let cut = next_spans[k - 1].1;
+        next = next[cut..].trim_start().to_string();
+        return (prev, next);
+    }
+
+    // --- Rule 1b: CJK char-level duplicate head ---
+    let pv: Vec<char> = prev.chars().collect();
+    let nv: Vec<char> = next.chars().collect();
+    // Trailing CJK run of prev, skipping trailing punctuation.
+    let mut pt = pv.len();
+    while pt > 0 && (is_edge_punct(pv[pt - 1]) || pv[pt - 1].is_whitespace()) {
+        pt -= 1;
+    }
+    let mut p_run = pt;
+    while p_run > 0 && is_cjk_ideograph(pv[p_run - 1]) {
+        p_run -= 1;
+    }
+    let prev_run = &pv[p_run..pt];
+    // Leading CJK run of next, skipping leading punctuation.
+    let mut ns = 0;
+    while ns < nv.len() && (is_edge_punct(nv[ns]) || nv[ns].is_whitespace()) {
+        ns += 1;
+    }
+    let mut ne = ns;
+    while ne < nv.len() && is_cjk_ideograph(nv[ne]) {
+        ne += 1;
+    }
+    let next_run = &nv[ns..ne];
+
+    let max_c = MAX_CJK_CHARS.min(prev_run.len()).min(next_run.len());
+    'cjk_match: for k in (MIN_CJK_MATCH..=max_c).rev() {
+        if prev_run[prev_run.len() - k..] != next_run[..k] {
+            continue 'cjk_match;
+        }
+        // Remove the first k CJK chars of next's run; punctuation that
+        // follows (e.g. the "，" of "测试，") carries sentence structure and
+        // is kept. If next also STARTED with punctuation, don't keep both.
+        let keep_prefix =
+            ns == 0 || !(ns + k < nv.len() && is_edge_punct(nv[ns + k]));
+        let mut merged: Vec<char> = Vec::with_capacity(nv.len() - k);
+        if keep_prefix {
+            merged.extend_from_slice(&nv[..ns]);
+        }
+        merged.extend_from_slice(&nv[ns + k..]);
+        next = merged.into_iter().collect::<String>().trim_start().to_string();
+        return (prev, next);
+    }
+
+    // --- Rule 2: truncated-fragment absorption (Latin) ---
+    if let (Some(&(ps, pe)), Some(&(qs, qe))) = (prev_spans.last(), next_spans.first()) {
+        let p = prev[ps..pe].trim_matches(is_edge_punct);
+        let q = next[qs..qe].trim_matches(is_edge_punct);
+        let pc = p.chars().count();
+        if pc >= MIN_FRAGMENT_CHARS
+            && q.chars().count() > pc
+            && q.to_lowercase().starts_with(&p.to_lowercase())
+        {
+            prev = prev[..ps].trim_end().to_string();
+        }
+    }
+
+    (prev, next)
+}
+
+/// Join per-chunk transcripts, deduplicating the 0.8s overlap at each
+/// boundary (see `dedup_chunk_boundary`).
+#[cfg(feature = "qwen-local")]
+fn join_file_chunks(texts: &mut Vec<String>, sep: &str) -> String {
+    for i in 1..texts.len() {
+        if texts[i].trim().is_empty() || texts[i - 1].trim().is_empty() {
+            continue;
+        }
+        let (prev, next) = dedup_chunk_boundary(&texts[i - 1], &texts[i]);
+        let stripped = texts[i].chars().count() - next.chars().count()
+            + (texts[i - 1].chars().count() - prev.chars().count());
+        if stripped > 0 {
+            crate::elog::elog!(
+                "[mlx-worker] chunk boundary #{}/{} dedup: {} chars of duplicated overlap text removed",
+                i + 1,
+                texts.len(),
+                stripped
+            );
+        }
+        texts[i - 1] = prev;
+        texts[i] = next;
+    }
+    texts.retain(|t| !t.trim().is_empty());
+    let mut out = String::new();
+    for (i, t) in texts.iter().enumerate() {
+        if i > 0 {
+            out.push_str(sep);
+        }
+        out.push_str(t.trim());
+    }
+    out
 }
 
 pub(crate) fn normalize_language_for_elevenlabs(language: &str) -> String {
@@ -2929,6 +3143,12 @@ pub(crate) fn mlx_worker(
                 let mut vad_fed = 0usize;
                 let mut seg_start: Option<usize> = None;
                 let mut last_partial_abs = 0usize;
+                // True when a VAD speech frame arrived since the last partial
+                // decode. Partials are skipped while it is false: decoding a
+                // growing silence tail makes Qwen hallucinate fillers / junk
+                // AFTER the user stops speaking, and those tokens get frozen
+                // into the rollback prefix that the final commit decodes from.
+                let mut speech_since_partial = true;
                 let mut committed_text = String::new();
                 let mut active_text = String::new();
                 let mut segment_index = 0usize;
@@ -3107,6 +3327,9 @@ pub(crate) fn mlx_worker(
                         }
                         let frame = &samples[rel..rel + frame_len];
                         let speech = vad.is_speech(frame);
+                        if speech {
+                            speech_since_partial = true;
+                        }
                         let events = clock.on_frame(vad_fed, frame_len, speech);
                         vad_fed += frame_len;
 
@@ -3309,6 +3532,17 @@ pub(crate) fn mlx_worker(
                         continue;
                     }
 
+                    // Silence guard: with no speech frame since the last
+                    // partial, the only new signal is the growing silence
+                    // tail. Decoding it invites hallucinated fillers/junk
+                    // AFTER the user stopped talking, and those tokens get
+                    // frozen into the rollback prefix the final commit
+                    // decodes from. Skip — the commit decode covers all
+                    // speech up to the VAD end-of-speech point.
+                    if !speech_since_partial {
+                        continue;
+                    }
+
                     if cancel_requested.load(Ordering::Acquire)
                         || !recording.load(Ordering::Acquire)
                     {
@@ -3319,6 +3553,7 @@ pub(crate) fn mlx_worker(
                     let seg_pcm = &samples[rel_start..];
                     partial_count += 1;
                     seg_partial_count += 1;
+                    speech_since_partial = false;
                     crate::elog::elog!(
                         "[mlx-worker] partial #{} seg#{}: {:.1}s window (+{:.1}s new)",
                         partial_count,
@@ -3567,12 +3802,21 @@ pub(crate) fn mlx_worker(
                 // (indices were rebased to hot-buffer absolute space).
                 if let Some(start) = seg_start.or_else(|| clock.active_start()) {
                     if start < remaining.len() {
+                        // Trim the trailing silence: the final window otherwise
+                        // ends wherever the user hit stop, and decoding the
+                        // silence tail after the last word is exactly what
+                        // hallucinates fillers/junk into the transcript.
+                        let end = clock
+                            .active_speech_end()
+                            .map(|e| e.min(remaining.len()))
+                            .filter(|e| *e > start)
+                            .unwrap_or(remaining.len());
                         let _ = commit_segment(
                             inf,
                             &mut stream_state,
                             &remaining,
                             start,
-                            remaining.len(),
+                            end,
                             &mut committed_text,
                             &mut active_text,
                             &mut last_language,
@@ -3949,6 +4193,208 @@ mod distill_term_tests {
         assert!(!accept_distill_term(
             "这是一段非常非常非常非常非常非常非常非常非常非常长的识别错误句子=短"
         ));
+    }
+}
+
+#[cfg(all(test, feature = "qwen-local"))]
+mod chunk_dedup_tests {
+    use super::{dedup_chunk_boundary, join_file_chunks};
+
+    #[test]
+    fn english_word_overlap_stripped() {
+        let (p, n) = dedup_chunk_boundary(
+            "We are currently trying to broaden that program.",
+            "that program. Yes, it works.",
+        );
+        assert_eq!(p, "We are currently trying to broaden that program.");
+        assert_eq!(n, "Yes, it works.");
+    }
+
+    #[test]
+    fn single_short_word_not_deduped() {
+        // "the" alone is coincidence-prone across a 60s boundary.
+        let (p, n) = dedup_chunk_boundary("this is the end of the", "the first thing");
+        assert_eq!(p, "this is the end of the");
+        assert_eq!(n, "the first thing");
+    }
+
+    #[test]
+    fn single_long_word_deduped() {
+        let (p, n) = dedup_chunk_boundary("deploy it with Docker", "Docker containers are up");
+        assert_eq!(p, "deploy it with Docker");
+        assert_eq!(n, "containers are up");
+    }
+
+    #[test]
+    fn cjk_char_overlap_stripped_keeps_punct() {
+        let (p, n) = dedup_chunk_boundary("你好，这是持续集成测试", "测试，现在开始新的段落。");
+        assert_eq!(p, "你好，这是持续集成测试");
+        assert_eq!(n, "，现在开始新的段落。");
+    }
+
+    #[test]
+    fn cjk_single_char_never_deduped() {
+        let (p, n) = dedup_chunk_boundary("这里的的", "的用法很重要");
+        assert_eq!(p, "这里的的");
+        assert_eq!(n, "的用法很重要");
+    }
+
+    #[test]
+    fn truncated_fragment_absorbed() {
+        let (p, n) = dedup_chunk_boundary("we under", "understand the flow now");
+        // "under" (5 chars) is a proper prefix of "understand" → drop it from
+        // prev; the full word comes from the next chunk.
+        assert_eq!(p, "we");
+        assert_eq!(n, "understand the flow now");
+    }
+
+    #[test]
+    fn short_common_word_not_absorbed() {
+        // "the" is a prefix of "therefore" but dropping it would lose speech.
+        let (p, n) = dedup_chunk_boundary("what about the", "therefore we agreed");
+        assert_eq!(p, "what about the");
+        assert_eq!(n, "therefore we agreed");
+    }
+
+    #[test]
+    fn unrelated_texts_untouched() {
+        let (p, n) = dedup_chunk_boundary("first chunk ends here.", "Second chunk begins.");
+        assert_eq!(p, "first chunk ends here.");
+        assert_eq!(n, "Second chunk begins.");
+    }
+
+    #[test]
+    fn join_file_chunks_dedups_each_boundary() {
+        let mut texts = vec![
+            "we broaden that program.".to_string(),
+            "that program. Yes it works".to_string(),
+            "it works and ships".to_string(),
+        ];
+        assert_eq!(
+            join_file_chunks(&mut texts, " "),
+            "we broaden that program. Yes it works and ships"
+        );
+    }
+
+    #[test]
+    fn join_file_chunks_cjk_no_separator() {
+        let mut texts = vec![
+            "你好，这是持续集成测试".to_string(),
+            "测试，现在开始新的段落。".to_string(),
+        ];
+        assert_eq!(
+            join_file_chunks(&mut texts, ""),
+            "你好，这是持续集成测试，现在开始新的段落。"
+        );
+    }
+
+    #[test]
+    fn join_file_chunks_drops_chunk_emptied_by_dedup() {
+        let mut texts = vec![
+            "the deployment used Docker".to_string(),
+            "Docker".to_string(),
+            "and Kubernetes later".to_string(),
+        ];
+        assert_eq!(
+            join_file_chunks(&mut texts, " "),
+            "the deployment used Docker and Kubernetes later"
+        );
+    }
+}
+
+/// Real-model e2e for the 60s file-chunking + boundary dedup path.
+/// Ignored by default (needs the model weights). Run:
+///
+/// ```bash
+/// cd asr-cli/src-tauri
+/// ASR_TEST_MODEL_DIR=../../qwen3_asr_rs/Qwen3-ASR-0.6B \
+///   cargo test --features qwen-local --lib file_chunk_e2e -- --ignored --nocapture
+/// ```
+///
+/// Builds ~96s of audio by alternating sample1/sample2 with 0.9s gaps,
+/// arranged so a word straddles the 60s chunk cut (a sample2 starts at
+/// 59.3s). The 0.8s overlap audio is transcribed by both chunks; asserts
+/// the join contains exactly one copy of each spoken sentence and no
+/// adjacent duplicated words.
+#[cfg(all(test, feature = "qwen-local"))]
+mod file_chunk_e2e {
+    use super::{init_local_asr_backend, load_asr_inference, transcribe_file_samples};
+
+    fn test_wav(name: &str) -> Vec<f32> {
+        let p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../qwen3_asr_rs/test_audio")
+            .join(name);
+        crate::audio::read_wav_as_f32_mono_16k(&p)
+            .unwrap_or_else(|e| panic!("read {name}: {e}"))
+    }
+
+    fn adjacent_duplicate_words(text: &str) -> Option<String> {
+        let clean = |w: &str| {
+            w.trim_matches(|c: char| c.is_ascii_punctuation() || "，。！？、；：".contains(c))
+                .to_lowercase()
+        };
+        let words: Vec<String> = text.split_whitespace().map(clean).collect();
+        for w in words.windows(2) {
+            if !w[0].is_empty() && w[0] == w[1] {
+                return Some(format!("{} {}", w[0], w[1]));
+            }
+        }
+        None
+    }
+
+    #[test]
+    #[ignore]
+    fn long_file_chunk_join_has_no_boundary_duplication() {
+        let model_dir = std::env::var("ASR_TEST_MODEL_DIR")
+            .unwrap_or_else(|_| "../../qwen3_asr_rs/Qwen3-ASR-0.6B".to_string());
+        if !std::path::Path::new(&model_dir).join("model.safetensors").exists() {
+            panic!("model not found at {model_dir}; set ASR_TEST_MODEL_DIR");
+        }
+
+        let s1 = test_wav("sample1.wav"); // 8.0s "Thank you for your contribution..."
+        let s2 = test_wav("sample2.wav"); // 2.8s "The quick brown fox..."
+        let gap = vec![0f32; 14_400]; // 0.9s silence
+        // s1,s2 ×7 + final s1; sample2 lands at 59.3s → straddles the 60s cut.
+        let mut samples = Vec::new();
+        for i in 0..15 {
+            let src = if i % 2 == 0 { &s1 } else { &s2 };
+            samples.extend_from_slice(src);
+            samples.extend_from_slice(&gap);
+        }
+        let total_secs = samples.len() as f64 / 16_000.0;
+        assert!(total_secs > 60.0, "need >60s to trigger chunking, got {total_secs:.1}s");
+
+        let mut inference = {
+            init_local_asr_backend();
+            load_asr_inference(std::path::Path::new(&model_dir)).expect("load model")
+        };
+        let mut aligner = None;
+        let result = transcribe_file_samples(
+            &mut inference,
+            &mut aligner,
+            &samples,
+            None,
+            "English",
+            "English",
+        );
+
+        assert!(result.error.is_none(), "chunk error: {:?}", result.error);
+        println!("joined ({}s audio):\n{}", total_secs, result.text);
+
+        // Exactly one copy per spoken sentence: 8×sample1, 7×sample2.
+        assert_eq!(
+            result.text.matches("contribution to the most recent").count(),
+            8,
+            "sample1 duplicated or lost at a chunk boundary"
+        );
+        assert_eq!(
+            result.text.matches("quick brown fox").count(),
+            7,
+            "sample2 duplicated or lost at a chunk boundary"
+        );
+        if let Some(dup) = adjacent_duplicate_words(&result.text) {
+            panic!("adjacent duplicated words at a chunk boundary: {dup}");
+        }
     }
 }
 

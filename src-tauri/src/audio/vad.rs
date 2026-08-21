@@ -403,6 +403,11 @@ pub(crate) struct SegmentClock {
     silence_run: usize,
     /// Samples classified as speech since segment open (for min_segment).
     speech_in_seg: usize,
+    /// Absolute end of the last speech frame inside the active segment —
+    /// where trailing silence starts. Lets callers trim the silence tail
+    /// before a final decode (decoding trailing silence makes Qwen3-ASR
+    /// hallucinate fillers/junk after the last word).
+    speech_end: usize,
     /// Absolute end of last committed/hard-cut segment (exclusive).
     cursor: usize,
 }
@@ -414,6 +419,7 @@ impl SegmentClock {
             seg_start: None,
             silence_run: 0,
             speech_in_seg: 0,
+            speech_end: 0,
             cursor: 0,
         }
     }
@@ -425,6 +431,13 @@ impl SegmentClock {
 
     pub(crate) fn active_start(&self) -> Option<usize> {
         self.seg_start
+    }
+
+    /// End of the last speech frame inside the active segment (absolute),
+    /// i.e. where the trailing silence starts. None when no segment is open.
+    /// For a force-opened segment with no speech yet this equals the start.
+    pub(crate) fn active_speech_end(&self) -> Option<usize> {
+        self.seg_start.map(|start| self.speech_end.max(start))
     }
 
     /// Feed one frame starting at `abs_start` with length `frame_len`.
@@ -448,6 +461,7 @@ impl SegmentClock {
                 self.seg_start = Some(start);
                 self.silence_run = 0;
                 self.speech_in_seg = frame_len;
+                self.speech_end = abs_end;
                 out.push(SegmentEvent::Open {
                     start_sample: start,
                 });
@@ -461,6 +475,7 @@ impl SegmentClock {
         if speech {
             self.silence_run = 0;
             self.speech_in_seg = self.speech_in_seg.saturating_add(frame_len);
+            self.speech_end = abs_end;
         } else {
             self.silence_run = self.silence_run.saturating_add(frame_len);
         }
@@ -495,6 +510,7 @@ impl SegmentClock {
         self.seg_start = None;
         self.silence_run = 0;
         self.speech_in_seg = 0;
+        self.speech_end = 0;
     }
 
     pub(crate) fn force_open(&mut self, start: usize) -> usize {
@@ -507,6 +523,7 @@ impl SegmentClock {
         self.seg_start = Some(start);
         self.silence_run = 0;
         self.speech_in_seg = 0;
+        self.speech_end = start;
         start
     }
 
@@ -520,6 +537,7 @@ impl SegmentClock {
             return;
         }
         self.cursor = self.cursor.saturating_sub(dropped);
+        self.speech_end = self.speech_end.saturating_sub(dropped);
         if let Some(s) = self.seg_start.as_mut() {
             *s = s.saturating_sub(dropped);
         }
@@ -665,6 +683,39 @@ mod tests {
             events.last(),
             Some(SegmentEvent::Commit { end_sample: 640 })
         ));
+    }
+
+    #[test]
+    fn active_speech_end_tracks_last_speech_frame() {
+        let cfg = SegmentConfig {
+            frame_samples: 320,
+            energy_enter: 0.01,
+            energy_exit: 0.004,
+            min_silence_samples: 10_000, // no commit during the test
+            commit_hold_samples: 0,
+            min_segment_samples: 320,
+            pre_roll_samples: 0,
+            max_segment_samples: 16000 * 90,
+            overlap_samples: 0,
+        };
+        let mut clock = SegmentClock::new(cfg);
+        assert_eq!(clock.active_speech_end(), None);
+
+        // speech [0, 960), silence [960, 1920): speech end = 960.
+        clock.on_frame(0, 320, true);
+        clock.on_frame(320, 320, true);
+        clock.on_frame(640, 320, true);
+        clock.on_frame(960, 320, false);
+        clock.on_frame(1280, 320, false);
+        assert_eq!(clock.active_speech_end(), Some(960));
+
+        // Speech resumes → end moves.
+        clock.on_frame(1600, 320, true);
+        assert_eq!(clock.active_speech_end(), Some(1920));
+
+        // Rebase after draining [0..1000): indices shift down by 1000.
+        clock.rebase(1000);
+        assert_eq!(clock.active_speech_end(), Some(920));
     }
 
     #[test]
