@@ -18,7 +18,7 @@ export const settings: Record<string, string> = {
   "settings.sub.permissions": "权限",
 
   // Section description lines
-  "settings.tabDesc.general": "语言、录音源与外观。各页自行保存。",
+  "settings.tabDesc.general": "语言、录音源与外观。修改后自动保存。",
   "settings.tabDesc.asr": "识别引擎、型号与逐字对齐。",
   "settings.tabDesc.polish": "服务商配置、纠错学习与词库。",
   "settings.tabDesc.agent": "内置 Claude · Codex · Pi，选一个作为默认派活 Agent。",

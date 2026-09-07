@@ -18,7 +18,7 @@ export const settings: Record<string, string> = {
   "settings.sub.permissions": "Permissions",
 
   // Section description lines
-  "settings.tabDesc.general": "Language, audio source, and appearance. Each panel saves on its own.",
+  "settings.tabDesc.general": "Language, audio source, and appearance. Changes save automatically.",
   "settings.tabDesc.asr": "Recognition engine, model, and word-level alignment.",
   "settings.tabDesc.polish": "Provider setup, corrections, and vocabulary.",
   "settings.tabDesc.agent": "Built-in Claude · Codex · Pi — pick one as the default dispatch agent.",

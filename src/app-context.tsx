@@ -524,20 +524,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Debounce config persistence refs
   const configSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const configInitializedRef = useRef(false);
-  const justSavedRef = useRef(false);
+  const lastSavedConfigRef = useRef("");
   const latestConfigRef = useRef(config);
 
   const saveConfig = useCallback(
     async (next = config, opts?: { silent?: boolean }) => {
       await invoke("save_app_config", { config: next });
       setConfig(next);
-      justSavedRef.current = true;
+      lastSavedConfigRef.current = JSON.stringify(next);
       if (!opts?.silent) toast.success(tRef.current("toast.configSaved"));
     },
     [config],
   );
 
-  // Debounce config persistence: write to disk ~1s after last config change.
+  // Settings are auto-saved. A short debounce coalesces multi-field clicks and
+  // avoids rewriting the config once per keystroke while still feeling immediate.
   useEffect(() => {
     latestConfigRef.current = config;
     if (!configInitializedRef.current) {
@@ -546,14 +547,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     if (configSaveTimerRef.current) clearTimeout(configSaveTimerRef.current);
     configSaveTimerRef.current = setTimeout(() => {
-      if (justSavedRef.current) {
-        justSavedRef.current = false;
+      const snapshot = JSON.stringify(config);
+      if (lastSavedConfigRef.current === snapshot) {
+        lastSavedConfigRef.current = "";
         return;
       }
-      invoke("save_app_config", { config }).catch((e: unknown) =>
-        console.warn("[config] debounced save failed:", e)
-      );
-    }, 1000);
+      invoke("save_app_config", { config }).catch((error: unknown) => {
+        console.error("[config] auto-save failed:", error);
+        toast.danger(
+          tRef.current("toast.configSaveFailed", {
+            error: lookupRustMsg(String(error), tRef.current),
+          }),
+        );
+      });
+    }, 150);
     return () => {
       if (configSaveTimerRef.current) clearTimeout(configSaveTimerRef.current);
     };

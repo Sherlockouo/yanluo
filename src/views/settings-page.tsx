@@ -43,7 +43,6 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
-  Save,
   Shield,
   SlidersHorizontal,
   Sparkles,
@@ -676,7 +675,7 @@ function SystemPanel({
 }
 
 function AsrProviderPanel() {
-  const { config, updateConfig, saveConfig, chooseModelDir, loadModel, modelLoaded, modelLoading } =
+  const { config, updateConfig, chooseModelDir, loadModel, modelLoaded, modelLoading } =
     useApp();
   const t = useT();
   const [appleAvailable, setAppleAvailable] = useState(true);
@@ -686,10 +685,6 @@ function AsrProviderPanel() {
   const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
   const [downloadAligner, setDownloadAligner] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-
-  // Dirty detection: snapshot config on mount and after save
-  const configSnapshotRef = useRef(JSON.stringify(config));
-  const isDirty = JSON.stringify(config) !== configSnapshotRef.current;
 
   useEffect(() => {
     void invoke<AppInfo>("get_app_info")
@@ -1008,8 +1003,8 @@ function AsrProviderPanel() {
         </Reveal>
       ) : null}
 
-      <div className="form-actions">
-        {isQwen && !needsDownload ? (
+      {isQwen && !needsDownload ? (
+        <div className="form-actions">
           <div className="form-actions-secondary flex gap-2">
             <Button
               size="sm"
@@ -1030,23 +1025,8 @@ function AsrProviderPanel() {
               {modelLoaded ? t("settings.asr.reload") : t("settings.asr.loadModel")}
             </Button>
           </div>
-        ) : null}
-        <Button
-          className="form-actions-primary btn-press"
-          fullWidth
-          variant={isQwen && !needsDownload && !modelLoaded ? "secondary" : "primary"}
-          isDisabled={!isDirty}
-          onPress={() => {
-            void saveConfig(config, { silent: true }).then(() => {
-              configSnapshotRef.current = JSON.stringify(config);
-              toast.success(t("common.saved"));
-            });
-          }}
-        >
-          <Save size={16} />
-          {t("common.save")}
-        </Button>
-      </div>
+        </div>
+      ) : null}
       {isQwen && !needsDownload && !modelLoaded ? (
         <p className="type-meta text-warning">{t("settings.asr.notLoadedWarning")}</p>
       ) : null}
@@ -1426,11 +1406,6 @@ function LlmProviderPanel() {
     setOpenId(id);
   };
 
-  const save = () => {
-    void saveConfig();
-    toast.success(t("common.saved"));
-  };
-
   return (
     <div className="flex flex-col gap-8">
       <div className="set-lines">
@@ -1546,7 +1521,6 @@ function LlmProviderPanel() {
                     config={config}
                     onPatch={(patch) => patchCreds(p.id, patch)}
                     onActivate={() => activate(p.id)}
-                    onSave={save}
                     onReset={() => resetBuiltin(p.id)}
                     onDelete={() => deleteCustom(p.id)}
                   />
@@ -1584,7 +1558,7 @@ function LlmProviderPanel() {
 
 /** 翻译 Prompt — 从出稿-翻译 tab 收敛至此 (v3.1: 使用处只留选择, 编辑在设置). */
 function TranslatePromptSection() {
-  const { config, updateConfig, saveConfig } = useApp();
+  const { config, updateConfig } = useApp();
   const t = useT();
   const translateValue =
     config.llm_translate_prompt || DEFAULT_LLM_TRANSLATE_PROMPT;
@@ -1612,7 +1586,7 @@ function TranslatePromptSection() {
           })}
         />
       </TextField>
-      <div className="flex items-center justify-end gap-2">
+      <div className="flex items-center justify-end">
         <Button
           size="sm"
           variant="ghost"
@@ -1620,18 +1594,6 @@ function TranslatePromptSection() {
         >
           <RotateCcw size={14} />
           {t("common.restoreDefault")}
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="btn-press"
-          onPress={() => {
-            void saveConfig();
-            toast.success(t("common.saved"));
-          }}
-        >
-          <Save size={14} />
-          {t("common.save")}
         </Button>
       </div>
     </section>
@@ -1645,7 +1607,6 @@ function ProviderEditor({
   config,
   onPatch,
   onActivate,
-  onSave,
   onReset,
   onDelete,
 }: {
@@ -1655,7 +1616,6 @@ function ProviderEditor({
   config: ReturnType<typeof useApp>["config"];
   onPatch: (patch: Partial<LlmCredential>) => void;
   onActivate: () => void;
-  onSave: () => void;
   onReset: () => void;
   onDelete: () => void;
 }) {
@@ -1775,8 +1735,7 @@ function ProviderEditor({
         <p className="type-meta">{t("settings.llm.fewShotHint")}</p>
       </div>
 
-      <div className="form-actions">
-        <div className="form-actions-secondary flex gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
           {!isCurrent ? (
             <Button size="sm" variant="secondary" onPress={onActivate}>
               {t("settings.llm.setCurrent")}
@@ -1799,23 +1758,13 @@ function ProviderEditor({
                 ? t("common.confirmDelete")
                 : t("common.delete")}
           </Button>
-        </div>
-        <Button
-          className="form-actions-primary btn-press"
-          fullWidth
-          variant="primary"
-          onPress={onSave}
-        >
-          <Save size={16} />
-          {t("common.save")}
-        </Button>
       </div>
     </div>
   );
 }
 
 function GeneralPanel() {
-  const { config, updateConfig, theme, setTheme, saveConfig } = useApp();
+  const { config, updateConfig, theme, setTheme } = useApp();
   const { locale, setLocale, t } = useI18n();
   const langOptions = asrLanguageOptions(config.extra_languages);
   const addable = addableLanguageCatalog(config.extra_languages);
@@ -2122,21 +2071,6 @@ function GeneralPanel() {
         </div>
       </div>
 
-      <div className="form-actions">
-        <Button
-          className="form-actions-primary btn-press"
-          fullWidth
-          variant="primary"
-          onPress={() => {
-            void saveConfig(config, { silent: true }).then(() =>
-              toast.success(t("common.saved")),
-            );
-          }}
-        >
-          <Save size={16} />
-          {t("common.save")}
-        </Button>
-      </div>
     </div>
   );
 }
@@ -2445,21 +2379,6 @@ function HotkeysPanel() {
         </Button>
       </div>
 
-      <div className="form-actions">
-        <Button
-          className="form-actions-primary btn-press"
-          fullWidth
-          variant="primary"
-          onPress={() => {
-            void saveConfig(config, { silent: true }).then(() =>
-              toast.success(t("common.saved")),
-            );
-          }}
-        >
-          <Save size={16} />
-          {t("common.save")}
-        </Button>
-      </div>
     </SectionCard>
   );
 }
@@ -3220,21 +3139,6 @@ function AgentPanel() {
         </SectionCard>
         </Reveal>
       ) : null}
-
-      <Reveal index={3}>
-      <div className="form-actions">
-        <Button
-          className="form-actions-primary btn-press"
-          fullWidth
-          variant="primary"
-          onPress={() => void saveConfig()}
-        >
-          <Save size={16} />
-          {t("common.save")}
-        </Button>
-      </div>
-      </Reveal>
     </div>
   );
 }
-

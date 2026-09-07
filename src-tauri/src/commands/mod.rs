@@ -970,6 +970,21 @@ pub(crate) struct LearnFromHudPayload {
     pub(crate) learned_pairs: Vec<LearnedPairInfo>,
 }
 
+fn confirm_hide_delay(paste_failed: bool) -> Option<std::time::Duration> {
+    paste_failed.then(|| std::time::Duration::from_secs(3))
+}
+
+#[cfg(test)]
+mod hud_confirm_tests {
+    use super::confirm_hide_delay;
+
+    #[test]
+    fn successful_confirm_hides_immediately() {
+        assert_eq!(confirm_hide_delay(false), None);
+        assert_eq!(confirm_hide_delay(true).map(|delay| delay.as_secs()), Some(3));
+    }
+}
+
 /// Confirm Fn/⇧Fn HUD edit: paste → history → optional learn → hide.
 #[tauri::command]
 pub(crate) fn confirm_floating_transcript(
@@ -1083,18 +1098,15 @@ pub(crate) fn confirm_floating_transcript(
             "hud-confirm-error",
             serde_json::json!({"error": "粘贴失败，文字已在剪贴板"}),
         );
+    }
+    if let Some(delay) = confirm_hide_delay(paste_failed) {
         let app_hide = app.clone();
         std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(3000));
+            std::thread::sleep(delay);
             emit_floating_status(&app_hide, false, "idle", "", 0.0);
         });
     } else {
-        // Flash success (FE plays .hud-capsule-confirm-success), then hide after 300ms.
-        let app_hide = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            emit_floating_status(&app_hide, false, "idle", "", 0.0);
-        });
+        emit_floating_status(&app, false, "idle", "", 0.0);
     }
     let _ = app.emit("transcription-result", &result);
     Ok(())

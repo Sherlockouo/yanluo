@@ -127,13 +127,11 @@ fn emit_hud_skip_or_confirm(app: &AppHandle) -> bool {
         // Fn consumed by HUD interaction — no session will start.
         crate::audio::discard_speculative_mic();
         let _ = app.emit_to("floating", "hud-confirm-request", ());
-        let _ = app.emit("hud-confirm-request", ());
         return true;
     }
     if hud_skip_pipeline(app) {
         crate::audio::discard_speculative_mic();
         let _ = app.emit_to("floating", "hud-accept-preview-request", ());
-        let _ = app.emit("hud-accept-preview-request", ());
         return true;
     }
     false
