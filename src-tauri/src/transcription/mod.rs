@@ -1273,6 +1273,30 @@ pub(crate) fn list_fewshot_cases(app: &AppHandle) -> Vec<FewShotCaseInfo> {
     with_user
 }
 
+fn paste_immediate_result(
+    app: &AppHandle,
+    result: &TranscriptionResult,
+    source: &str,
+    media_kind: &str,
+) -> Option<bool> {
+    match inject_text_via_paste_on_main(app, &result.text) {
+        Ok(()) => crate::elog::elog!(
+            "[paste] immediate accept {} chars mode={source}",
+            result.text.chars().count()
+        ),
+        Err(e) => {
+            crate::elog::elog!("[paste] immediate accept failed: {e}");
+            let _ = app.emit(
+                "partial-error",
+                format!("已写入剪切板，但粘贴失败（请检查辅助功能权限）: {e}"),
+            );
+        }
+    }
+    emit_floating_status(app, false, "idle", "", 0.0);
+    append_history(app, result, source, None, media_kind);
+    Some(false)
+}
+
 pub(crate) fn finalize_successful_result(
     app: &AppHandle,
     gen: u64,
@@ -1285,9 +1309,10 @@ pub(crate) fn finalize_successful_result(
     let is_transcribe = source == "transcribe";
     let is_translate = source == "translate";
     let is_agent = source == "agent";
+    let engine = app.state::<AsrEngine>();
+    let take_accept = || take_immediate_accept(&engine.inner().immediate_accept_requested);
 
-    let config = app
-        .state::<AsrEngine>()
+    let config = engine
         .inner()
         .config
         .lock()
@@ -1317,6 +1342,12 @@ pub(crate) fn finalize_successful_result(
         crate::elog::elog!("[asr] finalize aborted before paste (gen={gen})");
         return None;
     }
+    if source == "fn"
+        && !result.text.trim().is_empty()
+        && take_accept()
+    {
+        return paste_immediate_result(app, result, &source, media_kind);
+    }
 
     // Fn: optional LLM 纠错 after vocab. Translate has its own stream; agent stays raw for edit.
     // Skip polish entirely when disabled or credentials incomplete — go straight to HUD editing.
@@ -1341,6 +1372,11 @@ pub(crate) fn finalize_successful_result(
         std::thread::spawn(move || {
             let r = refine_transcript_with_cases_abortable(&cfg_clone, &blm, &fewshot, || {
                 AsrEngine::finalize_aborted(&app_handle, gen)
+                    || app_handle
+                        .state::<AsrEngine>()
+                        .inner()
+                        .immediate_accept_requested
+                        .load(Ordering::Acquire)
             });
             let _ = tx.send(r);
         });
@@ -1364,6 +1400,11 @@ pub(crate) fn finalize_successful_result(
             }
             Ok(Err(e)) if e == "aborted" => {
                 crate::elog::elog!("[llm] fn refine aborted (gen={gen})");
+                if !AsrEngine::finalize_aborted(app, gen)
+                    && take_accept()
+                {
+                    return paste_immediate_result(app, result, &source, media_kind);
+                }
                 return None;
             }
             Ok(Err(e)) => {
@@ -1416,6 +1457,13 @@ pub(crate) fn finalize_successful_result(
                 result.text.chars().count()
             );
         }
+    }
+
+    if is_translate
+        && !result.text.trim().is_empty()
+        && take_accept()
+    {
+        return paste_immediate_result(app, result, &source, media_kind);
     }
 
     if AsrEngine::finalize_aborted(app, gen) {
@@ -1490,6 +1538,9 @@ pub(crate) fn finalize_successful_result(
         if result.raw_text.trim().is_empty() {
             result.raw_text = result.text.clone();
         }
+    }
+    if take_accept() {
+        return paste_immediate_result(app, result, &source, media_kind);
     }
     let shown_text = result.text.clone();
     AsrEngine::set_pending_hud_confirm(

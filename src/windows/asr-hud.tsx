@@ -676,23 +676,6 @@ export function AsrHud() {
       }),
     );
     add(
-      listen("hud-accept-preview-request", () => {
-        const p = payloadRef.current;
-        const text =
-          p.text?.trim() ||
-          [p.committed, p.active]
-            .map((s) => (s ?? "").trim())
-            .filter(Boolean)
-            .join(" ") ||
-          "";
-        void invoke("accept_floating_preview", {
-          text: text || null,
-        }).catch((e) => {
-          console.error("[hud] accept preview failed", e);
-        });
-      }),
-    );
-    add(
       listen("hud-cancel-request", () => {
         void cancelTranscript();
       }),

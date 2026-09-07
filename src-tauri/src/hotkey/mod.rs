@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 use crate::hud::{
     close_floating_lang_menu, emit_floating_status, floating_lang_menu_is_open,
-    floating_status_slot,
+    floating_status_slot, set_floating_window_visible,
 };
 use crate::state::*;
 use crate::config::*;
@@ -84,6 +84,13 @@ fn cancel_hotkey_is_actionable(app: &AppHandle) -> bool {
         if AsrEngine::has_pending_hud_confirm(app) {
             return true;
         }
+        if engine
+            .inner()
+            .immediate_accept_requested
+            .load(Ordering::Acquire)
+        {
+            return true;
+        }
     }
     floating_status_slot(app)
         .lock()
@@ -111,15 +118,16 @@ fn hud_confirm_editing(app: &AppHandle) -> bool {
 }
 
 /// Spinner mid-state (LLM refine / finalize): Fn accepts HUD text now.
-fn hud_skip_pipeline(app: &AppHandle) -> bool {
+fn hud_skip_pipeline_text(app: &AppHandle) -> Option<String> {
     floating_status_slot(app)
         .lock()
-        .map(|s| {
-            s.visible
+        .ok()
+        .and_then(|s| {
+            (s.visible
                 && matches!(s.state.as_str(), "refining" | "processing")
-                && s.intention.as_deref() != Some("agent")
+                && s.intention.as_deref() != Some("agent"))
+                .then(|| s.text.clone())
         })
-        .unwrap_or(false)
 }
 
 fn emit_hud_skip_or_confirm(app: &AppHandle) -> bool {
@@ -129,9 +137,27 @@ fn emit_hud_skip_or_confirm(app: &AppHandle) -> bool {
         let _ = app.emit_to("floating", "hud-confirm-request", ());
         return true;
     }
-    if hud_skip_pipeline(app) {
+    if let Some(text) = hud_skip_pipeline_text(app) {
         crate::audio::discard_speculative_mic();
-        let _ = app.emit_to("floating", "hud-accept-preview-request", ());
+        if let Some(engine) = app.try_state::<AsrEngine>() {
+            engine
+                .inner()
+                .immediate_accept_requested
+                .store(true, Ordering::Release);
+        }
+        if let Ok(mut slot) = floating_status_slot(app).lock() {
+            slot.visible = false;
+        }
+        set_floating_window_visible(app, false);
+        if !text.trim().is_empty() {
+            let app = app.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = crate::commands::accept_requested_preview(app, text)
+                {
+                    crate::elog::elog!("[asr] immediate preview accept failed: {e}");
+                }
+            });
+        }
         return true;
     }
     false

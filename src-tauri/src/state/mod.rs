@@ -41,9 +41,20 @@ pub(crate) enum WorkerCommand {
     },
 }
 
+pub(crate) fn take_immediate_accept(requested: &AtomicBool) -> bool {
+    requested.swap(false, Ordering::AcqRel)
+}
+
+pub(crate) fn reserve_recording(recording: &AtomicBool) -> bool {
+    recording
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_ok()
+}
+
 #[cfg(test)]
 mod worker_command_tests {
-    use super::WorkerCommand;
+    use super::{reserve_recording, take_immediate_accept, WorkerCommand};
+    use std::sync::atomic::AtomicBool;
 
     #[test]
     fn streaming_command_keeps_generation_from_recording_start() {
@@ -58,6 +69,20 @@ mod worker_command_tests {
         };
         assert_eq!(finalize_gen, 42);
         assert_ne!(finalize_gen, 43, "a later cancel generation must stay stale");
+    }
+
+    #[test]
+    fn quick_second_fn_skips_editing_once() {
+        let requested = AtomicBool::new(true);
+        assert!(take_immediate_accept(&requested));
+        assert!(!take_immediate_accept(&requested));
+    }
+
+    #[test]
+    fn rapid_fn_reserves_only_one_recording_start() {
+        let recording = AtomicBool::new(false);
+        assert!(reserve_recording(&recording));
+        assert!(!reserve_recording(&recording));
     }
 }
 
@@ -88,6 +113,8 @@ pub struct AsrEngine {
     pub(crate) learn_state: LearnState,
     /// Bumped on start/cancel. Finalize captures gen; stale gen = aborted mid-pipeline.
     pub(crate) finalize_gen: Arc<AtomicU64>,
+    /// Fn pressed while final text is not ready: paste the result without opening editing.
+    pub(crate) immediate_accept_requested: AtomicBool,
     pub(crate) model_loaded: Arc<AtomicBool>,
     /// Channel to the MLX worker thread.
     pub(crate) worker_tx: Mutex<Sender<WorkerCommand>>,
@@ -152,6 +179,7 @@ impl AsrEngine {
             recording,
             cancel_requested,
             finalize_gen,
+            immediate_accept_requested: AtomicBool::new(false),
             model_loaded,
             worker_tx: Mutex::new(tx),
             config: Mutex::new(config),

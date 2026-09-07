@@ -677,11 +677,20 @@ pub(crate) async fn start_recording(
 /// Native Fn toggle — the hotkey tap's direct path. Mirrors what the webview
 /// `fn-key-down` listener used to decide, minus two IPC round-trips through a
 /// hidden WKWebView the OS may throttle (the old ~100-300ms pre-HUD delay).
-/// editing / refining / processing are already intercepted inside the tap
-/// (hud-confirm-request / hud-accept-preview-request), so only the
-/// recording→stop and idle→start transitions remain. Errors surface to the FE
+/// editing / refining / processing are already intercepted inside the tap, so
+/// only the recording→stop and idle→start transitions remain. Errors surface to the FE
 /// via `fn-toggle-error` (it owns i18n + toast).
+static FN_TOGGLE_LOCK: Mutex<()> = Mutex::new(());
+
 pub(crate) fn handle_fn_toggle(app: &AppHandle, intention: &str) {
+    let _toggle = match FN_TOGGLE_LOCK.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            crate::elog::elog!("[fn-toggle] lifecycle lock poisoned: {e}");
+            let _ = app.emit("fn-toggle-error", "Fn lifecycle lock poisoned");
+            return;
+        }
+    };
     let t0 = std::time::Instant::now();
     let engine = app.state::<AsrEngine>();
     let live = engine.inner().recording.load(Ordering::Acquire)
@@ -753,12 +762,16 @@ pub(crate) fn start_recording_impl(
         .lock()
         .map(|config| config.clone())
         .map_err(|e| e.to_string())?;
-    // Reject if already recording.
+    // Reserve the lifecycle before audio startup. A rapid second Fn can now
+    // stop this session while the capture owner is still opening the device.
+    if engine
+        .inner()
+        .recorder
+        .lock()
+        .map_err(|e| e.to_string())?
+        .is_some()
     {
-        let guard = engine.inner().recorder.lock().map_err(|e| e.to_string())?;
-        if guard.is_some() {
-            return Err("Already recording".into());
-        }
+        return Err("Already recording".into());
     }
     if matches!(config.asr_provider, AsrProvider::Qwen)
         && !engine.inner().model_loaded.load(Ordering::Acquire)
@@ -785,6 +798,10 @@ pub(crate) fn start_recording_impl(
         );
     }
 
+    if !reserve_recording(&engine.inner().recording) {
+        return Err("Already recording".into());
+    }
+
     let session = match mode {
         Some("transcribe") => "transcribe",
         Some("translate") => "translate",
@@ -795,6 +812,14 @@ pub(crate) fn start_recording_impl(
     reset_translate_stream(app);
     let finalize_gen = AsrEngine::bump_finalize_gen(app);
     AsrEngine::set_pending_hud_confirm(app, None);
+    engine
+        .inner()
+        .immediate_accept_requested
+        .store(false, Ordering::Release);
+    engine
+        .inner()
+        .cancel_requested
+        .store(false, Ordering::Release);
 
     // Show HUD *before* ScreenCaptureKit start — that path can take seconds and
     // used to leave the UI frozen with no capsule until capture finished/failed.
@@ -808,6 +833,7 @@ pub(crate) fn start_recording_impl(
     ) {
         Ok(rec) => rec,
         Err(e) => {
+            engine.inner().recording.store(false, Ordering::Release);
             emit_floating_status(app, false, "idle", "", 0.0);
             return Err(e.to_string());
         }
@@ -819,12 +845,6 @@ pub(crate) fn start_recording_impl(
         let mut guard = engine.inner().recorder.lock().map_err(|e| e.to_string())?;
         *guard = Some(rec);
     }
-    engine
-        .inner()
-        .cancel_requested
-        .store(false, Ordering::Release);
-    engine.inner().recording.store(true, Ordering::Release);
-
     spawn_audio_level_pump(app.clone(), engine.inner().recording.clone());
 
     // Segmented streaming quality floor. Below ~0.5s the rollback window can't
@@ -918,19 +938,25 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
                 )
         })
         .unwrap_or(false);
+    let had_immediate_accept = engine
+        .immediate_accept_requested
+        .load(Ordering::Acquire);
     let session = AsrEngine::session_mode(app);
 
     let cancel_gen = AsrEngine::bump_finalize_gen(app);
     engine.cancel_requested.store(true, Ordering::Release);
     engine.recording.store(false, Ordering::Release);
+    engine
+        .immediate_accept_requested
+        .store(false, Ordering::Release);
     reset_translate_stream(app);
     AsrEngine::set_pending_hud_confirm(app, None);
 
-    if !was_recording && !has_recorder && !hud_busy {
+    if !was_recording && !has_recorder && !hud_busy && !had_immediate_accept {
         emit_floating_status(app, false, "idle", "", 0.0);
         let _ = app.emit("recording-cancelled", ());
         crate::elog::elog!(
-            "[asr] cancelled noop reason={reason} session={session} gen={cancel_gen} (recording=false recorder=false hud_busy=false)"
+            "[asr] cancelled noop reason={reason} session={session} gen={cancel_gen} (recording=false recorder=false hud_busy=false immediate=false)"
         );
         return;
     }
@@ -953,8 +979,8 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
     emit_floating_status(app, false, "idle", "", 0.0);
     let _ = app.emit("recording-cancelled", ());
     crate::elog::elog!(
-        "[asr] cancelled reason={reason} session={session} gen={cancel_gen} (recording={} recorder={} hud_busy={})",
-        was_recording, has_recorder, hud_busy
+        "[asr] cancelled reason={reason} session={session} gen={cancel_gen} (recording={} recorder={} hud_busy={} immediate={})",
+        was_recording, has_recorder, hud_busy, had_immediate_accept
     );
 }
 
@@ -1041,6 +1067,9 @@ pub(crate) fn confirm_floating_transcript(
             true
         }
     };
+    if !paste_failed {
+        emit_floating_status(&app, false, "idle", "", 0.0);
+    }
 
     let user_for_history = if learn {
         Some(confirmed.as_str())
@@ -1107,8 +1136,6 @@ pub(crate) fn confirm_floating_transcript(
             std::thread::sleep(delay);
             emit_floating_status(&app_hide, false, "idle", "", 0.0);
         });
-    } else {
-        emit_floating_status(&app, false, "idle", "", 0.0);
     }
     let _ = app.emit("transcription-result", &result);
     Ok(())
@@ -1119,23 +1146,32 @@ pub(crate) fn confirm_floating_transcript(
 pub(crate) fn cancel_floating_transcript(app: AppHandle) -> Result<(), String> {
     let _ = AsrEngine::take_pending_hud_confirm(&app);
     let cancel_gen = AsrEngine::bump_finalize_gen(&app);
+    app.state::<AsrEngine>()
+        .inner()
+        .immediate_accept_requested
+        .store(false, Ordering::Release);
     emit_floating_status(&app, false, "idle", "", 0.0);
     let _ = app.emit("recording-cancelled", ());
     crate::elog::elog!("[asr] hud confirm cancelled gen={cancel_gen}");
     Ok(())
 }
 
-/// Mid-pipeline skip: refining / processing → paste HUD text now, abort in-flight finalize.
-/// Fn while spinner shows = accept what user already sees (no wait for LLM / late ASR).
-/// `text` = optional FE HUD override (slot may lag after keepLive-only partials).
-#[tauri::command]
-pub(crate) fn accept_floating_preview(
-    app: AppHandle,
-    text: Option<String>,
-) -> Result<(), String> {
-    let (state, slot_text, intention) = floating_status_slot(&app)
+/// Mid-pipeline skip: paste visible HUD text now, abort in-flight finalize.
+pub(crate) fn accept_requested_preview(app: AppHandle, text: String) -> Result<(), String> {
+    let requested = &app
+        .state::<AsrEngine>()
+        .inner()
+        .immediate_accept_requested;
+    if !take_immediate_accept(requested) {
+        return Ok(());
+    }
+    accept_floating_preview(app, text)
+}
+
+fn accept_floating_preview(app: AppHandle, text: String) -> Result<(), String> {
+    let (state, intention) = floating_status_slot(&app)
         .lock()
-        .map(|s| (s.state.clone(), s.text.clone(), s.intention.clone()))
+        .map(|s| (s.state.clone(), s.intention.clone()))
         .unwrap_or_default();
     if intention.as_deref() == Some("agent") {
         return Err("派活态请用 Enter 派发".into());
@@ -1144,26 +1180,14 @@ pub(crate) fn accept_floating_preview(
         return Err("当前不在处理中间态".into());
     }
 
-    // Abort in-flight finalize / LLM refine (late result discarded).
+    let confirmed = text.trim().to_string();
+    if confirmed.is_empty() {
+        return Err("没有可立即提交的识别文本".into());
+    }
+
+    // Text is already available: paste it now and invalidate the late final result.
     let cancel_gen = AsrEngine::bump_finalize_gen(&app);
     let _ = AsrEngine::take_pending_hud_confirm(&app);
-
-    let from_fe = text
-        .as_deref()
-        .map(str::trim)
-        .filter(|t| !t.is_empty())
-        .unwrap_or("");
-    let confirmed = if !from_fe.is_empty() {
-        from_fe.to_string()
-    } else {
-        slot_text.trim().to_string()
-    };
-    if confirmed.is_empty() {
-        emit_floating_status(&app, false, "idle", "", 0.0);
-        let _ = app.emit("recording-cancelled", ());
-        crate::elog::elog!("[asr] accept preview: empty — idle");
-        return Ok(());
-    }
 
     let mode = AsrEngine::session_mode(&app);
     let mode = if mode == "translate" || mode == "fn" {
