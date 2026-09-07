@@ -1275,12 +1275,12 @@ pub(crate) fn list_fewshot_cases(app: &AppHandle) -> Vec<FewShotCaseInfo> {
 
 pub(crate) fn finalize_successful_result(
     app: &AppHandle,
+    gen: u64,
     result: &mut TranscriptionResult,
     samples: Option<&[f32]>,
     audio_path_override: Option<String>,
     media_kind: &str,
 ) -> Option<bool> {
-    let gen = AsrEngine::finalize_gen(app);
     let source = AsrEngine::session_mode(app);
     let is_transcribe = source == "transcribe";
     let is_translate = source == "translate";
@@ -2997,6 +2997,7 @@ pub(crate) fn mlx_worker(
                 chunk_sec,
                 rollback_tokens,
                 language,
+                finalize_gen,
             } => {
                 let inf = match inference.as_mut() {
                     Some(inf) => inf,
@@ -3766,7 +3767,6 @@ pub(crate) fn mlx_worker(
                     continue;
                 }
 
-                let finalize_gen = AsrEngine::finalize_gen(&app);
                 if AsrEngine::finalize_aborted(&app, finalize_gen) {
                     crate::elog::elog!("[mlx-worker] finalize gen stale before commit — suppress");
                     emit_floating_status(&app, false, "idle", "", 0.0);
@@ -3857,6 +3857,7 @@ pub(crate) fn mlx_worker(
                     }
                     match finalize_successful_result(
                         &app,
+                        finalize_gen,
                         &mut result,
                         Some(&samples),
                         None,
@@ -3899,7 +3900,11 @@ pub(crate) fn mlx_worker(
                 }
             }
 
-            WorkerCommand::TranscribeFile { path, media_kind: kind_override } => {
+            WorkerCommand::TranscribeFile {
+                path,
+                media_kind: kind_override,
+                finalize_gen,
+            } => {
                 AsrEngine::set_session_mode(&app, "transcribe");
                 let (saved, media_kind) =
                     match persist_media_for_playback(&path, kind_override.as_deref()) {
@@ -3983,6 +3988,7 @@ pub(crate) fn mlx_worker(
                 if result.error.is_none() {
                     let _ = finalize_successful_result(
                         &app,
+                        finalize_gen,
                         &mut result,
                         None,
                         Some(saved.to_string_lossy().to_string()),

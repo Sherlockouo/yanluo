@@ -793,7 +793,7 @@ pub(crate) fn start_recording_impl(
     };
     AsrEngine::set_session_mode(app, session);
     reset_translate_stream(app);
-    let _ = AsrEngine::bump_finalize_gen(app);
+    let finalize_gen = AsrEngine::bump_finalize_gen(app);
     AsrEngine::set_pending_hud_confirm(app, None);
 
     // Show HUD *before* ScreenCaptureKit start — that path can take seconds and
@@ -863,6 +863,7 @@ pub(crate) fn start_recording_impl(
             chunk_sec,
             rollback_tokens,
             language,
+            finalize_gen,
         })?;
     }
     #[cfg(target_os = "macos")]
@@ -875,11 +876,12 @@ pub(crate) fn start_recording_impl(
         );
     }
     crate::elog::elog!(
-        "[asr] recording started, provider={} mode={} chunk={}s rollback={}",
+        "[asr] recording started, provider={} mode={} chunk={}s rollback={} gen={}",
         config.asr_provider.label(),
         session,
         chunk_sec,
-        rollback_tokens
+        rollback_tokens,
+        finalize_gen
     );
 
     Ok(())
@@ -918,7 +920,7 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
         .unwrap_or(false);
     let session = AsrEngine::session_mode(app);
 
-    let _ = AsrEngine::bump_finalize_gen(app);
+    let cancel_gen = AsrEngine::bump_finalize_gen(app);
     engine.cancel_requested.store(true, Ordering::Release);
     engine.recording.store(false, Ordering::Release);
     reset_translate_stream(app);
@@ -928,7 +930,7 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
         emit_floating_status(app, false, "idle", "", 0.0);
         let _ = app.emit("recording-cancelled", ());
         crate::elog::elog!(
-            "[asr] cancelled noop reason={reason} session={session} (recording=false recorder=false hud_busy=false)"
+            "[asr] cancelled noop reason={reason} session={session} gen={cancel_gen} (recording=false recorder=false hud_busy=false)"
         );
         return;
     }
@@ -951,7 +953,7 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
     emit_floating_status(app, false, "idle", "", 0.0);
     let _ = app.emit("recording-cancelled", ());
     crate::elog::elog!(
-        "[asr] cancelled reason={reason} session={session} (recording={} recorder={} hud_busy={})",
+        "[asr] cancelled reason={reason} session={session} gen={cancel_gen} (recording={} recorder={} hud_busy={})",
         was_recording, has_recorder, hud_busy
     );
 }
@@ -1116,10 +1118,10 @@ pub(crate) fn confirm_floating_transcript(
 #[tauri::command]
 pub(crate) fn cancel_floating_transcript(app: AppHandle) -> Result<(), String> {
     let _ = AsrEngine::take_pending_hud_confirm(&app);
-    let _ = AsrEngine::bump_finalize_gen(&app);
+    let cancel_gen = AsrEngine::bump_finalize_gen(&app);
     emit_floating_status(&app, false, "idle", "", 0.0);
     let _ = app.emit("recording-cancelled", ());
-    crate::elog::elog!("[asr] hud confirm cancelled");
+    crate::elog::elog!("[asr] hud confirm cancelled gen={cancel_gen}");
     Ok(())
 }
 
@@ -1143,7 +1145,7 @@ pub(crate) fn accept_floating_preview(
     }
 
     // Abort in-flight finalize / LLM refine (late result discarded).
-    let _ = AsrEngine::bump_finalize_gen(&app);
+    let cancel_gen = AsrEngine::bump_finalize_gen(&app);
     let _ = AsrEngine::take_pending_hud_confirm(&app);
 
     let from_fe = text
@@ -1175,8 +1177,8 @@ pub(crate) fn accept_floating_preview(
     match inject_text_via_paste_on_main(&app, &confirmed) {
         Ok(()) => {
             crate::elog::elog!(
-                "[paste] accept preview {} chars (skipped mid-pipeline mode={mode})",
-                confirmed.chars().count()
+                "[paste] accept preview {} chars (skipped mid-pipeline mode={mode} gen={cancel_gen})",
+                confirmed.chars().count(),
             );
         }
         Err(e) => {
@@ -1187,6 +1189,7 @@ pub(crate) fn accept_floating_preview(
             );
         }
     }
+    emit_floating_status(&app, false, "idle", "", 0.0);
 
     let lang = app
         .state::<AsrEngine>()
@@ -1208,7 +1211,6 @@ pub(crate) fn accept_floating_preview(
         alignment: None,
     };
     append_history(&app, &result, &mode, None, "audio");
-    emit_floating_status(&app, false, "idle", "", 0.0);
     let _ = app.emit("transcription-result", &result);
     Ok(())
 }
@@ -1398,7 +1400,14 @@ pub(crate) fn stop_recording_impl(app: &AppHandle) -> Result<(), String> {
             return;
         }
         if result.error.is_none() {
-            match finalize_successful_result(&app, &mut result, Some(&samples), None, "audio") {
+            match finalize_successful_result(
+                &app,
+                finalize_gen,
+                &mut result,
+                Some(&samples),
+                None,
+                "audio",
+            ) {
                 None => {
                     // Aborted mid-pipeline; recording-cancelled already (or) HUD idle.
                     return;
@@ -1450,6 +1459,7 @@ pub(crate) fn transcribe_file(
     }
 
     AsrEngine::set_session_mode(&app, "transcribe");
+    let finalize_gen = AsrEngine::bump_finalize_gen(&app);
     emit_floating_status(&app, false, "processing", "", 0.0);
 
     if matches!(config.asr_provider, AsrProvider::Qwen) {
@@ -1459,6 +1469,7 @@ pub(crate) fn transcribe_file(
         engine.send_worker(WorkerCommand::TranscribeFile {
             path: src,
             media_kind,
+            finalize_gen,
         })?;
         return Ok(());
     }
@@ -1541,6 +1552,7 @@ pub(crate) fn transcribe_file(
         if result.error.is_none() {
             let _ = finalize_successful_result(
                 &app,
+                finalize_gen,
                 &mut result,
                 None,
                 Some(saved.to_string_lossy().to_string()),

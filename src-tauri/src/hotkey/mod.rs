@@ -429,14 +429,17 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                 return CallbackResult::Drop;
                             }
 
-                            if binding_matches(&hk_cancel, &key, &mods) {
+                            if (key == "escape" && mods.is_empty())
+                                || binding_matches(&hk_cancel, &key, &mods)
+                            {
                                 // Never swallow cancel when idle — other apps need the key.
                                 if cancel_hotkey_is_actionable(&app_cb) {
-                                    if hud_confirm_editing(&app_cb) {
-                                        let _ = app_cb.emit_to("floating", "hud-cancel-request", ());
-                                        let _ = app_cb.emit("hud-cancel-request", ());
-                                    } else {
-                                        let _ = app_cb.emit("escape-key-down", ());
+                                    if let Some(engine) = app_cb.try_state::<AsrEngine>() {
+                                        crate::commands::cancel_recording_with_reason(
+                                            &app_cb,
+                                            engine.inner(),
+                                            "cancel-hotkey",
+                                        );
                                     }
                                     return CallbackResult::Drop;
                                 }

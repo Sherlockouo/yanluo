@@ -32,11 +32,33 @@ pub(crate) enum WorkerCommand {
         chunk_sec: f64,
         rollback_tokens: usize,
         language: Option<String>,
+        finalize_gen: u64,
     },
     TranscribeFile {
         path: PathBuf,
         media_kind: Option<String>,
+        finalize_gen: u64,
     },
+}
+
+#[cfg(test)]
+mod worker_command_tests {
+    use super::WorkerCommand;
+
+    #[test]
+    fn streaming_command_keeps_generation_from_recording_start() {
+        let cmd = WorkerCommand::StartStreaming {
+            chunk_sec: 0.5,
+            rollback_tokens: 5,
+            language: None,
+            finalize_gen: 42,
+        };
+        let WorkerCommand::StartStreaming { finalize_gen, .. } = cmd else {
+            unreachable!()
+        };
+        assert_eq!(finalize_gen, 42);
+        assert_ne!(finalize_gen, 43, "a later cancel generation must stay stale");
+    }
 }
 
 // ---------------------------------------------------------------------------
