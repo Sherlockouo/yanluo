@@ -998,22 +998,30 @@ pub(crate) struct LearnFromHudPayload {
     pub(crate) learned_pairs: Vec<LearnedPairInfo>,
 }
 
-fn confirm_hide_delay(paste_failed: bool) -> Option<std::time::Duration> {
-    paste_failed.then(|| std::time::Duration::from_secs(3))
-}
-
 #[cfg(test)]
 mod hud_confirm_tests {
-    use super::confirm_hide_delay;
-
     #[test]
-    fn successful_confirm_hides_immediately() {
-        assert_eq!(confirm_hide_delay(false), None);
-        assert_eq!(confirm_hide_delay(true).map(|delay| delay.as_secs()), Some(3));
+    fn editing_hud_is_gone_before_paste() {
+        let source = include_str!("mod.rs");
+        let start = source
+            .rfind("pub(crate) fn confirm_floating_transcript")
+            .expect("confirm function");
+        let body = &source[start..];
+        let end = body
+            .find("pub(crate) fn cancel_floating_transcript")
+            .expect("cancel function");
+        let body = &body[..end];
+        let hide = body
+            .find("finish_floating_hide(app.clone())")
+            .expect("native hide before paste");
+        let paste = body
+            .find("match inject_text_via_paste_on_main")
+            .expect("paste call");
+        assert!(hide < paste, "HUD must disappear before paste starts");
     }
 }
 
-/// Confirm Fn/⇧Fn HUD edit: paste → history → optional learn → hide.
+/// Confirm Fn/⇧Fn HUD edit: hide → paste → history → optional learn.
 #[tauri::command]
 pub(crate) fn confirm_floating_transcript(
     app: AppHandle,
@@ -1050,13 +1058,15 @@ pub(crate) fn confirm_floating_transcript(
     };
     result.text = confirmed.clone();
 
-    let paste_failed = match inject_text_via_paste_on_main(&app, &confirmed) {
+    // The editing HUD must be fully gone before Cmd+V reaches the target app.
+    emit_floating_status(&app, false, "idle", "", 0.0);
+    finish_floating_hide(app.clone());
+    match inject_text_via_paste_on_main(&app, &confirmed) {
         Ok(()) => {
             crate::elog::elog!(
                 "[paste] confirmed {} chars (edited={edited} mode={mode})",
                 confirmed.chars().count()
             );
-            false
         }
         Err(e) => {
             crate::elog::elog!("[paste] injection failed: {e}");
@@ -1064,11 +1074,7 @@ pub(crate) fn confirm_floating_transcript(
                 "partial-error",
                 format!("已写入剪切板，但粘贴失败（请检查辅助功能权限）: {e}"),
             );
-            true
         }
-    };
-    if !paste_failed {
-        emit_floating_status(&app, false, "idle", "", 0.0);
     }
 
     let user_for_history = if learn {
@@ -1121,22 +1127,6 @@ pub(crate) fn confirm_floating_transcript(
         }
     }
 
-    // P0-4: Confirm success flash + delayed hide / error with 3s auto-hide.
-    if paste_failed {
-        // Keep HUD with danger hint, auto-hide after 3s
-        let _ = app.emit_to(
-            "floating",
-            "hud-confirm-error",
-            serde_json::json!({"error": "粘贴失败，文字已在剪贴板"}),
-        );
-    }
-    if let Some(delay) = confirm_hide_delay(paste_failed) {
-        let app_hide = app.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(delay);
-            emit_floating_status(&app_hide, false, "idle", "", 0.0);
-        });
-    }
     let _ = app.emit("transcription-result", &result);
     Ok(())
 }
