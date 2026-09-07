@@ -20,23 +20,6 @@ fn panic_payload_str(payload: &Box<dyn std::any::Any + Send>) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Send-safe wrapper for cpal::Stream (which is !Send on macOS).
-// ---------------------------------------------------------------------------
-
-pub(crate) struct SendWrapper<T>(pub T);
-unsafe impl<T> Send for SendWrapper<T> {}
-unsafe impl<T> Sync for SendWrapper<T> {}
-
-impl<T> SendWrapper<T> {
-    pub(crate) fn new(t: T) -> Self {
-        Self(t)
-    }
-    pub(crate) fn into_inner(self) -> T {
-        self.0
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Worker commands
 // ---------------------------------------------------------------------------
 
@@ -74,7 +57,7 @@ pub(crate) struct PendingHudConfirm {
 
 pub struct AsrEngine {
     pub(crate) model_dir: Mutex<String>,
-    pub(crate) recorder: Mutex<Option<SendWrapper<AudioRecorder>>>,
+    pub(crate) recorder: Mutex<Option<AudioRecorder>>,
     /// true while recording is active. Worker loop reads this.
     pub(crate) recording: Arc<AtomicBool>,
     /// Set by cancel_recording; mlx worker skips final transcription when true.
@@ -88,6 +71,7 @@ pub struct AsrEngine {
     pub(crate) worker_tx: Mutex<Sender<WorkerCommand>>,
     pub(crate) config: Mutex<AppConfig>,
     pub(crate) history: Mutex<Vec<HistoryEntry>>,
+    pub(crate) history_persist: Mutex<()>,
     /// "fn" | "translate" (HUD + paste) or "transcribe" (save audio, no paste).
     pub(crate) session_mode: Mutex<String>,
     /// Live translate accumulation (strategy C). Translate mode only.
@@ -150,6 +134,7 @@ impl AsrEngine {
             worker_tx: Mutex::new(tx),
             config: Mutex::new(config),
             history: Mutex::new(history),
+            history_persist: Mutex::new(()),
             session_mode: Mutex::new("fn".into()),
             translate_stream: Mutex::new(TranslateStreamState::default()),
             pending_hud_confirm: Mutex::new(None),
@@ -232,21 +217,21 @@ impl AsrEngine {
     pub(crate) fn get_audio_snapshot(app: &AppHandle) -> Option<Vec<f32>> {
         let state = app.state::<AsrEngine>();
         let rec_guard = state.inner().recorder.lock().unwrap();
-        rec_guard.as_ref().map(|r| r.0.get_samples())
+        rec_guard.as_ref().map(|r| r.get_samples())
     }
 
     /// Hot-path: samples from absolute `from` to end (avoids full-buffer clone).
     pub(crate) fn get_audio_from(app: &AppHandle, from: usize) -> Option<(usize, Vec<f32>)> {
         let state = app.state::<AsrEngine>();
         let rec_guard = state.inner().recorder.lock().ok()?;
-        Some(rec_guard.as_ref()?.0.get_samples_from(from))
+        Some(rec_guard.as_ref()?.get_samples_from(from))
     }
 
     /// Drain recorder samples before `keep_from` for cold archive.
     pub(crate) fn drain_audio_before(app: &AppHandle, keep_from: usize) -> Option<Vec<f32>> {
         let state = app.state::<AsrEngine>();
         let rec_guard = state.inner().recorder.lock().ok()?;
-        Some(rec_guard.as_ref()?.0.drain_before(keep_from))
+        Some(rec_guard.as_ref()?.drain_before(keep_from))
     }
 
     /// Live meter level from the active recorder (avoids cloning the full buffer).
@@ -273,9 +258,12 @@ impl AsrEngine {
     pub(crate) fn take_recorder_and_stop(app: &AppHandle) -> Option<Vec<f32>> {
         let state = app.state::<AsrEngine>();
         let mut rec_guard = state.inner().recorder.lock().unwrap();
-        rec_guard.take().map(|wrapper| {
-            let rec = wrapper.into_inner();
-            rec.stop().unwrap_or_default()
+        rec_guard.take().and_then(|recorder| match recorder.stop() {
+            Ok(samples) => Some(samples),
+            Err(error) => {
+                crate::elog::elog!("[audio] recorder stop failed: {error}");
+                None
+            }
         })
     }
 }

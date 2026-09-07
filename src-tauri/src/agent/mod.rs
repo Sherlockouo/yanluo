@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::config::*;
@@ -114,6 +114,14 @@ pub(crate) struct AgentJob {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct AgentJobStreamUpdate {
+    id: String,
+    progress: Option<String>,
+    session_id: Option<String>,
+    event: Option<AgentJobEvent>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct PathInfo {
     pub(crate) path: String,
     pub(crate) name: String,
@@ -127,6 +135,7 @@ pub(crate) struct PathInfo {
 
 pub(crate) struct AgentRuntime {
     jobs: Mutex<Vec<AgentJob>>,
+    persist_jobs: Mutex<()>,
     children: Mutex<HashMap<String, u32>>,
     cancel_flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
     /// HUD Raycast menu open — Esc closes menu first (hotkey tap reads this).
@@ -138,6 +147,7 @@ impl AgentRuntime {
         let jobs = load_jobs_from_disk();
         Self {
             jobs: Mutex::new(jobs),
+            persist_jobs: Mutex::new(()),
             children: Mutex::new(HashMap::new()),
             cancel_flags: Mutex::new(HashMap::new()),
             hud_menu_open: AtomicBool::new(false),
@@ -300,10 +310,7 @@ fn event_from_stream_line(line: &str) -> Option<(Option<String>, AgentJobEvent)>
                 for block in content {
                     let bt = block.get("type").and_then(|x| x.as_str()).unwrap_or("");
                     if bt == "tool_use" {
-                        let name = block
-                            .get("name")
-                            .and_then(|x| x.as_str())
-                            .unwrap_or("tool");
+                        let name = block.get("name").and_then(|x| x.as_str()).unwrap_or("tool");
                         let input = block
                             .get("input")
                             .map(|i| i.to_string())
@@ -342,9 +349,9 @@ fn event_from_stream_line(line: &str) -> Option<(Option<String>, AgentJobEvent)>
                         let text = block
                             .get("content")
                             .and_then(|c| {
-                                c.as_str().map(|s| s.to_string()).or_else(|| {
-                                    Some(c.to_string())
-                                })
+                                c.as_str()
+                                    .map(|s| s.to_string())
+                                    .or_else(|| Some(c.to_string()))
                             })
                             .unwrap_or_default();
                         draft = Some(AgentJobEvent {
@@ -365,10 +372,7 @@ fn event_from_stream_line(line: &str) -> Option<(Option<String>, AgentJobEvent)>
                 .or_else(|| v.get("tool_name"))
                 .and_then(|x| x.as_str())
                 .unwrap_or("tool");
-            let input = v
-                .get("input")
-                .map(|i| i.to_string())
-                .unwrap_or_default();
+            let input = v.get("input").map(|i| i.to_string()).unwrap_or_default();
             draft = Some(AgentJobEvent {
                 seq: 0,
                 ts: now_rfc3339(),
@@ -422,7 +426,9 @@ fn event_from_stream_line(line: &str) -> Option<(Option<String>, AgentJobEvent)>
                     x.as_str().map(|s| s.to_string()).or_else(|| {
                         x.as_array().and_then(|arr| {
                             arr.iter().find_map(|b| {
-                                b.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                                b.get("text")
+                                    .and_then(|t| t.as_str())
+                                    .map(|s| s.to_string())
                             })
                         })
                     })
@@ -464,10 +470,7 @@ fn event_from_stream_line(line: &str) -> Option<(Option<String>, AgentJobEvent)>
                 .or_else(|| v.get("tool_name"))
                 .and_then(|x| x.as_str())
                 .unwrap_or("tool");
-            let input = v
-                .get("args")
-                .map(|i| i.to_string())
-                .unwrap_or_default();
+            let input = v.get("args").map(|i| i.to_string()).unwrap_or_default();
             draft = Some(AgentJobEvent {
                 seq: 0,
                 ts: now_rfc3339(),
@@ -514,12 +517,23 @@ fn event_from_stream_line(line: &str) -> Option<(Option<String>, AgentJobEvent)>
                 }
             }
         }
-        "agent_start" | "agent_end" | "turn_start" | "turn_end"
-        | "message_start" | "message_update" | "message_delta" | "message_stop"
+        "agent_start"
+        | "agent_end"
+        | "turn_start"
+        | "turn_end"
+        | "message_start"
+        | "message_update"
+        | "message_delta"
+        | "message_stop"
         | "tool_execution_update"
-        | "queue_update" | "compaction_start" | "compaction_end"
-        | "auto_retry_start" | "auto_retry_end"
-        | "content_block_delta" | "content_block_start" | "content_block_stop" => {
+        | "queue_update"
+        | "compaction_start"
+        | "compaction_end"
+        | "auto_retry_start"
+        | "auto_retry_end"
+        | "content_block_delta"
+        | "content_block_start"
+        | "content_block_stop" => {
             // lifecycle / delta noise — skip timeline
         }
         "system" => {
@@ -542,17 +556,37 @@ fn event_from_stream_line(line: &str) -> Option<(Option<String>, AgentJobEvent)>
 }
 
 fn load_jobs_from_disk() -> Vec<AgentJob> {
-    fs::read_to_string(agent_jobs_path())
-        .ok()
-        .and_then(|data| serde_json::from_str(&data).ok())
-        .unwrap_or_default()
+    let path = agent_jobs_path();
+    match fs::read_to_string(&path) {
+        Ok(data) => match serde_json::from_str(&data) {
+            Ok(jobs) => jobs,
+            Err(error) => {
+                crate::elog::elog!("[agent] jobs parse failed {:?}: {error}", path);
+                Vec::new()
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            crate::elog::elog!("[agent] jobs read failed {:?}: {error}", path);
+            Vec::new()
+        }
+    }
 }
 
-fn persist_jobs(jobs: &[AgentJob]) {
-    let _ = fs::create_dir_all(app_data_dir());
-    if let Ok(data) = serde_json::to_string_pretty(jobs) {
-        let _ = fs::write(agent_jobs_path(), data);
-    }
+fn persist_jobs(jobs: &[AgentJob]) -> Result<(), String> {
+    let dir = app_data_dir();
+    fs::create_dir_all(&dir).map_err(|e| format!("create agent data dir: {e}"))?;
+    let mut tmp = tempfile::NamedTempFile::new_in(&dir)
+        .map_err(|e| format!("create agent jobs temp file: {e}"))?;
+    serde_json::to_writer(&mut tmp, jobs).map_err(|e| format!("serialize agent jobs: {e}"))?;
+    tmp.flush()
+        .map_err(|e| format!("flush agent jobs temp file: {e}"))?;
+    tmp.as_file()
+        .sync_all()
+        .map_err(|e| format!("sync agent jobs temp file: {e}"))?;
+    tmp.persist(agent_jobs_path())
+        .map_err(|e| format!("replace agent jobs file: {}", e.error))?;
+    Ok(())
 }
 
 fn emit_job(app: &AppHandle, job: &AgentJob) {
@@ -563,14 +597,118 @@ fn update_job<F>(app: &AppHandle, runtime: &AgentRuntime, id: &str, f: F) -> Opt
 where
     F: FnOnce(&mut AgentJob),
 {
-    let mut jobs = runtime.jobs.lock().ok()?;
-    let job = jobs.iter_mut().find(|j| j.id == id)?;
-    f(job);
-    let snapshot = job.clone();
-    persist_jobs(&jobs);
-    drop(jobs);
+    let _persist = runtime.persist_jobs.lock().ok()?;
+    let (snapshot, jobs_snapshot) = {
+        let mut jobs = runtime.jobs.lock().ok()?;
+        let job = jobs.iter_mut().find(|j| j.id == id)?;
+        f(job);
+        (job.clone(), jobs.clone())
+    };
+    if let Err(error) = persist_jobs(&jobs_snapshot) {
+        crate::elog::elog!("[agent] persist failed: {error}");
+    }
     emit_job(app, &snapshot);
     Some(snapshot)
+}
+
+fn update_job_stream(
+    app: &AppHandle,
+    runtime: &AgentRuntime,
+    id: &str,
+    progress: Option<String>,
+    parsed: Option<(Option<String>, AgentJobEvent)>,
+) -> bool {
+    let update = {
+        let Ok(mut jobs) = runtime.jobs.lock() else {
+            crate::elog::elog!("[agent] stream update failed: jobs lock poisoned");
+            return false;
+        };
+        let Some(job) = jobs.iter_mut().find(|j| j.id == id) else {
+            return false;
+        };
+        let Some(update) = apply_job_stream_update(job, progress, parsed) else {
+            return false;
+        };
+        update
+    };
+
+    if let Err(error) = app.emit("agent-job-stream", &update) {
+        crate::elog::elog!("[agent] stream emit failed: {error}");
+    }
+    true
+}
+
+fn apply_job_stream_update(
+    job: &mut AgentJob,
+    progress: Option<String>,
+    parsed: Option<(Option<String>, AgentJobEvent)>,
+) -> Option<AgentJobStreamUpdate> {
+    let progress = progress.filter(|p| p != &job.progress);
+    if let Some(ref p) = progress {
+        job.progress = p.clone();
+    }
+
+    let mut session_id = None;
+    let mut event = None;
+    if let Some((sid, mut next)) = parsed {
+        if job
+            .session_id
+            .as_ref()
+            .map(|s| s.trim().is_empty())
+            .unwrap_or(true)
+        {
+            if let Some(sid) = sid.filter(|s| !s.trim().is_empty()) {
+                job.session_id = Some(sid.clone());
+                session_id = Some(sid);
+            }
+        }
+        let duplicate = job
+            .events
+            .last()
+            .map(|last| {
+                last.kind == next.kind && last.title == next.title && last.text == next.text
+            })
+            .unwrap_or(false);
+        if !duplicate {
+            next.seq = job.events.last().map(|e| e.seq + 1).unwrap_or(0);
+            job.events.push(next.clone());
+            if job.events.len() > MAX_EVENTS {
+                let drop_n = job.events.len() - MAX_EVENTS;
+                job.events.drain(0..drop_n);
+            }
+            event = Some(next);
+        }
+    }
+
+    if progress.is_none() && session_id.is_none() && event.is_none() {
+        return None;
+    }
+    Some(AgentJobStreamUpdate {
+        id: job.id.clone(),
+        progress,
+        session_id,
+        event,
+    })
+}
+
+fn persist_runtime_jobs(runtime: &AgentRuntime) {
+    let _persist = match runtime.persist_jobs.lock() {
+        Ok(lock) => lock,
+        Err(error) => {
+            crate::elog::elog!("[agent] checkpoint serialize failed: {error}");
+            return;
+        }
+    };
+    let snapshot = match runtime.jobs.lock() {
+        Ok(jobs) => jobs.clone(),
+        Err(error) => {
+            crate::elog::elog!("[agent] checkpoint failed: {error}");
+            return;
+        }
+    };
+    if let Err(error) = persist_jobs(&snapshot) {
+        crate::elog::elog!("[agent] checkpoint failed: {error}");
+    }
 }
 
 fn resolve_bin(name: &str) -> Option<PathBuf> {
@@ -620,16 +758,10 @@ fn extract_progress(line: &str) -> Option<String> {
     if let Some(t) = v.get("type").and_then(|x| x.as_str()) {
         match t {
             "assistant" => {
-                if let Some(content) = v
-                    .pointer("/message/content")
-                    .and_then(|c| c.as_array())
-                {
+                if let Some(content) = v.pointer("/message/content").and_then(|c| c.as_array()) {
                     for block in content {
                         if block.get("type").and_then(|x| x.as_str()) == Some("tool_use") {
-                            let name = block
-                                .get("name")
-                                .and_then(|x| x.as_str())
-                                .unwrap_or("tool");
+                            let name = block.get("name").and_then(|x| x.as_str()).unwrap_or("tool");
                             return Some(format!("tool · {name}"));
                         }
                         if let Some(text) = block.get("text").and_then(|x| x.as_str()) {
@@ -675,13 +807,15 @@ fn extract_progress(line: &str) -> Option<String> {
                     .or_else(|| v.pointer("/item/text"))
                     .or_else(|| v.pointer("/message/content"))
                     .and_then(|x| {
-                        x.as_str()
-                            .map(|s| s.to_string())
-                            .or_else(|| x.as_array().and_then(|arr| {
+                        x.as_str().map(|s| s.to_string()).or_else(|| {
+                            x.as_array().and_then(|arr| {
                                 arr.iter().find_map(|b| {
-                                    b.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                                    b.get("text")
+                                        .and_then(|t| t.as_str())
+                                        .map(|s| s.to_string())
                                 })
-                            }))
+                            })
+                        })
                     })
                 {
                     if !text.trim().is_empty() {
@@ -816,9 +950,8 @@ fn resolve_agent_bin(configured: &str, fallback_name: &str) -> Result<PathBuf, S
             "{label} CLI 路径不存在：{configured}。请在设置 → 派活 里确认路径。"
         ));
     }
-    resolve_bin(fallback_name).ok_or_else(|| {
-        format!("未找到 {label} CLI。安装后在设置 → 派活 里确认路径。")
-    })
+    resolve_bin(fallback_name)
+        .ok_or_else(|| format!("未找到 {label} CLI。安装后在设置 → 派活 里确认路径。"))
 }
 
 /// Walk up from `path` looking for a `.git` dir/file (worktrees included).
@@ -867,11 +1000,7 @@ fn remember_trusted_dir(engine: &AsrEngine, app: &AppHandle, cwd: &str) {
 /// Default `{app}/agent` is auto-trusted. Other dirs: remember on first dispatch
 /// (sending from the app = grant). Never use blocking OS dialogs here — they
 /// deadlock Tauri's command / main thread.
-fn ensure_codex_cwd_allowed(
-    app: &AppHandle,
-    engine: &AsrEngine,
-    cwd: &str,
-) -> Result<(), String> {
+fn ensure_codex_cwd_allowed(app: &AppHandle, engine: &AsrEngine, cwd: &str) -> Result<(), String> {
     if is_inside_git_repo(Path::new(cwd)) {
         return Ok(());
     }
@@ -1159,9 +1288,10 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
         // Resume when job already has session AND this isn't the first event-only seed:
         // if last event is user and we already ran before (events contain prior assistant/tool),
         // or status was re-queued via continue — detect via any prior assistant/tool event.
-        let had_prior_turn = job.events.iter().any(|e| {
-            matches!(e.kind.as_str(), "assistant" | "tool" | "tool_result")
-        });
+        let had_prior_turn = job
+            .events
+            .iter()
+            .any(|e| matches!(e.kind.as_str(), "assistant" | "tool" | "tool_result"));
         let resume = if had_prior_turn {
             job.session_id.clone()
         } else {
@@ -1220,11 +1350,7 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
                 .iter()
                 .find(|p| p.kind == kind && p.id == c.agent_profile_id)
                 .or_else(|| c.agent_profiles.iter().find(|p| p.kind == kind))
-                .or_else(|| {
-                    c.agent_profiles
-                        .iter()
-                        .find(|p| p.id == c.agent_profile_id)
-                })
+                .or_else(|| c.agent_profiles.iter().find(|p| p.id == c.agent_profile_id))
                 .map(|p| p.model.trim().to_string())
                 .filter(|m| !m.is_empty())
         });
@@ -1245,22 +1371,20 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
     let run_prompt = {
         let jobs = runtime.jobs.lock().ok();
         jobs.and_then(|g| {
-            g.iter()
-                .find(|j| j.id == job_id)
-                .and_then(|j| {
-                    j.events
-                        .iter()
-                        .rev()
-                        .find(|e| e.kind == "user")
-                        .map(|e| e.text.clone())
-                })
+            g.iter().find(|j| j.id == job_id).and_then(|j| {
+                j.events
+                    .iter()
+                    .rev()
+                    .find(|e| e.kind == "user")
+                    .map(|e| e.text.clone())
+            })
         })
         .filter(|t| !t.trim().is_empty())
         .unwrap_or(prompt)
     };
 
-    let kit = crate::agent_kit::sync_agent_kit()
-        .unwrap_or_else(|_| crate::agent_kit::agent_kit_dir());
+    let kit =
+        crate::agent_kit::sync_agent_kit().unwrap_or_else(|_| crate::agent_kit::agent_kit_dir());
     let cli_prompt = with_kit_preamble(&run_prompt, &kit);
 
     let mut child = match spawn_agent_process(
@@ -1315,7 +1439,15 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
         };
         let reader = BufReader::new(stdout);
         let mut result = String::new();
-        for line in reader.lines().flatten() {
+        let mut last_checkpoint = Instant::now();
+        for line in reader.lines() {
+            let line = match line {
+                Ok(line) => line,
+                Err(error) => {
+                    crate::elog::elog!("[agent] stdout read failed: {error}");
+                    break;
+                }
+            };
             if cancel_out.load(Ordering::Relaxed)
                 || !owns_cancel_flag(&runtime_out, &job_out, &cancel_out)
             {
@@ -1327,36 +1459,11 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
             if !owns_cancel_flag(&runtime_out, &job_out, &cancel_out) {
                 break;
             }
-            update_job(&app_out, &runtime_out, &job_out, |j| {
-                if let Some(p) = progress {
-                    j.progress = p;
-                }
-                if let Some((sid, mut ev)) = parsed {
-                    if j.session_id.as_ref().map(|s| s.trim().is_empty()).unwrap_or(true) {
-                        if let Some(s) = sid.filter(|s| !s.trim().is_empty()) {
-                            j.session_id = Some(s);
-                        }
-                    }
-                    let seq = j.events.last().map(|e| e.seq + 1).unwrap_or(0);
-                    ev.seq = seq;
-                    let dup = j
-                        .events
-                        .last()
-                        .map(|last| {
-                            last.kind == ev.kind
-                                && last.title == ev.title
-                                && last.text == ev.text
-                        })
-                        .unwrap_or(false);
-                    if !dup {
-                        j.events.push(ev);
-                        if j.events.len() > MAX_EVENTS {
-                            let drop_n = j.events.len() - MAX_EVENTS;
-                            j.events.drain(0..drop_n);
-                        }
-                    }
-                }
-            });
+            let changed = update_job_stream(&app_out, &runtime_out, &job_out, progress, parsed);
+            if changed && last_checkpoint.elapsed() >= Duration::from_secs(2) {
+                persist_runtime_jobs(&runtime_out);
+                last_checkpoint = Instant::now();
+            }
         }
         result
     });
@@ -1368,7 +1475,14 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
         };
         let reader = BufReader::new(stderr);
         let mut buf = String::new();
-        for line in reader.lines().flatten() {
+        for line in reader.lines() {
+            let line = match line {
+                Ok(line) => line,
+                Err(error) => {
+                    crate::elog::elog!("[agent] stderr read failed: {error}");
+                    break;
+                }
+            };
             if cancel_err.load(Ordering::Relaxed) {
                 break;
             }
@@ -1410,9 +1524,10 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
                 if !result_acc.trim().is_empty() {
                     j.result = result_acc.clone();
                     // Avoid duplicate assistant + result cards with the same body.
-                    let already = j.events.iter().any(|e| {
-                        e.kind == "assistant" && e.text.trim() == result_acc.trim()
-                    });
+                    let already = j
+                        .events
+                        .iter()
+                        .any(|e| e.kind == "assistant" && e.text.trim() == result_acc.trim());
                     if !already {
                         push_event(j, "assistant", "assistant", &result_acc);
                     }
@@ -1505,11 +1620,7 @@ pub(crate) fn set_agent_defaults(
     profile_id: Option<String>,
     engine: State<'_, AsrEngine>,
 ) -> Result<(), String> {
-    let mut config = engine
-        .inner()
-        .config
-        .lock()
-        .map_err(|e| e.to_string())?;
+    let mut config = engine.inner().config.lock().map_err(|e| e.to_string())?;
     ensure_agent_profiles(&mut config);
     let profile_set = if let Some(ref pid) = profile_id {
         let pid = pid.trim().to_string();
@@ -1597,11 +1708,7 @@ pub(crate) fn dispatch_agent(
     let prompt = compose_prompt(&prompt, &attachments);
     let mut cwd = cwd.trim().to_string();
     {
-        let mut cfg = engine
-            .inner()
-            .config
-            .lock()
-            .map_err(|e| e.to_string())?;
+        let mut cfg = engine.inner().config.lock().map_err(|e| e.to_string())?;
         if cwd.is_empty() || !Path::new(&cwd).is_dir() {
             cwd = resolve_agent_cwd(&mut cfg)?;
         }
@@ -1649,14 +1756,16 @@ pub(crate) fn dispatch_agent(
     };
     push_event(&mut job, "user", "user", &prompt);
 
-    {
+    let _persist = runtime.persist_jobs.lock().map_err(|e| e.to_string())?;
+    let jobs_snapshot = {
         let mut jobs = runtime.jobs.lock().map_err(|e| e.to_string())?;
         jobs.insert(0, job.clone());
         if jobs.len() > MAX_JOBS {
             jobs.truncate(MAX_JOBS);
         }
-        persist_jobs(&jobs);
-    }
+        jobs.clone()
+    };
+    persist_jobs(&jobs_snapshot)?;
     emit_job(&app, &job);
 
     let cancel = Arc::new(AtomicBool::new(false));
@@ -1714,9 +1823,7 @@ pub(crate) fn continue_agent_job(
             .as_ref()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-            .ok_or_else(|| {
-                "无法续聊：缺少 session id（旧任务或 Codex 未回报会话）".to_string()
-            })?;
+            .ok_or_else(|| "无法续聊：缺少 session id（旧任务或 Codex 未回报会话）".to_string())?;
         (job.cwd.clone(), job.agent.clone(), sid, was_active)
     };
 
@@ -1814,10 +1921,7 @@ fn is_image_ext(ext: &str) -> bool {
 }
 
 fn is_html_ext(ext: &str) -> bool {
-    matches!(
-        ext.to_ascii_lowercase().as_str(),
-        "html" | "htm" | "xhtml"
-    )
+    matches!(ext.to_ascii_lowercase().as_str(), "html" | "htm" | "xhtml")
 }
 
 fn is_pdf_ext(ext: &str) -> bool {
@@ -1906,7 +2010,6 @@ pub(crate) fn get_path_info(path: String) -> Result<PathInfo, String> {
     })
 }
 
-
 #[tauri::command]
 pub(crate) fn cancel_agent_job(
     app: AppHandle,
@@ -1950,18 +2053,17 @@ pub(crate) fn delete_agent_job(
             kill_pid(pid);
         }
     }
-    let mut jobs = runtime.jobs.lock().map_err(|e| e.to_string())?;
-    let before = jobs.len();
-    jobs.retain(|j| j.id != id);
-    let removed = jobs.len() < before;
-    persist_jobs(&jobs);
-    drop(jobs);
+    let _persist = runtime.persist_jobs.lock().map_err(|e| e.to_string())?;
+    let (removed, jobs_snapshot) = {
+        let mut jobs = runtime.jobs.lock().map_err(|e| e.to_string())?;
+        let before = jobs.len();
+        jobs.retain(|j| j.id != id);
+        (jobs.len() < before, jobs.clone())
+    };
+    persist_jobs(&jobs_snapshot)?;
     if removed {
         // Notify UI to drop the row.
-        let _ = app.emit(
-            "agent-job-deleted",
-            serde_json::json!({ "id": id }),
-        );
+        let _ = app.emit("agent-job-deleted", serde_json::json!({ "id": id }));
     }
     Ok(removed)
 }
@@ -1997,16 +2099,18 @@ pub(crate) fn clear_agent_jobs(
         }
     }
 
-    let mut jobs = runtime.jobs.lock().map_err(|e| e.to_string())?;
-    let before = jobs.len();
-    if finished_only {
-        jobs.retain(|j| matches!(j.status, JobStatus::Queued | JobStatus::Running));
-    } else {
-        jobs.clear();
-    }
-    let removed = before.saturating_sub(jobs.len());
-    persist_jobs(&jobs);
-    drop(jobs);
+    let _persist = runtime.persist_jobs.lock().map_err(|e| e.to_string())?;
+    let (removed, jobs_snapshot) = {
+        let mut jobs = runtime.jobs.lock().map_err(|e| e.to_string())?;
+        let before = jobs.len();
+        if finished_only {
+            jobs.retain(|j| matches!(j.status, JobStatus::Queued | JobStatus::Running));
+        } else {
+            jobs.clear();
+        }
+        (before.saturating_sub(jobs.len()), jobs.clone())
+    };
+    persist_jobs(&jobs_snapshot)?;
     let _ = app.emit("agent-jobs-reload", ());
     Ok(removed)
 }
@@ -2262,11 +2366,7 @@ fn fetch_codex_models() -> Vec<AgentModelOpt> {
     };
     let mut seen = std::collections::HashSet::new();
     for m in arr {
-        let slug = m
-            .get("slug")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .trim();
+        let slug = m.get("slug").and_then(|x| x.as_str()).unwrap_or("").trim();
         if slug.is_empty() || !seen.insert(slug.to_string()) {
             continue;
         }
@@ -2457,12 +2557,61 @@ pub(crate) fn refresh_agent_models(app: AppHandle, force: Option<bool>) -> Agent
 mod tests {
     use super::*;
 
+    fn sample_job() -> AgentJob {
+        AgentJob {
+            id: "job-1".into(),
+            agent: AgentKind::Codex,
+            prompt: String::new(),
+            cwd: "/tmp".into(),
+            attachments: Vec::new(),
+            status: JobStatus::Running,
+            progress: "starting".into(),
+            result: String::new(),
+            error: String::new(),
+            started_at: now_rfc3339(),
+            finished_at: None,
+            session_id: None,
+            events: Vec::new(),
+            turn_attachments: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn stream_update_emits_only_delta_and_deduplicates() {
+        let mut job = sample_job();
+        let event = AgentJobEvent {
+            seq: 0,
+            ts: now_rfc3339(),
+            kind: "assistant".into(),
+            title: "assistant".into(),
+            text: "done".into(),
+        };
+        let update = apply_job_stream_update(
+            &mut job,
+            Some("working".into()),
+            Some((Some("session-1".into()), event.clone())),
+        )
+        .expect("changed");
+        assert_eq!(update.id, "job-1");
+        assert_eq!(update.progress.as_deref(), Some("working"));
+        assert_eq!(update.session_id.as_deref(), Some("session-1"));
+        assert_eq!(update.event.as_ref().map(|e| e.text.as_str()), Some("done"));
+        assert_eq!(job.events.len(), 1);
+
+        assert!(apply_job_stream_update(
+            &mut job,
+            Some("working".into()),
+            Some((Some("session-1".into()), event)),
+        )
+        .is_none());
+        assert_eq!(job.events.len(), 1);
+    }
+
     #[test]
     fn pi_session_and_tool_events() {
-        let (sid, ev) = event_from_stream_line(
-            r#"{"type":"session","version":3,"id":"abc-123","cwd":"/tmp"}"#,
-        )
-        .expect("session");
+        let (sid, ev) =
+            event_from_stream_line(r#"{"type":"session","version":3,"id":"abc-123","cwd":"/tmp"}"#)
+                .expect("session");
         assert_eq!(sid.as_deref(), Some("abc-123"));
         assert_eq!(ev.kind, "system");
 
@@ -2486,9 +2635,7 @@ mod tests {
         assert_eq!(msg.kind, "assistant");
         assert_eq!(msg.text, "hello");
 
-        assert!(
-            event_from_stream_line(r#"{"type":"message_update","message":{}}"#).is_none()
-        );
+        assert!(event_from_stream_line(r#"{"type":"message_update","message":{}}"#).is_none());
     }
 
     #[test]
@@ -2506,7 +2653,10 @@ merouter       claude-sonnet-4.6                    200K     64K      no        
             .iter()
             .any(|m| m.id == "huggingface/deepseek-ai/DeepSeek-R1"));
         // anthropic/openai/google/merouter float first — openai before huggingface
-        let oi = list.iter().position(|m| m.id.starts_with("openai/")).unwrap();
+        let oi = list
+            .iter()
+            .position(|m| m.id.starts_with("openai/"))
+            .unwrap();
         let hi = list
             .iter()
             .position(|m| m.id.starts_with("huggingface/"))

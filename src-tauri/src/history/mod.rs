@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use tauri::{AppHandle, Manager};
 use crate::state::*;
@@ -107,10 +108,21 @@ pub(crate) fn default_history_source() -> String {
     "fn".into()
 }
 pub(crate) fn load_history_from_disk() -> Vec<HistoryEntry> {
-    fs::read_to_string(history_path())
-        .ok()
-        .and_then(|data| serde_json::from_str(&data).ok())
-        .unwrap_or_default()
+    let path = history_path();
+    match fs::read_to_string(&path) {
+        Ok(data) => match serde_json::from_str(&data) {
+            Ok(history) => history,
+            Err(error) => {
+                crate::elog::elog!("[history] parse failed {:?}: {error}", path);
+                Vec::new()
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            crate::elog::elog!("[history] read failed {:?}: {error}", path);
+            Vec::new()
+        }
+    }
 }
 
 /// List/IPC payload — drop alignment + segments (can be MiB-scale per entry).
@@ -139,9 +151,15 @@ pub(crate) fn history_entry_for_list(entry: &HistoryEntry) -> HistoryEntry {
 }
 
 pub(crate) fn save_history_to_disk(history: &[HistoryEntry]) -> Result<(), String> {
-    fs::create_dir_all(app_data_dir()).map_err(|e| e.to_string())?;
-    let data = serde_json::to_string_pretty(history).map_err(|e| e.to_string())?;
-    fs::write(history_path(), data).map_err(|e| e.to_string())
+    let dir = app_data_dir();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut tmp = tempfile::NamedTempFile::new_in(&dir).map_err(|e| e.to_string())?;
+    serde_json::to_writer(&mut tmp, history).map_err(|e| e.to_string())?;
+    tmp.flush().map_err(|e| e.to_string())?;
+    tmp.as_file().sync_all().map_err(|e| e.to_string())?;
+    tmp.persist(history_path())
+        .map_err(|e| e.error.to_string())?;
+    Ok(())
 }
 pub(crate) fn append_history(
     app: &AppHandle,
@@ -163,6 +181,13 @@ pub(crate) fn append_history_with_user(
     user_text: Option<&str>,
 ) -> Option<String> {
     let state = app.state::<AsrEngine>();
+    let _persist = match state.inner().history_persist.lock() {
+        Ok(lock) => lock,
+        Err(error) => {
+            crate::elog::elog!("[history] append serialization failed: {error}");
+            return None;
+        }
+    };
     // Lock order: config → history (same as apply_learned_terms) to avoid deadlock.
     let translate_target_language = if source == "translate" {
         state
@@ -177,7 +202,10 @@ pub(crate) fn append_history_with_user(
     };
     let mut history = match state.inner().history.lock() {
         Ok(history) => history,
-        Err(_) => return None,
+        Err(error) => {
+            crate::elog::elog!("[history] append failed: {error}");
+            return None;
+        }
     };
     let id = format!(
         "{}-{}",
@@ -222,7 +250,12 @@ pub(crate) fn append_history_with_user(
         },
     );
     history.truncate(5000);
-    let _ = save_history_to_disk(&history);
+    let snapshot = history.clone();
+    drop(history);
+    if let Err(error) = save_history_to_disk(&snapshot) {
+        crate::elog::elog!("[history] append persist failed: {error}");
+        return None;
+    }
     Some(id)
 }
 
@@ -253,7 +286,6 @@ pub(crate) fn rate_history_entry_by_id(
     } else {
         return Err(format!("invalid quality_rating: {trimmed}"));
     }
-    save_history_to_disk(history)?;
     Ok(true)
 }
 
@@ -282,7 +314,6 @@ pub(crate) fn set_history_user_text_by_id(
         entry.quality_rating = Some("bad".into());
         entry.rated_at = Some(chrono::Utc::now().to_rfc3339());
     }
-    save_history_to_disk(history)?;
     Ok(true)
 }
 
@@ -318,7 +349,6 @@ pub(crate) fn mark_history_learn_status_by_id(
     } else {
         return Err(format!("invalid learn_status: {trimmed}"));
     }
-    save_history_to_disk(history)?;
     Ok(true)
 }
 
@@ -343,9 +373,6 @@ pub(crate) fn mark_history_learn_status_many(
             entry.learn_status = next.clone();
             n += 1;
         }
-    }
-    if n > 0 {
-        save_history_to_disk(history)?;
     }
     Ok(n)
 }
@@ -387,8 +414,6 @@ pub(crate) fn apply_learned_terms_to_state(
             merge_unique_preserve(&mut entry.learn_terms, terms);
         }
     }
-    save_config_to_disk(config)?;
-    save_history_to_disk(history)?;
     Ok(config.vocabulary.clone())
 }
 
@@ -462,7 +487,6 @@ pub(crate) fn delete_history_entry_by_id(
     if let Some(path) = entry.audio_path.as_deref() {
         remove_recording_if_owned(path);
     }
-    save_history_to_disk(history)?;
     Ok(true)
 }
 

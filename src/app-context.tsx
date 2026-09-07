@@ -15,6 +15,7 @@ import { toast } from "@/lib/toast";
 import { useNavigate } from "react-router-dom";
 import type {
   AgentJob,
+  AgentJobStreamUpdate,
   AppConfig,
   FloatingPayload,
   HistoryEntry,
@@ -400,6 +401,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
           next[idx] = event.payload;
           return next;
         });
+      }),
+      listen<AgentJobStreamUpdate>("agent-job-stream", (event) => {
+        const delta = event.payload;
+        setAgentJobs((prev) =>
+          prev.map((job) => {
+            if (job.id !== delta.id) return job;
+            const events = delta.event
+              ? [...(job.events ?? []), delta.event].slice(-400)
+              : job.events;
+            return {
+              ...job,
+              progress: delta.progress ?? job.progress,
+              session_id: delta.session_id ?? job.session_id,
+              events,
+            };
+          }),
+        );
       }),
       listen<{ id: string }>("agent-job-deleted", (event) => {
         setAgentJobs((prev) => prev.filter((j) => j.id !== event.payload.id));

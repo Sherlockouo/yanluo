@@ -25,7 +25,6 @@ pub(crate) fn spawn_audio_level_pump(app: AppHandle, recording: Arc<AtomicBool>)
                     slot.rms = rms;
                 }
                 let payload = AudioLevelPayload { rms, bands };
-                let _ = app.emit("audio-level", &payload);
                 let _ = app.emit_to("floating", "audio-level", &payload);
             }
             std::thread::sleep(Duration::from_millis(16));
@@ -38,7 +37,6 @@ pub(crate) fn spawn_audio_level_pump(app: AppHandle, recording: Arc<AtomicBool>)
             rms: 0.0,
             bands: vec![0.0; HUD_BAND_COUNT],
         };
-        let _ = app.emit("audio-level", &silence);
         let _ = app.emit_to("floating", "audio-level", &silence);
     });
 }
@@ -274,9 +272,11 @@ pub(crate) fn emit_floating_status(app: &AppHandle, visible: bool, state: &str, 
     // AppKit: always hop to main thread (mlx-worker must not call makeKey*).
     let keyable = visible && (state == "editing" || mode == "agent");
     crate::platform::set_floating_hud_keyable(app, keyable);
-    let _ = app.emit("floating-status", &payload);
+    let _ = app.emit_to("main", "floating-status", &payload);
     let _ = app.emit_to("floating", "floating-status", &payload);
-    let _ = app.emit_to("floating-lang", "floating-status", &payload);
+    if app.get_webview_window("floating-lang").is_some() {
+        let _ = app.emit_to("floating-lang", "floating-status", &payload);
+    }
 }
 
 pub(crate) const FLOATING_HUD_H: f64 = 56.0;
@@ -750,8 +750,6 @@ pub(crate) fn persist_floating_hud_position(window: &tauri::WebviewWindow) {
 
 pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
     if app.get_webview_window("floating").is_some() {
-        let _ = create_floating_lang_window(app);
-        let _ = create_floating_agent_menu_window(app);
         return Ok(());
     }
     let (x, y) = resolve_hud_logical_position(app, FLOATING_HUD_MIN_W);
@@ -820,8 +818,6 @@ pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
     });
 
     crate::elog::elog!("[floating] ASR HUD window created");
-    let _ = create_floating_lang_window(app);
-    let _ = create_floating_agent_menu_window(app);
     Ok(())
 }
 
@@ -937,6 +933,12 @@ fn translate_lang_chip_should_show(app: &AppHandle) -> bool {
 
 /// Show/hide the separate translate-target chip. Call on the AppKit main thread.
 pub(crate) fn sync_floating_lang_chip(app: &AppHandle, show: bool) {
+    if show && app.get_webview_window("floating-lang").is_none() {
+        if let Err(error) = create_floating_lang_window(app) {
+            crate::elog::elog!("[floating-lang] create failed: {error}");
+            return;
+        }
+    }
     let Some(lang) = app.get_webview_window("floating-lang") else {
         return;
     };

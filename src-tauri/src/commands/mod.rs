@@ -219,6 +219,7 @@ pub(crate) fn get_history_entry(
 
 #[tauri::command]
 pub(crate) fn clear_history(engine: State<'_, AsrEngine>) -> Result<(), String> {
+    let _persist = engine.inner().history_persist.lock().map_err(|e| e.to_string())?;
     {
         let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
         history.clear();
@@ -228,8 +229,16 @@ pub(crate) fn clear_history(engine: State<'_, AsrEngine>) -> Result<(), String> 
 
 #[tauri::command]
 pub(crate) fn delete_history_entry(id: String, engine: State<'_, AsrEngine>) -> Result<bool, String> {
-    let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
-    delete_history_entry_by_id(&mut history, &id)
+    let _persist = engine.inner().history_persist.lock().map_err(|e| e.to_string())?;
+    let (removed, snapshot) = {
+        let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
+        let removed = delete_history_entry_by_id(&mut history, &id)?;
+        (removed, history.clone())
+    };
+    if removed {
+        save_history_to_disk(&snapshot)?;
+    }
+    Ok(removed)
 }
 
 /// Rate ASR quality on a history entry: "bad" | "ok" | "good" (empty clears).
@@ -239,8 +248,16 @@ pub(crate) fn rate_history_entry(
     rating: String,
     engine: State<'_, AsrEngine>,
 ) -> Result<bool, String> {
-    let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
-    rate_history_entry_by_id(&mut history, &id, &rating)
+    let _persist = engine.inner().history_persist.lock().map_err(|e| e.to_string())?;
+    let (updated, snapshot) = {
+        let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
+        let updated = rate_history_entry_by_id(&mut history, &id, &rating)?;
+        (updated, history.clone())
+    };
+    if updated {
+        save_history_to_disk(&snapshot)?;
+    }
+    Ok(updated)
 }
 
 /// Save user gold correction for learn/few-shot.
@@ -250,8 +267,16 @@ pub(crate) fn set_history_user_text(
     user_text: String,
     engine: State<'_, AsrEngine>,
 ) -> Result<bool, String> {
-    let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
-    set_history_user_text_by_id(&mut history, &id, &user_text)
+    let _persist = engine.inner().history_persist.lock().map_err(|e| e.to_string())?;
+    let (updated, snapshot) = {
+        let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
+        let updated = set_history_user_text_by_id(&mut history, &id, &user_text)?;
+        (updated, history.clone())
+    };
+    if updated {
+        save_history_to_disk(&snapshot)?;
+    }
+    Ok(updated)
 }
 
 /// Mark learn_status: "suggested" | "distilled" | "applied" | "skipped" (empty clears).
@@ -261,8 +286,16 @@ pub(crate) fn mark_history_learn_status(
     status: String,
     engine: State<'_, AsrEngine>,
 ) -> Result<bool, String> {
-    let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
-    mark_history_learn_status_by_id(&mut history, &id, &status)
+    let _persist = engine.inner().history_persist.lock().map_err(|e| e.to_string())?;
+    let (updated, snapshot) = {
+        let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
+        let updated = mark_history_learn_status_by_id(&mut history, &id, &status)?;
+        (updated, history.clone())
+    };
+    if updated {
+        save_history_to_disk(&snapshot)?;
+    }
+    Ok(updated)
 }
 
 /// Few-shot pairs currently injected into refine prompts (设置 → 纠错学习 管理面板).
@@ -278,8 +311,16 @@ pub(crate) fn mark_history_learn_status_batch(
     status: String,
     engine: State<'_, AsrEngine>,
 ) -> Result<usize, String> {
-    let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
-    mark_history_learn_status_many(&mut history, &ids, &status)
+    let _persist = engine.inner().history_persist.lock().map_err(|e| e.to_string())?;
+    let (updated, snapshot) = {
+        let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
+        let updated = mark_history_learn_status_many(&mut history, &ids, &status)?;
+        (updated, history.clone())
+    };
+    if updated > 0 {
+        save_history_to_disk(&snapshot)?;
+    }
+    Ok(updated)
 }
 
 /// Merge terms into vocabulary and mark entries learn_status=applied.
@@ -290,17 +331,15 @@ pub(crate) fn apply_learned_terms(
     terms: Vec<String>,
     engine: State<'_, AsrEngine>,
 ) -> Result<Vec<String>, String> {
-    let vocabulary = {
+    let _persist = engine.inner().history_persist.lock().map_err(|e| e.to_string())?;
+    let (vocabulary, config, history) = {
         let mut config = engine.inner().config.lock().map_err(|e| e.to_string())?;
         let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
-        apply_learned_terms_to_state(&mut config, &mut history, &ids, &terms)?
+        let vocabulary = apply_learned_terms_to_state(&mut config, &mut history, &ids, &terms)?;
+        save_config_to_disk(&config)?;
+        (vocabulary, config.clone(), history.clone())
     };
-    let config = engine
-        .inner()
-        .config
-        .lock()
-        .map(|c| c.clone())
-        .map_err(|e| e.to_string())?;
+    save_history_to_disk(&history)?;
     let _ = app.emit("config-updated", &config);
     Ok(vocabulary)
 }
@@ -515,35 +554,35 @@ fn mine_homophone_pair(asr: &str, gold: &str) -> Option<String> {
 /// Keep the newest `keep` entries; drop the rest. `keep=0` clears all.
 #[tauri::command]
 pub(crate) fn prune_history(keep: usize, engine: State<'_, AsrEngine>) -> Result<usize, String> {
-    let remaining = {
+    let _persist = engine.inner().history_persist.lock().map_err(|e| e.to_string())?;
+    let (remaining, snapshot) = {
         let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
         if keep == 0 {
             history.clear();
         } else {
             history.truncate(keep);
         }
-        let n = history.len();
-        save_history_to_disk(&history)?;
-        n
+        (history.len(), history.clone())
     };
+    save_history_to_disk(&snapshot)?;
     Ok(remaining)
 }
 
 /// Drop entries older than `days` (by created_at). Returns remaining count.
 #[tauri::command]
 pub(crate) fn prune_history_older_than(days: u64, engine: State<'_, AsrEngine>) -> Result<usize, String> {
+    let _persist = engine.inner().history_persist.lock().map_err(|e| e.to_string())?;
     let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
-    let remaining = {
+    let (remaining, snapshot) = {
         let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
         history.retain(|entry| {
             chrono::DateTime::parse_from_rfc3339(&entry.created_at)
                 .map(|dt| dt.with_timezone(&chrono::Utc) >= cutoff)
                 .unwrap_or(true)
         });
-        let n = history.len();
-        save_history_to_disk(&history)?;
-        n
+        (history.len(), history.clone())
     };
+    save_history_to_disk(&snapshot)?;
     Ok(remaining)
 }
 
@@ -778,7 +817,7 @@ pub(crate) fn start_recording_impl(
     }
     {
         let mut guard = engine.inner().recorder.lock().map_err(|e| e.to_string())?;
-        *guard = Some(SendWrapper::new(rec));
+        *guard = Some(rec);
     }
     engine
         .inner()
@@ -1205,7 +1244,6 @@ pub(crate) fn stop_recording_impl(app: &AppHandle) -> Result<(), String> {
     };
     emit_floating_status(app, show_hud, "processing", &hud_text, 0.0);
     if session == "agent" {
-        let _ = app.emit("agent-voice-status", "processing");
         let _ = app.emit_to("floating", "agent-voice-status", "processing");
     }
 
@@ -1363,7 +1401,6 @@ pub(crate) fn stop_recording_impl(app: &AppHandle) -> Result<(), String> {
         } else {
             emit_floating_status(&app, false, "idle", "", 0.0);
             if AsrEngine::session_mode(&app) == "agent" {
-                let _ = app.emit("agent-transcription-result", &result);
                 let _ = app.emit_to("floating", "agent-transcription-result", &result);
             }
         }
@@ -1613,6 +1650,7 @@ pub(crate) fn learn_from_edit(
 ) -> Result<Vec<LearnedPairInfo>, String> {
     let candidates = crate::learn::extract_correction_pairs(&before, &after);
     let state = app.state::<AsrEngine>();
+    let _persist = state.inner().history_persist.lock().map_err(|e| e.to_string())?;
     let mut learned = Vec::new();
 
     for c in &candidates {
@@ -1629,14 +1667,18 @@ pub(crate) fn learn_from_edit(
     }
 
     // Update history entry user_text and learn_status
-    if let Ok(mut history) = state.inner().history.lock() {
-        if let Some(entry) = history.iter_mut().find(|e| e.id == entry_id) {
-            entry.user_text = Some(after.clone());
-            entry.text = after;
-            entry.learn_status = Some("applied".into());
-        }
-        let _ = save_history_to_disk(&history);
-    }
+    let history_snapshot = {
+        let mut history = state.inner().history.lock().map_err(|e| e.to_string())?;
+        let entry = history
+            .iter_mut()
+            .find(|e| e.id == entry_id)
+            .ok_or_else(|| format!("history entry not found: {entry_id}"))?;
+        entry.user_text = Some(after.clone());
+        entry.text = after;
+        entry.learn_status = Some("applied".into());
+        history.clone()
+    };
+    save_history_to_disk(&history_snapshot)?;
 
     if !learned.is_empty() {
         crate::elog::elog!(

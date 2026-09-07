@@ -84,6 +84,13 @@ export type AgentJob = {
   turn_attachments?: string[];
 };
 
+export type AgentJobStreamUpdate = {
+  id: string;
+  progress?: string | null;
+  session_id?: string | null;
+  event?: AgentJobEvent | null;
+};
+
 export type AgentPathInfo = {
   path: string;
   name: string;

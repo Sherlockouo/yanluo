@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::Manager;
@@ -639,10 +640,21 @@ pub(crate) fn history_path() -> PathBuf {
 }
 
 pub(crate) fn load_config_from_disk() -> AppConfig {
-    let mut config = fs::read_to_string(config_path())
-        .ok()
-        .and_then(|data| serde_json::from_str(&data).ok())
-        .unwrap_or_default();
+    let path = config_path();
+    let mut config = match fs::read_to_string(&path) {
+        Ok(data) => match serde_json::from_str(&data) {
+            Ok(config) => config,
+            Err(error) => {
+                crate::elog::elog!("[config] parse failed {:?}: {error}", path);
+                AppConfig::default()
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => AppConfig::default(),
+        Err(error) => {
+            crate::elog::elog!("[config] read failed {:?}: {error}", path);
+            AppConfig::default()
+        }
+    };
     normalize_config_for_platform(&mut config);
     ensure_agent_profiles(&mut config);
     let before = config.agent_cwd.clone();
@@ -707,9 +719,14 @@ pub(crate) fn normalize_config_for_platform(config: &mut AppConfig) {
 }
 
 pub(crate) fn save_config_to_disk(config: &AppConfig) -> Result<(), String> {
-    fs::create_dir_all(app_data_dir()).map_err(|e| e.to_string())?;
-    let data = serde_json::to_string_pretty(config).map_err(|e| e.to_string())?;
-    fs::write(config_path(), data).map_err(|e| e.to_string())?;
+    let dir = app_data_dir();
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut tmp = tempfile::NamedTempFile::new_in(&dir).map_err(|e| e.to_string())?;
+    serde_json::to_writer(&mut tmp, config).map_err(|e| e.to_string())?;
+    tmp.flush().map_err(|e| e.to_string())?;
+    tmp.as_file().sync_all().map_err(|e| e.to_string())?;
+    tmp.persist(config_path())
+        .map_err(|e| e.error.to_string())?;
     write_user_default_language(&config.language);
     Ok(())
 }

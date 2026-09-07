@@ -96,7 +96,6 @@ pub(crate) fn handle_asr_partial_ex(
             segment_index,
         };
         // Dual-emit: floating webview may miss broadcast-only events (parity with audio-level).
-        let _ = app.emit("partial-result", &payload);
         let _ = app.emit_to("floating", "partial-result", &payload);
         // Keep Rust slot in sync with HUD — accept_floating_preview / stop_recording
         // read slot.text; FE keepLive alone is not enough (mid-pipeline Fn was silent-empty).
@@ -404,7 +403,6 @@ fn apply_retarget_translation(app: &AppHandle, epoch: u64, asr: &str, translated
     };
     emit_floating_status(app, true, "recording", &out, 0.0);
     let payload = PartialResult::display(out);
-    let _ = app.emit("partial-result", &payload);
     let _ = app.emit_to("floating", "partial-result", &payload);
 }
 

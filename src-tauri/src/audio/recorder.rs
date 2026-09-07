@@ -8,7 +8,7 @@
 //! All paths deliver 16 kHz mono f32 into shared buffers.
 
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::SampleFormat;
@@ -97,8 +97,7 @@ impl LiveMeter {
         let env = self.envelope();
         let sources = self.sources.lock().ok().and_then(|g| g.clone());
         if let Some(src) = sources {
-            if let Some(buf) = mix_buffers_tail_try(&src.mic, &src.system, src.mode, METER_WINDOW)
-            {
+            if let Some(buf) = mix_buffers_tail_try(&src.mic, &src.system, src.mode, METER_WINDOW) {
                 if !buf.is_empty() {
                     let rms = meter_from_slice(&buf).max(env);
                     let bands = goertzel_bands(&buf, TARGET_SR as f32, METER_BAND_COUNT);
@@ -130,7 +129,11 @@ fn envelope_bands(level: f32) -> Vec<f32> {
     let n = METER_BAND_COUNT;
     (0..n)
         .map(|i| {
-            let t = if n == 1 { 0.5 } else { i as f32 / (n - 1) as f32 };
+            let t = if n == 1 {
+                0.5
+            } else {
+                i as f32 / (n - 1) as f32
+            };
             let shape = 0.4 + 0.6 * (std::f32::consts::PI * t).sin();
             shape * level
         })
@@ -207,12 +210,35 @@ enum MicHandle {
     Leased(WarmMicLease),
 }
 
-/// Active audio recorder. Drop streams / system capture to stop.
+struct CaptureOwner {
+    stop_tx: mpsc::Sender<()>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl CaptureOwner {
+    fn stop(&mut self) -> Result<(), String> {
+        let Some(thread) = self.thread.take() else {
+            return Ok(());
+        };
+        let send_result = self.stop_tx.send(());
+        let join_result = thread.join();
+        send_result.map_err(|_| "audio capture owner exited before stop".to_string())?;
+        join_result.map_err(|_| "audio capture owner panicked during stop".to_string())
+    }
+}
+
+impl Drop for CaptureOwner {
+    fn drop(&mut self) {
+        if let Err(error) = self.stop() {
+            crate::elog::elog!("[audio] capture owner stop failed: {error}");
+        }
+    }
+}
+
+/// Active audio recorder. Native capture handles stay on `CaptureOwner`'s
+/// thread; this Send-safe facade only shares PCM buffers and a stop channel.
 pub struct AudioRecorder {
-    /// Mic stream (cpal) — present for External / Both.
-    _mic_stream: Option<MicHandle>,
-    /// System-audio capture handle — present for System / Both (macOS).
-    _system: Option<SystemAudioCapture>,
+    owner: CaptureOwner,
     mic_samples: Arc<Mutex<Vec<f32>>>,
     system_samples: Arc<Mutex<Vec<f32>>>,
     mode: AudioCaptureMode,
@@ -226,79 +252,57 @@ impl AudioRecorder {
         live_meter: Arc<LiveMeter>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         live_meter.clear();
-        let want_mic = matches!(mode, AudioCaptureMode::External | AudioCaptureMode::Both);
-        let want_system = matches!(mode, AudioCaptureMode::System | AudioCaptureMode::Both);
-
-        // Warm path: a speculative capture started on Fn key-down may already
-        // be flowing — promote it instead of cold-booting the AudioUnit,
-        // keeping speech captured between press and release. External only:
-        // Both mixes mic/system by index and must not offset the mic.
-        let fresh_mic = Arc::new(Mutex::new(Vec::<f32>::new()));
-        let (mut mic_stream, mic_samples) = if want_mic {
-            let warm = if mode == AudioCaptureMode::External {
-                take_speculative_mic()
-            } else {
-                discard_speculative_mic();
-                None
-            };
-            match warm {
-                Some(lease) => {
-                    let buffered = lease.samples.lock().map(|s| s.len()).unwrap_or(0);
-                    crate::elog::elog!(
-                        "[audio] promoted speculative mic (pre-buffered {:.2}s)",
-                        buffered as f64 / 16_000.0
-                    );
-                    let samples = lease.samples.clone();
-                    (Some(MicHandle::Leased(lease)), samples)
-                }
-                None => (
-                    Some(MicHandle::Owned(start_mic_stream(
-                        fresh_mic.clone(),
-                        live_meter.clone(),
-                    )?)),
-                    fresh_mic,
-                ),
-            }
+        let warm_mic = if mode == AudioCaptureMode::External {
+            take_speculative_mic()
         } else {
             discard_speculative_mic();
-            (None, fresh_mic)
+            None
         };
+        let mic_samples = warm_mic
+            .as_ref()
+            .map(|lease| lease.samples.clone())
+            .unwrap_or_else(|| Arc::new(Mutex::new(Vec::<f32>::new())));
         let system_samples = Arc::new(Mutex::new(Vec::<f32>::new()));
-
-        let (system, effective_mode, fallback_warning) = if want_system {
-            match SystemAudioCapture::start(
-                system_samples.clone(),
-                live_meter.clone(),
-            ) {
-                Ok(cap) => (Some(cap), mode, None),
-                Err(err) => {
-                    // Screen-recording TCC denied / unavailable: keep going on mic
-                    // even when the user picked「只录系统」— better than hard-fail.
-                    let msg = format!(
-                        "系统音频不可用（{err}），已退回只录麦克风。需要录系统声时请到「设置 → 权限」授予屏幕录制。"
-                    );
-                    crate::elog::elog!("[audio] {msg}");
-                    if mic_stream.is_none() {
-                        match start_mic_stream(mic_samples.clone(), live_meter.clone()) {
-                            Ok(stream) => mic_stream = Some(MicHandle::Owned(stream)),
-                            Err(mic_err) => {
-                                return Err(format!(
-                                    "系统音频不可用（{err}）；麦克风也启动失败（{mic_err}）"
-                                )
-                                .into());
-                            }
+        let (ready_tx, ready_rx) = mpsc::sync_channel(0);
+        let (stop_tx, stop_rx) = mpsc::channel();
+        let mic_for_owner = mic_samples.clone();
+        let system_for_owner = system_samples.clone();
+        let meter_for_owner = live_meter.clone();
+        let thread = std::thread::Builder::new()
+            .name("audio-capture-owner".into())
+            .spawn(move || {
+                let started = start_capture_on_owner(
+                    mode,
+                    warm_mic,
+                    mic_for_owner,
+                    system_for_owner,
+                    meter_for_owner,
+                );
+                match started {
+                    Ok((mic, system, effective_mode, fallback_warning)) => {
+                        if ready_tx
+                            .send(Ok((effective_mode, fallback_warning)))
+                            .is_err()
+                        {
+                            return;
                         }
+                        let _ = stop_rx.recv();
+                        drop(mic);
+                        drop(system);
                     }
-                    (None, AudioCaptureMode::External, Some(msg))
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(error));
+                    }
                 }
-            }
-        } else {
-            (None, mode, None)
+            })?;
+        let (effective_mode, fallback_warning) = ready_rx
+            .recv()
+            .map_err(|_| "audio capture owner exited during startup")?
+            .map_err(|error| -> Box<dyn std::error::Error> { error.into() })?;
+        let owner = CaptureOwner {
+            stop_tx,
+            thread: Some(thread),
         };
-
-        if mic_stream.is_none() && system.is_none() {
-            return Err("no audio capture source started".into());
-        }
 
         crate::elog::elog!(
             "[audio] capture mode={} (effective={})",
@@ -306,15 +310,10 @@ impl AudioRecorder {
             effective_mode.as_str()
         );
 
-        live_meter.bind_sources(
-            mic_samples.clone(),
-            system_samples.clone(),
-            effective_mode,
-        );
+        live_meter.bind_sources(mic_samples.clone(), system_samples.clone(), effective_mode);
 
         Ok(Self {
-            _mic_stream: mic_stream,
-            _system: system,
+            owner,
             mic_samples,
             system_samples,
             mode: effective_mode,
@@ -343,7 +342,12 @@ impl AudioRecorder {
     /// for cold archive (final align / export). Hot buffers keep `[keep_from..]`
     /// so the next segment's overlap remains available.
     pub fn drain_before(&self, keep_from: usize) -> Vec<f32> {
-        drain_buffers_before(&self.mic_samples, &self.system_samples, self.mode, keep_from)
+        drain_buffers_before(
+            &self.mic_samples,
+            &self.system_samples,
+            self.mode,
+            keep_from,
+        )
     }
 
     /// Live meter 0–1 from recent samples (tail only — never clones the full buffer).
@@ -369,12 +373,76 @@ impl AudioRecorder {
     }
 
     /// Stop recording and return all captured samples (16kHz mono f32).
-    pub fn stop(self) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+    pub fn stop(mut self) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+        self.owner.stop()?;
         let samples = mix_buffers(&self.mic_samples, &self.system_samples, self.mode);
-        drop(self._mic_stream);
-        drop(self._system);
         Ok(samples)
     }
+}
+
+fn start_capture_on_owner(
+    mode: AudioCaptureMode,
+    warm_mic: Option<WarmMicLease>,
+    mic_samples: Arc<Mutex<Vec<f32>>>,
+    system_samples: Arc<Mutex<Vec<f32>>>,
+    live_meter: Arc<LiveMeter>,
+) -> Result<
+    (
+        Option<MicHandle>,
+        Option<SystemAudioCapture>,
+        AudioCaptureMode,
+        Option<String>,
+    ),
+    String,
+> {
+    let want_mic = matches!(mode, AudioCaptureMode::External | AudioCaptureMode::Both);
+    let want_system = matches!(mode, AudioCaptureMode::System | AudioCaptureMode::Both);
+    let mut mic_stream = if want_mic {
+        match warm_mic {
+            Some(lease) => {
+                let buffered = lease.samples.lock().map(|s| s.len()).unwrap_or(0);
+                crate::elog::elog!(
+                    "[audio] promoted speculative mic (pre-buffered {:.2}s)",
+                    buffered as f64 / 16_000.0
+                );
+                Some(MicHandle::Leased(lease))
+            }
+            None => Some(MicHandle::Owned(
+                start_mic_stream(mic_samples.clone(), live_meter.clone())
+                    .map_err(|error| error.to_string())?,
+            )),
+        }
+    } else {
+        discard_speculative_mic();
+        None
+    };
+
+    let (system, effective_mode, fallback_warning) = if want_system {
+        match SystemAudioCapture::start(system_samples, live_meter.clone()) {
+            Ok(cap) => (Some(cap), mode, None),
+            Err(error) => {
+                let message = format!(
+                    "系统音频不可用（{error}），已退回只录麦克风。需要录系统声时请到「设置 → 权限」授予屏幕录制。"
+                );
+                crate::elog::elog!("[audio] {message}");
+                if mic_stream.is_none() {
+                    mic_stream = Some(MicHandle::Owned(
+                        start_mic_stream(mic_samples, live_meter).map_err(|mic_error| {
+                            format!("系统音频不可用（{error}）；麦克风也启动失败（{mic_error}）")
+                        })?,
+                    ));
+                }
+                (None, AudioCaptureMode::External, Some(message))
+            }
+        }
+    } else {
+        (None, mode, None)
+    };
+
+    if mic_stream.is_none() && system.is_none() {
+        return Err("no audio capture source started".into());
+    }
+    Ok((mic_stream, system, effective_mode, fallback_warning))
 }
 
 // ---------------------------------------------------------------------------
@@ -406,13 +474,11 @@ struct SpeculativeMic {
 }
 
 fn speculative_slot() -> &'static Mutex<Option<SpeculativeMic>> {
-    static SLOT: std::sync::OnceLock<Mutex<Option<SpeculativeMic>>> =
-        std::sync::OnceLock::new();
+    static SLOT: std::sync::OnceLock<Mutex<Option<SpeculativeMic>>> = std::sync::OnceLock::new();
     SLOT.get_or_init(|| Mutex::new(None))
 }
 
-const SPECULATIVE_REAP_AFTER: std::time::Duration =
-    std::time::Duration::from_secs(10);
+const SPECULATIVE_REAP_AFTER: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Begin warming the mic. Called from the hotkey tap thread — never blocks:
 /// stream construction runs on the owner thread.
@@ -489,11 +555,10 @@ impl Drop for WarmMicLease {
 /// warm (regular cold start follows).
 pub fn take_speculative_mic() -> Option<WarmMicLease> {
     let mut slot = speculative_slot().lock().ok()?;
-    slot.take()
-        .map(|spec| WarmMicLease {
-            samples: spec.samples,
-            cmd: Some(spec.cmd),
-        })
+    slot.take().map(|spec| WarmMicLease {
+        samples: spec.samples,
+        cmd: Some(spec.cmd),
+    })
 }
 
 /// Drop the speculative capture without using it (cancelled chord / error).
@@ -724,8 +789,7 @@ fn start_mic_stream(
         }
     }
 
-    let (config, sample_format) =
-        best.ok_or("No supported input stream configuration found")?;
+    let (config, sample_format) = best.ok_or("No supported input stream configuration found")?;
 
     let actual_sr = config.sample_rate().0 as usize;
     let actual_channels = config.channels() as usize;
@@ -986,10 +1050,7 @@ fn process_chunk(
         ds.process(&mono)
     };
 
-    let peak = resampled
-        .iter()
-        .map(|s| s.abs())
-        .fold(0.0_f32, f32::max);
+    let peak = resampled.iter().map(|s| s.abs()).fold(0.0_f32, f32::max);
     if let Ok(mut buf) = out.lock() {
         buf.extend_from_slice(&resampled);
     }
@@ -1074,8 +1135,7 @@ impl Downsampler {
         let base = (self.in_total - hist_len) as f64;
         let last_abs = (self.in_total + input.len() - 1) as f64;
         let half = self.half as f64;
-        let mut out =
-            Vec::with_capacity((input.len() as f64 / self.step).ceil() as usize + 4);
+        let mut out = Vec::with_capacity((input.len() as f64 / self.step).ceil() as usize + 4);
         let mut guard = 0usize;
         while self.src_pos + half <= last_abs && guard < input.len() + 8 {
             let mut acc = 0.0f32;
@@ -1216,7 +1276,11 @@ mod downsample_tests {
         let mut ds2 = Downsampler::new(48_000, 16_000);
         let _ = ds2.process(&sine(12_000.0, 48_000, 4800));
         let hiss = ds2.process(&sine(12_000.0, 48_000, 4800));
-        assert!(rms(&hiss) < 0.05, "12kHz should be suppressed, got {}", rms(&hiss));
+        assert!(
+            rms(&hiss) < 0.05,
+            "12kHz should be suppressed, got {}",
+            rms(&hiss)
+        );
     }
 
     /// Chunk-streaming continuity: splitting the input must produce the same

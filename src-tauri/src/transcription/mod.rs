@@ -1384,13 +1384,10 @@ pub(crate) fn finalize_successful_result(
     // Agent voice: no paste, no history — stay on floating HUD for text edit + dispatch.
     if is_agent {
         let partial = PartialResult::display(result.text.clone());
-        let _ = app.emit("partial-result", &partial);
         let _ = app.emit_to("floating", "partial-result", &partial);
         let snapshot = result.clone();
         emit_floating_status(app, true, "editing", &result.text, 0.0);
-        let _ = app.emit("agent-transcription-result", &snapshot);
         let _ = app.emit_to("floating", "agent-transcription-result", &snapshot);
-        let _ = app.emit("agent-voice-status", "editing");
         let _ = app.emit_to("floating", "agent-voice-status", "editing");
         return Some(false);
     }
@@ -1506,18 +1503,8 @@ pub(crate) fn finalize_successful_result(
         }),
     );
     let partial = PartialResult::display(result.text.clone());
-    let _ = app.emit("partial-result", &partial);
     let _ = app.emit_to("floating", "partial-result", &partial);
     emit_floating_status(app, true, "editing", &result.text, 0.0);
-    let _ = app.emit(
-        "hud-edit-ready",
-        serde_json::json!({
-            "mode": source,
-            "asr_text": result.raw_text,
-            "text": result.text,
-            "refine_failed": result.refine_failed,
-        }),
-    );
     let _ = app.emit_to(
         "floating",
         "hud-edit-ready",
@@ -2861,24 +2848,17 @@ fn init_local_asr_backend() {
     }
 }
 
-/// GPU warm-up against the pinned qwen3_asr_rs git rev (which ships no
-/// built-in `warmup()`): one offline forward on 1s of silence forces Metal
-/// shader JIT for the shared kernel set (mel / encoder / prefill / decode).
-///
-/// Offline-only on purpose: the streaming pass would leave the encoder in
-/// chunk-local mode and the field is private — leaking that state into
-/// `transcribe_samples` would corrupt file transcriptions. The chunk-local
-/// variants still JIT on the first live session, but they are a small
-/// fraction of the total cold-start cost.
+/// Compile offline GPU kernels before the model becomes visible as ready.
+/// The pinned engine revision's `warmup()` also runs streaming first, which
+/// can alter MLX offline numerics, so keep this path explicitly offline-only.
 #[cfg(feature = "qwen-local")]
 fn warmup_asr_inference(
     inf: &mut qwen3_asr_rs::inference::AsrInference,
 ) -> Result<(), String> {
-    let silence: Vec<f32> = vec![0.0; 16_000];
+    let silence = vec![0.0; 16_000];
     inf.transcribe_samples(&silence, None)
         .map(|_| ())
         .map_err(|e| e.to_string())?;
-    // Force all queued Metal work (shader compilation) to complete now.
     #[cfg(target_os = "macos")]
     {
         qwen3_asr_rs::backend::mlx::stream::synchronize();
@@ -2960,20 +2940,21 @@ pub(crate) fn mlx_worker(
                 crate::elog::elog!("[asr-worker] Loading model from {:?}", path);
                 match load_asr_inference(&path) {
                     Ok(mut inf) => {
-                        // Warm the GPU right after load: forces Metal shader JIT
-                        // so the first real utterance doesn't pay the ~2s
-                        // cold-start that reads as "ASR stuck before the first
-                        // word". "model-loaded" now means ready.
+                        // "model-loaded" means the offline path is warm; a
+                        // failed warmup is a failed load.
                         let warmup_t0 = std::time::Instant::now();
-                        match warmup_asr_inference(&mut inf) {
-                            Ok(()) => crate::elog::elog!(
-                                "[asr-worker] GPU warmup done in {:.0}ms",
-                                warmup_t0.elapsed().as_millis()
-                            ),
-                            Err(e) => crate::elog::elog!(
-                                "[asr-worker] GPU warmup failed (non-fatal): {e}"
-                            ),
+                        if let Err(e) = warmup_asr_inference(&mut inf) {
+                            crate::elog::elog!("[asr-worker] GPU warmup failed: {e}");
+                            model_loaded.store(false, Ordering::Release);
+                            inference = None;
+                            aligner = None;
+                            let _ = app.emit("model-error", &format!("Failed to warm model: {e}"));
+                            continue;
                         }
+                        crate::elog::elog!(
+                            "[asr-worker] GPU warmup done in {:.0}ms",
+                            warmup_t0.elapsed().as_millis()
+                        );
                         inference = Some(inf);
                         model_loaded.store(true, Ordering::Release);
                         let _ = app.emit("model-loaded", &path.to_string_lossy().to_string());
@@ -3896,7 +3877,6 @@ pub(crate) fn mlx_worker(
                 } else {
                     emit_floating_status(&app, false, "idle", "", 0.0);
                     if AsrEngine::session_mode(&app) == "agent" {
-                        let _ = app.emit("agent-transcription-result", &result);
                         let _ = app.emit_to("floating", "agent-transcription-result", &result);
                     }
                 }

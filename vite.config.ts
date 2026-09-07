@@ -31,8 +31,8 @@ export default defineConfig({
   },
   build: {
     target: "esnext",
-    // LightningCSS minify can corrupt Tailwind v4 nested :where(&) selectors.
-    cssMinify: false,
+    // LightningCSS can corrupt Tailwind v4 nested :where(&) selectors.
+    cssMinify: "esbuild",
   },
   resolve: {
     alias: {
