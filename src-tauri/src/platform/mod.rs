@@ -252,6 +252,9 @@ pub(crate) fn fade_out_floating_hud(app: &AppHandle, gen: u64) {
 
     let app = app.clone();
     let _ = app.clone().run_on_main_thread(move || {
+        if floating_fade_gen() != gen {
+            return;
+        }
         let Some(window) = app.get_webview_window("floating") else {
             return;
         };
@@ -360,6 +363,9 @@ pub(crate) fn fade_out_floating_hud(app: &AppHandle, gen: u64) {
 pub(crate) fn set_floating_hud_keyable(app: &tauri::AppHandle, keyable: bool) {
     let app = app.clone();
     let _ = app.clone().run_on_main_thread(move || {
+        if keyable && !floating_status_slot(&app).lock().expect("HUD state poisoned").visible {
+            return;
+        }
         let Some(window) = app.get_webview_window("floating") else {
             return;
         };

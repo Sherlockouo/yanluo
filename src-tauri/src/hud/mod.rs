@@ -122,6 +122,36 @@ fn hud_native_up() -> &'static AtomicBool {
     &UP
 }
 
+/// Called inside the paste main-thread callback. No animation, dispatch, focus
+/// restoration or disk I/O here: Cmd+V follows immediately in the same callback.
+pub(crate) fn hide_floating_before_paste(app: &AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let _main = objc2::MainThreadMarker::new().ok_or("HUD hide must run on main thread")?;
+    let slot = floating_status_slot(app);
+    {
+        let mut status = slot.lock().map_err(|e| format!("HUD state: {e}"))?;
+        status.visible = false;
+        status.state = "idle".into();
+    }
+    bump_floating_fade_gen();
+    hud_native_up().store(false, Ordering::Release);
+    for label in ["floating", "floating-lang", "floating-agent-menu"] {
+        let Some(window) = app.get_webview_window(label) else { continue };
+        #[cfg(target_os = "macos")]
+        unsafe {
+            let ptr = window.ns_window().map_err(|e| format!("{label}: {e}"))?;
+            let native = &*(ptr as *const objc2_app_kit::NSWindow);
+            native.orderOut(None);
+            if native.isVisible() {
+                return Err(format!("{label} is still visible after orderOut"));
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        window.hide().map_err(|e| format!("{label}: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Remember the app that had focus before HUD / paste, so we can hand it back
 /// and so Cmd+V lands in the right place.
 pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
@@ -136,6 +166,10 @@ pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
     // from eprintln!, ObjC edge cases, etc. — see crash in set_floating_window_visible).
     let _ = app.clone().run_on_main_thread(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            // A queued show must not reopen a HUD already dismissed for paste.
+            if visible && !floating_status_slot(&app).lock().expect("HUD state poisoned").visible {
+                return;
+            }
             if let Some(window) = app.get_webview_window("floating") {
                 if visible {
                     // Invalidate any dismiss fade so re-summon isn't stuck at alpha 0.

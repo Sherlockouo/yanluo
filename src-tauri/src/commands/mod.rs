@@ -998,29 +998,6 @@ pub(crate) struct LearnFromHudPayload {
     pub(crate) learned_pairs: Vec<LearnedPairInfo>,
 }
 
-#[cfg(test)]
-mod hud_confirm_tests {
-    #[test]
-    fn editing_hud_is_gone_before_paste() {
-        let source = include_str!("mod.rs");
-        let start = source
-            .rfind("pub(crate) fn confirm_floating_transcript")
-            .expect("confirm function");
-        let body = &source[start..];
-        let end = body
-            .find("pub(crate) fn cancel_floating_transcript")
-            .expect("cancel function");
-        let body = &body[..end];
-        let hide = body
-            .find("finish_floating_hide(app.clone())")
-            .expect("native hide before paste");
-        let paste = body
-            .find("match inject_text_via_paste_on_main")
-            .expect("paste call");
-        assert!(hide < paste, "HUD must disappear before paste starts");
-    }
-}
-
 /// Confirm Fn/⇧Fn HUD edit: hide → paste → history → optional learn.
 #[tauri::command]
 pub(crate) fn confirm_floating_transcript(
@@ -1058,9 +1035,7 @@ pub(crate) fn confirm_floating_transcript(
     };
     result.text = confirmed.clone();
 
-    // The editing HUD must be fully gone before Cmd+V reaches the target app.
-    emit_floating_status(&app, false, "idle", "", 0.0);
-    finish_floating_hide(app.clone());
+    // Shared paste callback orders the native HUD out immediately before Cmd+V.
     match inject_text_via_paste_on_main(&app, &confirmed) {
         Ok(()) => {
             crate::elog::elog!(
@@ -1077,6 +1052,7 @@ pub(crate) fn confirm_floating_transcript(
         }
     }
 
+    emit_floating_status(&app, false, "idle", "", 0.0);
     let user_for_history = if learn {
         Some(confirmed.as_str())
     } else {

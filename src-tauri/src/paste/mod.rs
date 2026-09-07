@@ -49,8 +49,18 @@ pub(crate) fn inject_text_via_paste_on_main(app: &AppHandle, text: &str) -> Resu
     }
     let text = text.to_string();
     let (tx, rx) = mpsc::channel();
+    let paste_app = app.clone();
     app.run_on_main_thread(move || {
-        let result = inject_text_via_paste(&text);
+        let started = std::time::Instant::now();
+        let result = crate::hud::hide_floating_before_paste(&paste_app).and_then(|()| {
+            let hidden_us = started.elapsed().as_micros();
+            let result = inject_text_via_paste(&text);
+            crate::elog::elog!(
+                "[paste] HUD native visible=false before Cmd+V; hide_us={hidden_us} total_us={} success={}",
+                started.elapsed().as_micros(), result.is_ok()
+            );
+            result
+        });
         let _ = tx.send(result);
     })
     .map_err(|e| format!("failed to schedule paste on main thread: {e}"))?;
