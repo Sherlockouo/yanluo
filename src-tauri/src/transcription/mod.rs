@@ -3070,6 +3070,7 @@ fn load_align_inference(
     path: &std::path::Path,
 ) -> Result<qwen3_asr_rs::align::AlignInference, String> {
     use qwen3_asr_rs::tensor::Device;
+    crate::config::validate_align_model_dir(path)?;
     match qwen3_asr_rs::align::AlignInference::load(path, Device::Gpu(0)) {
         Ok(a) => Ok(a),
         Err(gpu_err) => {

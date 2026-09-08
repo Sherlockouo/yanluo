@@ -542,6 +542,25 @@ impl AsrProvider {
         }
     }
 }
+const ALIGN_MODEL_FILES: [&str; 3] = ["config.json", "model.safetensors", "tokenizer.json"];
+
+pub(crate) fn validate_align_model_dir(path: &Path) -> Result<(), String> {
+    let missing: Vec<_> = ALIGN_MODEL_FILES
+        .iter()
+        .filter(|file| !path.join(file).is_file())
+        .copied()
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "Incomplete ForcedAligner directory {:?}; missing {}",
+            path,
+            missing.join(", ")
+        ))
+    }
+}
+
 pub(crate) fn default_align_model_dir() -> String {
     let hf = dirs::home_dir().map(|h| {
         h.join(".cache/huggingface/hub/models--Qwen--Qwen3-ForcedAligner-0.6B/snapshots")
@@ -551,7 +570,7 @@ pub(crate) fn default_align_model_dir() -> String {
             let mut dirs: Vec<_> = entries
                 .filter_map(|e| e.ok())
                 .map(|e| e.path())
-                .filter(|p| p.is_dir() && p.join("config.json").exists())
+                .filter(|p| p.is_dir() && validate_align_model_dir(p).is_ok())
                 .collect();
             dirs.sort();
             if let Some(last) = dirs.pop() {
@@ -671,10 +690,28 @@ pub(crate) fn load_config_from_disk() -> AppConfig {
         }
     };
     normalize_config_for_platform(&mut config);
+    let align_before = config.align_model_dir.clone();
+    if !align_before.trim().is_empty()
+        && validate_align_model_dir(Path::new(&align_before)).is_err()
+    {
+        let fallback = default_align_model_dir();
+        if !fallback.is_empty() {
+            crate::elog::elog!(
+                "[config] replacing incomplete ForcedAligner directory {:?} with {:?}",
+                align_before,
+                fallback
+            );
+            config.align_model_dir = fallback;
+        }
+    }
     ensure_agent_profiles(&mut config);
     let before = config.agent_cwd.clone();
-    if resolve_agent_cwd(&mut config).is_ok() && config.agent_cwd != before {
-        let _ = save_config_to_disk(&config);
+    let agent_cwd_changed =
+        resolve_agent_cwd(&mut config).is_ok() && config.agent_cwd != before;
+    if agent_cwd_changed || config.align_model_dir != align_before {
+        if let Err(error) = save_config_to_disk(&config) {
+            crate::elog::elog!("[config] normalization save failed: {error}");
+        }
     }
     config
 }
@@ -780,5 +817,23 @@ pub(crate) fn write_user_default_language(language: &str) {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = language;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forced_aligner_directory_requires_runtime_files() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("config.json"), []).unwrap();
+        fs::write(dir.path().join("model.safetensors"), []).unwrap();
+        assert!(validate_align_model_dir(dir.path())
+            .unwrap_err()
+            .contains("tokenizer.json"));
+
+        fs::write(dir.path().join("tokenizer.json"), []).unwrap();
+        assert!(validate_align_model_dir(dir.path()).is_ok());
     }
 }
