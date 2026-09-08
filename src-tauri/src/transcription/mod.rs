@@ -260,15 +260,14 @@ fn refine_one_chunk(
     } else {
         format!("\n\n{}", fewshot_block.trim())
     };
-    let system = format!("{base_prompt}{glossary}{fewshot}");
+    let mut system = format!("{base_prompt}{glossary}{fewshot}");
     let model_name = config.llm_model.trim();
     let is_qwen3 = model_name.to_ascii_lowercase().contains("qwen3");
-    // Qwen3 thinking mode pollutes refine output on 1.7b; force no-think.
-    let user_content = if is_qwen3 {
-        format!("整理下面 ASR 文本（纠错 + 按意图润色表达）：\n---\n{input}\n---\n/no_think")
-    } else {
-        format!("整理下面 ASR 文本（纠错 + 按意图润色表达）：\n---\n{input}\n---")
-    };
+    // Editing models may copy the entire user message. Keep instructions and
+    // Qwen3's thinking control in system, never mixed into the transcript.
+    if is_qwen3 {
+        system.push_str("\n/no_think");
+    }
     let request = Request {
         model: model_name,
         temperature: 0.0,
@@ -279,7 +278,7 @@ fn refine_one_chunk(
             },
             Message {
                 role: "user",
-                content: user_content,
+                content: input.to_string(),
             },
         ],
     };
@@ -4198,7 +4197,69 @@ Just vaguely in general, we feature the Apple II. language English";
 
 #[cfg(test)]
 mod refine_artifact_tests {
-    use super::strip_refine_artifacts;
+    use super::{refine_one_chunk, strip_refine_artifacts};
+
+    #[test]
+    fn refine_sends_only_transcript_as_user_message() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            let mut reader = BufReader::new(&mut stream);
+            let mut length = None;
+            loop {
+                let mut line = String::new();
+                assert!(reader.read_line(&mut line).unwrap() > 0);
+                if line == "\r\n" { break; }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = Some(value.trim().parse::<usize>().unwrap());
+                }
+            }
+            let mut bytes = vec![0; length.expect("request body length")];
+            reader.read_exact(&mut bytes).unwrap();
+            let request: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            // A conservative correction model can echo its user message verbatim.
+            let response = serde_json::json!({"choices":[{"message":{
+                "content": request["messages"][1]["content"]
+            }}]}).to_string();
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
+            request
+        });
+        let mut config = crate::config::AppConfig::default();
+        config.llm_enabled = true;
+        config.llm_model = "qwen3-asr-refine:1.7b".into();
+        config.llm_api_base_url = format!("http://{address}/v1");
+        let input = "领导今天说要让干把会议材料准备一下，然后把办公室收拾一下，然后就是把这个舞台搭建一下啊，还有什么顺便都做一下";
+        let result = refine_one_chunk(&config, input, "", &mut || false).unwrap();
+        let request = server.join().unwrap();
+        assert_eq!(request["messages"][1]["content"], input);
+        assert_eq!(result, input, "echoed request must never add prompt text");
+    }
+
+    #[test]
+    #[ignore = "requires local Ollama with qwen3-asr-refine:1.7b"]
+    fn local_refine_returns_body_only() {
+        let mut config = crate::config::AppConfig::default();
+        config.llm_enabled = true;
+        config.llm_model = "qwen3-asr-refine:1.7b".into();
+        config.llm_api_base_url = "http://127.0.0.1:11434/v1".into();
+        for input in [
+            "领导今天说要让干把会议材料准备一下，然后把办公室收拾一下，然后就是把这个舞台搭建一下啊，还有什么顺便都做一下",
+            "我用配森写了个杰森接口然后部署到了服务器上",
+        ] {
+            let started = std::time::Instant::now();
+            let result = refine_one_chunk(&config, input, "", &mut || false).unwrap();
+            assert!(!result.contains("整理下面 ASR 文本"), "{result}");
+            assert!(!result.contains("/no_think"), "{result}");
+            assert!(!result.contains("---"), "{result}");
+            assert!(!result.starts_with('#'), "{result}");
+            println!("local refine {}ms: {result}", started.elapsed().as_millis());
+        }
+    }
 
     #[test]
     fn strips_think_and_output_label() {
