@@ -640,6 +640,18 @@ pub(crate) fn load_model(engine: State<'_, AsrEngine>) -> Result<(), String> {
             dir
         ));
     }
+    if !path.join("tokenizer.json").is_file() {
+        return Err(format!("Model tokenizer not found in {} (expected tokenizer.json)", dir));
+    }
+    let (align_enabled, align_dir) = engine
+        .inner()
+        .config
+        .lock()
+        .map(|config| (config.align_enabled, config.align_model_dir.clone()))
+        .map_err(|e| e.to_string())?;
+    if align_enabled && !align_dir.trim().is_empty() {
+        crate::config::validate_align_model_dir(std::path::Path::new(align_dir.trim()))?;
+    }
     engine.send_worker(WorkerCommand::LoadModel { path })
 }
 

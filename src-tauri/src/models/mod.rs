@@ -14,6 +14,15 @@ pub(crate) fn has_model_weights(path: &Path) -> bool {
     path.join("model.safetensors").exists() || path.join("model.safetensors.index.json").exists()
 }
 
+fn model_status_path(requested: Option<&str>, configured: &str, installed: PathBuf) -> PathBuf {
+    match requested {
+        Some(path) if !path.trim().is_empty() => PathBuf::from(path.trim()),
+        Some(_) => installed,
+        None if !configured.trim().is_empty() => PathBuf::from(configured.trim()),
+        None => installed,
+    }
+}
+
 #[derive(Clone, Serialize)]
 pub(crate) struct ModelStatus {
     pub(crate) model_id: String,
@@ -240,6 +249,7 @@ fn download_file(
 #[tauri::command]
 pub(crate) fn get_model_status(
     model_id: Option<String>,
+    path: Option<String>,
     engine: tauri::State<'_, AsrEngine>,
 ) -> Result<ModelStatus, String> {
     let cfg_id = engine
@@ -257,11 +267,7 @@ pub(crate) fn get_model_status(
         .lock()
         .map(|c| c.asr_model_dir.clone())
         .unwrap_or_default();
-    let path = if !configured.trim().is_empty() && has_model_weights(Path::new(&configured)) {
-        PathBuf::from(configured.trim())
-    } else {
-        model_install_path(&model_id)?
-    };
+    let path = model_status_path(path.as_deref(), &configured, model_install_path(&model_id)?);
     let installed = has_model_weights(&path);
     let has_tokenizer = path.join("tokenizer.json").exists();
     Ok(ModelStatus {
@@ -271,6 +277,24 @@ pub(crate) fn get_model_status(
         needs_download: !installed || !has_tokenizer,
         has_tokenizer,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_model_path_overrides_stale_saved_config() {
+        let installed = PathBuf::from("/models/default");
+        assert_eq!(
+            model_status_path(Some("/models/typed"), "/models/stale", installed.clone()),
+            PathBuf::from("/models/typed")
+        );
+        assert_eq!(
+            model_status_path(Some(""), "/models/stale", installed.clone()),
+            installed
+        );
+    }
 }
 
 /// Download Qwen ASR weights + tokenizer off the IPC thread.

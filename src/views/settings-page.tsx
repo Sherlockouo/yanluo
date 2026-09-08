@@ -52,7 +52,8 @@ import {
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-shell";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   CollapseTrigger,
   PageHeader,
@@ -80,6 +81,7 @@ import {
   asrLanguageOptions,
   addableLanguageCatalog,
   QWEN_ASR_MODELS,
+  qwenModelIdForPath,
   RECOMMENDED_REFINE_MODELS,
   resolveLlmCreds,
 } from "@/lib/constants";
@@ -653,7 +655,7 @@ function OrganizePanel() {
   const t = useT();
   const providers = listLlmProviders(config);
   const selected = config.llm_organize_provider || "deepseek";
-  const prompt = config.llm_organize_prompt || DEFAULT_LLM_ORGANIZE_PROMPT;
+  const prompt = config.llm_organize_prompt;
 
   return (
     <div className="flex flex-col gap-6">
@@ -740,7 +742,9 @@ function OrganizePanel() {
         <Button
           size="sm"
           variant="ghost"
-          onPress={() => updateConfig("llm_organize_prompt", "")}
+          onPress={() =>
+            updateConfig("llm_organize_prompt", DEFAULT_LLM_ORGANIZE_PROMPT)
+          }
         >
           <RotateCcw size={14} />
           {t("common.restoreDefault")}
@@ -791,6 +795,7 @@ function AsrProviderPanel() {
   const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
   const [downloadAligner, setDownloadAligner] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const statusRequest = useRef(0);
 
   useEffect(() => {
     void invoke<AppInfo>("get_app_info")
@@ -809,16 +814,24 @@ function AsrProviderPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const refreshStatus = useCallback(async () => {
+  const refreshStatus = useCallback(async (
+    path = config.asr_model_dir,
+    modelId = config.asr_model_id || "Qwen3-ASR-0.6B",
+  ) => {
+    const request = ++statusRequest.current;
+    setStatus(null);
     try {
       const next = await invoke<ModelStatus>("get_model_status", {
-        modelId: config.asr_model_id || "Qwen3-ASR-0.6B",
+        modelId,
+        path,
       });
-      setStatus(next);
-    } catch {
-      /* ignore */
+      if (request === statusRequest.current) setStatus(next);
+      return next;
+    } catch (error) {
+      console.error("[settings] model status failed:", error);
+      return null;
     }
-  }, [config.asr_model_id]);
+  }, [config.asr_model_dir, config.asr_model_id]);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -832,7 +845,14 @@ function AsrProviderPanel() {
 
   useEffect(() => {
     if (config.asr_provider === "qwen") void refreshStatus();
-  }, [config.asr_provider, config.asr_model_dir, refreshStatus]);
+  }, [config.asr_provider, refreshStatus]);
+
+  useEffect(() => {
+    const inferred = qwenModelIdForPath(config.asr_model_dir);
+    if (inferred && inferred !== config.asr_model_id) {
+      updateConfig("asr_model_id", inferred);
+    }
+  }, [config.asr_model_dir, config.asr_model_id, updateConfig]);
 
   const selectProvider = (next: AsrProvider) => {
     if (next === "apple" && !appleAvailable) return;
@@ -851,7 +871,7 @@ function AsrProviderPanel() {
       updateConfig("asr_model_dir", path);
       updateConfig("asr_model_id", modelId);
       toast.success(t("settings.asr.modelDownloadedLoading"));
-      await refreshStatus();
+      await refreshStatus(path, modelId);
       await loadModel(path);
     } catch (error) {
       toast.danger(
@@ -864,10 +884,37 @@ function AsrProviderPanel() {
     }
   };
 
+  const updateModelDir = (path: string) => {
+    updateConfig("asr_model_dir", path);
+    const inferred = qwenModelIdForPath(path);
+    if (inferred) updateConfig("asr_model_id", inferred);
+  };
+
+  const selectModelId = (modelId: string) => {
+    updateConfig("asr_model_id", modelId);
+    const currentId = qwenModelIdForPath(config.asr_model_dir);
+    if (currentId && currentId !== modelId) {
+      updateConfig("asr_model_dir", "");
+    }
+  };
+
+  const chooseAlignModelDir = async () => {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: t("settings.asr.alignModelDir"),
+    });
+    if (typeof selected === "string") {
+      updateConfig("align_model_dir", selected);
+    }
+  };
+
   const alignReady = Boolean(config.align_model_dir?.trim());
 
   const isQwen = config.asr_provider === "qwen";
-  const needsDownload = isQwen && (status?.needs_download ?? !status?.installed);
+  const modelDir = config.asr_model_dir.trim();
+  const needsDownload = isQwen && !modelDir;
+  const modelDirReady = Boolean(status?.installed && !status.needs_download);
 
   return (
     <div className="flex flex-col gap-4">
@@ -918,7 +965,7 @@ function AsrProviderPanel() {
               selectedKey={config.asr_model_id || "Qwen3-ASR-0.6B"}
               onSelectionChange={(key) => {
                 if (key == null) return;
-                updateConfig("asr_model_id", String(key));
+                selectModelId(String(key));
               }}
             >
               <Label>{t("settings.asr.model")}</Label>
@@ -937,13 +984,67 @@ function AsrProviderPanel() {
                 </ListBox>
               </Select.Popover>
             </Select>
-            {status?.installed && !status.needs_download ? (
-              <p className="-mt-2 truncate type-meta">
-                <span className="badge-soft" data-tone="success">
-                  {t("settings.asr.installed")}
-                </span>{" "}
-                {status.path}
-              </p>
+
+            <TextField
+              fullWidth
+              variant="secondary"
+              value={config.asr_model_dir}
+              onChange={updateModelDir}
+            >
+              <Label>{t("settings.asr.modelDir")}</Label>
+              <InputGroup className="w-full">
+                <InputGroup.Input className="min-w-0 font-mono text-[13px]" />
+                <InputGroup.Suffix className="pr-1">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onPress={() => void chooseModelDir()}
+                  >
+                    <FolderOpen size={16} />
+                    {t("settings.asr.browse")}
+                  </Button>
+                </InputGroup.Suffix>
+              </InputGroup>
+            </TextField>
+
+            {modelDir ? (
+              <div className="flex items-center justify-between gap-3">
+                <p className="min-w-0 truncate type-meta">
+                  <span
+                    className="badge-soft"
+                    data-tone={modelDirReady ? "success" : "warning"}
+                  >
+                    {status == null
+                      ? t("settings.asr.checking")
+                      : modelDirReady
+                        ? t("settings.asr.ready")
+                        : t("settings.asr.invalidDir")}
+                  </span>
+                </p>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    isPending={downloading}
+                    onPress={() => void startDownload()}
+                  >
+                    <Download size={14} />
+                    {t("settings.asr.redownload")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    className="btn-press"
+                    isPending={modelLoading}
+                    onPress={() => void loadModel(modelDir)}
+                  >
+                    <RefreshCw size={14} />
+                    {modelLoaded
+                      ? t("settings.asr.reload")
+                      : t("settings.asr.loadModel")}
+                  </Button>
+                </div>
+              </div>
             ) : null}
 
             {needsDownload ? (
@@ -973,6 +1074,17 @@ function AsrProviderPanel() {
                     </div>
                   </div>
                 ) : null}
+                <Checkbox
+                  isSelected={downloadAligner}
+                  onChange={setDownloadAligner}
+                >
+                  <Checkbox.Content className="flex items-center gap-2 type-meta">
+                    <Checkbox.Control>
+                      <Checkbox.Indicator />
+                    </Checkbox.Control>
+                    {t("settings.asr.downloadAligner")}
+                  </Checkbox.Content>
+                </Checkbox>
                 <Button
                   fullWidth
                   variant="primary"
@@ -1009,6 +1121,28 @@ function AsrProviderPanel() {
                 </Switch.Content>
               </Switch>
             </div>
+
+            <TextField
+              fullWidth
+              variant="secondary"
+              value={config.align_model_dir ?? ""}
+              onChange={(value) => updateConfig("align_model_dir", value)}
+            >
+              <Label>{t("settings.asr.alignModelDir")}</Label>
+              <InputGroup className="w-full">
+                <InputGroup.Input className="min-w-0 font-mono text-[13px]" />
+                <InputGroup.Suffix className="pr-1">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onPress={() => void chooseAlignModelDir()}
+                  >
+                    <FolderOpen size={16} />
+                    {t("settings.asr.browse")}
+                  </Button>
+                </InputGroup.Suffix>
+              </InputGroup>
+            </TextField>
           </>
         ) : null}
       </SectionCard>
@@ -1027,81 +1161,7 @@ function AsrProviderPanel() {
             <p className="-mt-1 type-meta">{t("settings.asr.advancedBlurb")}</p>
           ) : null}
           <SoftCollapse open={advancedOpen}>
-            <div className="flex flex-col gap-5 pt-1">
-              {downloading && progress ? (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between type-meta">
-                    <span>
-                      {progress.file}（{progress.file_index}/
-                      {progress.file_count}）
-                    </span>
-                    <span>
-                      {progress.percent != null
-                        ? `${progress.percent.toFixed(0)}%`
-                        : formatBytes(progress.downloaded)}
-                      {progress.total
-                        ? ` / ${formatBytes(progress.total)}`
-                        : ""}
-                    </span>
-                  </div>
-                  <div className="update-progress-track">
-                    <div
-                      className="update-progress-bar"
-                      style={{
-                        "--progress":
-                          progress.percent != null
-                            ? Math.min(100, Math.max(0, progress.percent)) / 100
-                            : 0.3,
-                      } as CSSProperties}
-                    />
-                  </div>
-                </div>
-              ) : null}
-
-              <TextField
-                fullWidth
-                variant="secondary"
-                value={config.asr_model_dir}
-                onChange={(value) => updateConfig("asr_model_dir", value)}
-              >
-                <Label>{t("settings.asr.modelDir")}</Label>
-                <InputGroup className="w-full">
-                  <InputGroup.Input className="min-w-0 font-mono text-[13px]" />
-                  <InputGroup.Suffix className="pr-1">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onPress={() => void chooseModelDir()}
-                    >
-                      <FolderOpen size={16} />
-                      {t("settings.asr.browse")}
-                    </Button>
-                  </InputGroup.Suffix>
-                </InputGroup>
-              </TextField>
-
-              <Checkbox
-                isSelected={downloadAligner}
-                onChange={setDownloadAligner}
-              >
-                <Checkbox.Content className="flex items-center gap-2 type-meta">
-                  <Checkbox.Control>
-                    <Checkbox.Indicator />
-                  </Checkbox.Control>
-                  {t("settings.asr.downloadAligner")}
-                </Checkbox.Content>
-              </Checkbox>
-
-              <TextField
-                fullWidth
-                variant="secondary"
-                value={config.align_model_dir ?? ""}
-                onChange={(value) => updateConfig("align_model_dir", value)}
-              >
-                <Label>{t("settings.asr.alignModelDir")}</Label>
-                <Input className="min-w-0 font-mono text-[13px]" />
-              </TextField>
-
+            <div className="pt-1">
               <VadAdvancedFields config={config} updateConfig={updateConfig} />
             </div>
           </SoftCollapse>
@@ -1109,33 +1169,6 @@ function AsrProviderPanel() {
         </Reveal>
       ) : null}
 
-      {isQwen && !needsDownload ? (
-        <div className="form-actions">
-          <div className="form-actions-secondary flex gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              isPending={downloading}
-              onPress={() => void startDownload()}
-            >
-              <Download size={14} />
-              {t("settings.asr.redownload")}
-            </Button>
-            <Button
-              size="sm"
-              variant={modelLoaded ? "secondary" : "primary"}
-              isPending={modelLoading}
-              isDisabled={!config.asr_model_dir?.trim()}
-              onPress={() => void loadModel()}
-            >
-              {modelLoaded ? t("settings.asr.reload") : t("settings.asr.loadModel")}
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      {isQwen && !needsDownload && !modelLoaded ? (
-        <p className="type-meta text-warning">{t("settings.asr.notLoadedWarning")}</p>
-      ) : null}
     </div>
   );
 }
@@ -1666,8 +1699,7 @@ function LlmProviderPanel() {
 function TranslatePromptSection() {
   const { config, updateConfig } = useApp();
   const t = useT();
-  const translateValue =
-    config.llm_translate_prompt || DEFAULT_LLM_TRANSLATE_PROMPT;
+  const translateValue = config.llm_translate_prompt;
 
   return (
     <section className="flex flex-col gap-3">
@@ -1696,7 +1728,9 @@ function TranslatePromptSection() {
         <Button
           size="sm"
           variant="ghost"
-          onPress={() => updateConfig("llm_translate_prompt", "")}
+          onPress={() =>
+            updateConfig("llm_translate_prompt", DEFAULT_LLM_TRANSLATE_PROMPT)
+          }
         >
           <RotateCcw size={14} />
           {t("common.restoreDefault")}
@@ -2877,7 +2911,7 @@ function UpdatesPanel() {
             <Button
               size="sm"
               variant="primary"
-              onPress={() => void open(latest.html_url)}
+              onPress={() => void openExternal(latest.html_url)}
             >
               <ExternalLink size={14} />
               {t("settings.updates.openReleasePage")}
@@ -2905,14 +2939,14 @@ function UpdatesPanel() {
           <button
             type="button"
             className="dlink muted"
-            onClick={() => void open(APP_RELEASES_URL)}
+            onClick={() => void openExternal(APP_RELEASES_URL)}
           >
             Releases
           </button>
           <button
             type="button"
             className="dlink muted"
-            onClick={() => void open(APP_REPO_URL)}
+            onClick={() => void openExternal(APP_REPO_URL)}
           >
             {t("settings.updates.repo")}
           </button>

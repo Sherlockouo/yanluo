@@ -230,7 +230,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
     }
   };
 
-  const refineValue = config.llm_refine_prompt || DEFAULT_LLM_REFINE_PROMPT;
+  const refineValue = config.llm_refine_prompt;
 
   // ─── Stats bar
   const topPair = stats?.top_pairs?.[0];
@@ -407,7 +407,9 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
               <Button
                 size="sm"
                 variant="secondary"
-                onPress={() => updateConfig("llm_refine_prompt", "")}
+                onPress={() =>
+                  updateConfig("llm_refine_prompt", DEFAULT_LLM_REFINE_PROMPT)
+                }
               >
                 <RotateCcw size={14} />
                 {t("learn.restoreDefault")}

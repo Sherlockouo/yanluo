@@ -46,10 +46,13 @@ export const settings: Record<string, string> = {
   "settings.asr.align": "Word-level alignment",
   "settings.asr.alignReady": "Word timestamps · configured",
   "settings.asr.alignNotReady":
-    "Available once the aligner model directory is set in Advanced below",
-  "settings.asr.advancedTitle": "Model directory and advanced parameters",
+    "Enter the aligner model directory below to enable it",
+  "settings.asr.checking": "Checking directory",
+  "settings.asr.ready": "Directory ready",
+  "settings.asr.invalidDir": "Incomplete directory",
+  "settings.asr.advancedTitle": "Responsiveness and segmentation (advanced)",
   "settings.asr.advancedBlurb":
-    "Model / aligner directories, VAD backend, and segmentation parameters live here · most users never need them.",
+    "Dictation, meeting, interview, and VAD segmentation settings · most users never need them.",
   "settings.asr.modelDir": "Model directory",
   "settings.asr.browse": "Browse",
   "settings.asr.downloadAligner":

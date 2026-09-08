@@ -202,11 +202,9 @@ export function resolveLlmCreds(
   const preset = llmPreset(provider);
   const stored = config.llm_credentials?.[provider];
   return {
-    api_base_url: stored?.api_base_url?.trim()
-      ? stored.api_base_url
-      : preset.baseUrl,
+    api_base_url: stored?.api_base_url ?? preset.baseUrl,
     api_key: stored?.api_key ?? "",
-    model: stored?.model?.trim() ? stored.model : (preset.models[0] ?? ""),
+    model: stored?.model ?? (preset.models[0] ?? ""),
     label: stored?.label ?? "",
   };
 }
@@ -255,6 +253,10 @@ export const QWEN_ASR_MODELS = [
   { id: "Qwen3-ASR-0.6B", label: "Qwen3-ASR-0.6B（推荐，约 2GB）", downloadable: true },
   { id: "Qwen3-ASR-1.7B", label: "Qwen3-ASR-1.7B（更大）", downloadable: true },
 ] as const;
+
+export function qwenModelIdForPath(path: string) {
+  return QWEN_ASR_MODELS.find((model) => path.includes(model.id))?.id ?? null;
+}
 
 export const defaultConfig: AppConfig = {
   asr_model_dir: "",

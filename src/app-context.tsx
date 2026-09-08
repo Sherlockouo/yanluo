@@ -22,7 +22,11 @@ import type {
   RecState,
   TranscriptionResult,
 } from "@/types";
-import { defaultConfig, seedLlmCredentials } from "@/lib/constants";
+import {
+  defaultConfig,
+  qwenModelIdForPath,
+  seedLlmCredentials,
+} from "@/lib/constants";
 import type { AgentModelsCache } from "@/lib/constants";
 import {
   harvestFromTriples,
@@ -603,20 +607,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
       title: tRef.current("toast.chooseModelDirTitle"),
     });
     if (typeof selected !== "string") return;
-    const next = { ...config, asr_model_dir: selected };
+    const inferred = qwenModelIdForPath(selected);
+    const next = {
+      ...config,
+      asr_model_dir: selected,
+      ...(inferred ? { asr_model_id: inferred } : {}),
+    };
     setConfig(next);
     await invoke("set_model_dir", { path: selected });
   }, [config]);
 
   const loadModel = useCallback(async (path?: string) => {
-    const dir = (path ?? config.asr_model_dir)?.trim() ?? "";
+    const current = latestConfigRef.current;
+    const dir = (path ?? current.asr_model_dir)?.trim() ?? "";
     if (!dir) {
       toast.danger(tRef.current("toast.noModelDir"));
       return;
     }
     setModelLoading(true);
     try {
-      await invoke("set_model_dir", { path: dir });
+      const next = { ...current, asr_model_dir: dir };
+      latestConfigRef.current = next;
+      setConfig(next);
+      await invoke("save_app_config", { config: next });
+      lastSavedConfigRef.current = JSON.stringify(next);
       await invoke("load_model");
     } catch (error) {
       setModelLoading(false);
@@ -626,7 +640,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }),
       );
     }
-  }, [config.asr_model_dir]);
+  }, []);
 
   const updateConfig = useCallback(
     <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => {
