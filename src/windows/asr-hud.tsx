@@ -1480,6 +1480,11 @@ function FloatingCapsule({
         <span className="hud-colon hud-drag-handle" aria-hidden>
           :
         </span>
+        {refining && !editing && !error && !switching ? (
+          <span className="hud-phase-label" role="status" aria-atomic="true">
+            {t("hud.polishing")}
+          </span>
+        ) : null}
         {editing ? (
           <>
             <textarea
@@ -1547,7 +1552,7 @@ function FloatingCapsule({
                 </>
               ) : (
                 displayText ||
-                (loading ? phaseLabel : "") ||
+                (loading && !refining ? phaseLabel : "") ||
                 /* B1: listening hint after 200ms with no text */
                 (recording && listenHint ? (
                   <span className="hud-listen-hint">{t("hud.listening")}</span>
