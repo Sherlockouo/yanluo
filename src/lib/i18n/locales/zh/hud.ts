@@ -2,6 +2,7 @@ export const hud: Record<string, string> = {
   "hud.listening": "正在听…",
   "hud.transcribing": "识别中…",
   "hud.polishing": "润色中…",
+  "hud.organizing": "整理中…",
   "hud.translating": "翻译中",
   "hud.switching": "切换中",
   "hud.pasted": "已粘贴",

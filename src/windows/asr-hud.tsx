@@ -605,16 +605,19 @@ export function AsrHud() {
         committed?: string;
         active?: string;
       }>("partial-result", (event) =>
-        setPayload((prev) => ({
-          ...prev,
-          visible: true,
-          state: prev.state === "idle" ? "recording" : prev.state,
-          text: event.payload.text,
-          committed: event.payload.committed ?? "",
-          active: event.payload.active ?? "",
-          switching:
-            event.payload.text.trim() === "" ? prev.switching : false,
-        })),
+        setPayload((prev) => {
+          if (!prev.visible || (prev.state !== "recording" && prev.state !== "processing")) {
+            return prev;
+          }
+          return {
+            ...prev,
+            text: event.payload.text,
+            committed: event.payload.committed ?? "",
+            active: event.payload.active ?? "",
+            switching:
+              event.payload.text.trim() === "" ? prev.switching : false,
+          };
+        }),
       ),
     );
     add(
@@ -840,6 +843,7 @@ export function AsrHud() {
     (payload.state === "recording" ||
       payload.state === "processing" ||
       payload.state === "refining" ||
+      payload.state === "organizing" ||
       payload.state === "editing");
 
   const prevShowRef = useRef(false);
@@ -1231,6 +1235,8 @@ function FloatingCapsule({
 }) {
   const t = useT();
   const refining = payload.state === "refining";
+  const organizing = payload.state === "organizing";
+  const pipelineStage = refining || organizing;
   const processing = payload.state === "processing";
   const recording = payload.state === "recording";
   const switching = Boolean(payload.switching);
@@ -1344,7 +1350,7 @@ function FloatingCapsule({
     lastTextRef.current = "";
   }
   // Clear only when recording starts fresh (no carry-over from previous session)
-  if (recording && !processing && !refining && !payload.text.trim() && !lastTextRef.current) {
+  if (recording && !processing && !pipelineStage && !payload.text.trim() && !lastTextRef.current) {
     lastTextRef.current = "";
   }
 
@@ -1354,12 +1360,12 @@ function FloatingCapsule({
 
   const sourceText =
     payload.text.trim() ||
-    (refining || processing ? lastTextRef.current : "");
+    (pipelineStage || processing ? lastTextRef.current : "");
   const displayText = switching ? "" : sourceText;
 
   const justRefined = processing && !switching && Boolean(displayText.trim());
   const loading =
-    !editing && (refining || switching || (processing && !justRefined));
+    !editing && (pipelineStage || switching || (processing && !justRefined));
 
   // Streaming reveal: partials arrive in bursts — drip the chars in so the
   // caption reads as a continuous stream instead of chunk-by-chunk jumps.
@@ -1419,8 +1425,10 @@ function FloatingCapsule({
   }, [editing]);
 
   // B3: Phase label for processing/refining
-  const phaseLabel = refining
-    ? t("hud.polishing")
+  const phaseLabel = pipelineStage
+    ? organizing
+      ? t("hud.organizing")
+      : t("hud.polishing")
     : processing && !justRefined
       ? t("hud.transcribing")
       : translating
@@ -1450,7 +1458,15 @@ function FloatingCapsule({
       ) : null}
       <div className="hud-inner">
         {/* B2: processing with preserved text → spinner + dimmed text */}
-        {justRefined ? (
+        {pipelineStage ? (
+          <div className="hud-brand-bars hud-drag-handle" aria-hidden>
+            <div className="hud-brand-bar" />
+            <div className="hud-brand-bar" />
+            <div className="hud-brand-bar" />
+            <div className="hud-brand-bar" />
+            <div className="hud-brand-bar" />
+          </div>
+        ) : justRefined ? (
           <span className="hud-spinner" aria-label={t("hud.transcribing")} />
         ) : loading ? (
           <span
@@ -1480,11 +1496,6 @@ function FloatingCapsule({
         <span className="hud-colon hud-drag-handle" aria-hidden>
           :
         </span>
-        {refining && !editing && !error && !switching ? (
-          <span className="hud-phase-label" role="status" aria-atomic="true">
-            {t("hud.polishing")}
-          </span>
-        ) : null}
         {editing ? (
           <>
             <textarea
@@ -1528,7 +1539,7 @@ function FloatingCapsule({
             className={cn(
               "hud-text-viewport",
               overflowing && "hud-text-overflow",
-              loading && "hud-text-refining",
+              pipelineStage && "hud-text-refining",
               switching && "hud-text-switching",
               justRefined && "hud-text-refined",
               error && "hud-text-error",
@@ -1552,7 +1563,7 @@ function FloatingCapsule({
                 </>
               ) : (
                 displayText ||
-                (loading && !refining ? phaseLabel : "") ||
+                (loading && !pipelineStage ? phaseLabel : "") ||
                 /* B1: listening hint after 200ms with no text */
                 (recording && listenHint ? (
                   <span className="hud-listen-hint">{t("hud.listening")}</span>
@@ -1566,6 +1577,12 @@ function FloatingCapsule({
                 </span>
               ) : null}
             </span>
+            {pipelineStage && !error && !switching ? (
+              <span className="hud-stage-overlay" role="status" aria-atomic="true">
+                <span className="hud-spinner" aria-hidden />
+                {phaseLabel}
+              </span>
+            ) : null}
           </div>
         )}
         {/* B4: Recording duration timer */}

@@ -120,6 +120,7 @@ export function AsrHudLangChip() {
   const busy =
     switching ||
     payload.state === "refining" ||
+    payload.state === "organizing" ||
     payload.state === "processing";
 
   const closeMenu = () => {

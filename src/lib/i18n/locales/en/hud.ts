@@ -2,6 +2,7 @@ export const hud: Record<string, string> = {
   "hud.listening": "Listening…",
   "hud.transcribing": "Transcribing…",
   "hud.polishing": "Polishing…",
+  "hud.organizing": "Organizing…",
   "hud.translating": "Translating",
   "hud.switching": "Switching",
   "hud.pasted": "Pasted",

@@ -15,7 +15,6 @@ import {
   BookOpen,
   MoreHorizontal,
   RotateCcw,
-  Save,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -94,7 +93,6 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
   const {
     config,
     updateConfig,
-    saveConfig,
     testLlm,
     history,
     distillLearnFromRatings,
@@ -429,15 +427,6 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
                 {t("learn.test")}
               </Button>
             </div>
-            <Button
-              className="form-actions-primary btn-press"
-              fullWidth
-              variant="secondary"
-              onPress={() => void saveConfig()}
-            >
-              <Save size={16} aria-hidden />
-              {t("learn.save")}
-            </Button>
           </div>
         </div>
       </SoftCollapse>

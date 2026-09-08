@@ -934,7 +934,7 @@ pub(crate) fn cancel_recording_with_reason(app: &AppHandle, engine: &AsrEngine, 
             s.visible
                 && matches!(
                     s.state.as_str(),
-                    "recording" | "processing" | "refining"
+                    "recording" | "processing" | "refining" | "organizing"
                 )
         })
         .unwrap_or(false);
@@ -1142,7 +1142,7 @@ fn accept_floating_preview(app: AppHandle, text: String) -> Result<(), String> {
     if intention.as_deref() == Some("agent") {
         return Err("派活态请用 Enter 派发".into());
     }
-    if state != "refining" && state != "processing" {
+    if state != "refining" && state != "organizing" && state != "processing" {
         return Err("当前不在处理中间态".into());
     }
 

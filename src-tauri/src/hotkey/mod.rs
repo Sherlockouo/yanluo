@@ -98,7 +98,7 @@ fn cancel_hotkey_is_actionable(app: &AppHandle) -> bool {
             s.visible
                 && matches!(
                     s.state.as_str(),
-                    "recording" | "processing" | "refining" | "editing"
+                    "recording" | "processing" | "refining" | "organizing" | "editing"
                 )
                 && s.intention.as_deref() != Some("agent")
         })
@@ -117,17 +117,42 @@ fn hud_confirm_editing(app: &AppHandle) -> bool {
             .unwrap_or(false)
 }
 
-/// Spinner mid-state (LLM refine / finalize): Fn accepts HUD text now.
-fn hud_skip_pipeline_text(app: &AppHandle) -> Option<String> {
+/// Snapshot the text shown while finalization is still running.
+fn hud_skip_pipeline_snapshot(app: &AppHandle) -> Option<(String, String)> {
     floating_status_slot(app)
         .lock()
         .ok()
         .and_then(|s| {
             (s.visible
-                && matches!(s.state.as_str(), "refining" | "processing")
+                && matches!(s.state.as_str(), "refining" | "organizing" | "processing")
                 && s.intention.as_deref() != Some("agent"))
-                .then(|| s.text.clone())
+                .then(|| (s.state.clone(), s.text.clone()))
         })
+}
+
+fn should_defer_mid_pipeline_accept(
+    mode: &str,
+    state: &str,
+    llm_enabled: bool,
+    llm_ready: bool,
+) -> bool {
+    mode == "fn"
+        && (matches!(state, "refining" | "organizing")
+            || (state == "processing" && llm_enabled && llm_ready))
+}
+
+#[cfg(test)]
+mod mid_pipeline_accept_tests {
+    use super::should_defer_mid_pipeline_accept;
+
+    #[test]
+    fn enabled_refine_finishes_before_quick_fn_pastes() {
+        assert!(should_defer_mid_pipeline_accept("fn", "processing", true, true));
+        assert!(should_defer_mid_pipeline_accept("fn", "refining", true, true));
+        assert!(should_defer_mid_pipeline_accept("fn", "organizing", true, true));
+        assert!(!should_defer_mid_pipeline_accept("fn", "processing", false, true));
+        assert!(!should_defer_mid_pipeline_accept("translate", "processing", true, true));
+    }
 }
 
 fn emit_hud_skip_or_confirm(app: &AppHandle) -> bool {
@@ -137,13 +162,32 @@ fn emit_hud_skip_or_confirm(app: &AppHandle) -> bool {
         let _ = app.emit_to("floating", "hud-confirm-request", ());
         return true;
     }
-    if let Some(text) = hud_skip_pipeline_text(app) {
+    if let Some((state, text)) = hud_skip_pipeline_snapshot(app) {
         crate::audio::discard_speculative_mic();
         if let Some(engine) = app.try_state::<AsrEngine>() {
             engine
                 .inner()
                 .immediate_accept_requested
                 .store(true, Ordering::Release);
+        }
+        let mode = AsrEngine::session_mode(app);
+        let (llm_enabled, llm_ready) = app
+            .try_state::<AsrEngine>()
+            .and_then(|engine| {
+                engine.inner().config.lock().ok().map(|config| {
+                    (
+                        config.llm_enabled,
+                        !config.llm_api_base_url.trim().is_empty()
+                            && !config.llm_model.trim().is_empty(),
+                    )
+                })
+            })
+            .unwrap_or((false, false));
+        if should_defer_mid_pipeline_accept(&mode, &state, llm_enabled, llm_ready) {
+            crate::elog::elog!(
+                "[asr] quick Fn deferred until LLM pipeline completes state={state}"
+            );
+            return true;
         }
         if let Ok(mut slot) = floating_status_slot(app).lock() {
             slot.visible = false;
@@ -409,7 +453,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                                     if recording
                                         || matches!(
                                             hud_state.as_str(),
-                                            "recording" | "processing" | "refining"
+                                            "recording" | "processing" | "refining" | "organizing"
                                         )
                                     {
                                         crate::elog::elog!("[asr] agent Esc → cancel ({hud_state})");

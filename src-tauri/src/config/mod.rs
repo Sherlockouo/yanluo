@@ -341,6 +341,14 @@ pub(crate) struct AppConfig {
     /// Empty = built-in refine prompt.
     #[serde(default)]
     pub(crate) llm_refine_prompt: String,
+    /// Intent-aware formatting runs after refinement and uses its own provider.
+    #[serde(default)]
+    pub(crate) llm_organize_enabled: bool,
+    #[serde(default = "default_llm_organize_provider")]
+    pub(crate) llm_organize_provider: String,
+    /// Empty = built-in organize prompt.
+    #[serde(default)]
+    pub(crate) llm_organize_prompt: String,
     /// Empty = built-in translate prompt (`{target}` placeholder).
     #[serde(default)]
     pub(crate) llm_translate_prompt: String,
@@ -423,6 +431,10 @@ pub(crate) fn default_llm_provider() -> String {
     "openai".into()
 }
 
+pub(crate) fn default_llm_organize_provider() -> String {
+    "deepseek".into()
+}
+
 pub(crate) fn default_align_enabled() -> bool {
     true
 }
@@ -497,6 +509,9 @@ impl Default for AppConfig {
             llm_model: "gpt-4o-mini".into(),
             llm_credentials: std::collections::HashMap::new(),
             llm_refine_prompt: String::new(),
+            llm_organize_enabled: false,
+            llm_organize_provider: default_llm_organize_provider(),
+            llm_organize_prompt: String::new(),
             llm_translate_prompt: String::new(),
             vocabulary: Vec::new(),
         }

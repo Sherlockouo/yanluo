@@ -470,7 +470,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (
           stateRef.current !== "recording" &&
           stateRef.current !== "processing" &&
-          stateRef.current !== "refining"
+          stateRef.current !== "refining" &&
+          stateRef.current !== "organizing"
         ) {
           return;
         }

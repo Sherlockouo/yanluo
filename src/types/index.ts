@@ -3,6 +3,7 @@ export type RecState =
   | "recording"
   | "processing"
   | "refining"
+  | "organizing"
   | "editing";
 
 export type AsrProvider = "qwen" | "apple";
@@ -189,6 +190,11 @@ export type AppConfig = {
   llm_credentials: Record<string, LlmCredential>;
   /** Empty = built-in default; `{glossary}` appended by backend for vocab. */
   llm_refine_prompt: string;
+  /** Intent-aware formatting stage. Requires refinement to be enabled. */
+  llm_organize_enabled: boolean;
+  llm_organize_provider: LlmProvider;
+  /** Empty = built-in organize prompt. */
+  llm_organize_prompt: string;
   /** Empty = built-in default; `{target}` replaced with language name. */
   llm_translate_prompt: string;
   vocabulary: string[];

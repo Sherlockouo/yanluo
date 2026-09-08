@@ -48,6 +48,18 @@ export const DEFAULT_LLM_REFINE_PROMPT = `\
 7. 无法确定的内容保留原文，不凭空猜测。
 8. 只输出精修后的正文，不解释、不列出修改内容、不添加标题。`;
 
+/** Built-in intent-aware organization system prompt. */
+export const DEFAULT_LLM_ORGANIZE_PROMPT = `\
+你是中文和中英混合文本整理助手。输入已经过 ASR 纠错，请理解用户真正想表达的意图，并把内容整理成可直接使用的成稿。
+
+规则：
+1. 根据意图选择最合适的格式：任务、步骤、清单使用列表；消息、邮件、通知整理成可直接发送的正文；观点或说明使用自然段落。
+2. 删除口水话、语气词、无意义重复和明显的自我修正，合并指代明确的零散信息。
+3. 保留原文中的事实、数字、结论、语气和约束，不添加原文没有的信息，不代替用户做决定。
+4. URL、邮箱、版本号、命令、代码、Markdown、环境变量、文件路径和英文术语原样保留。
+5. 无法确定的内容保留原文，不凭空猜测。
+6. 只输出整理后的正文，不解释、不添加“整理结果”等标题。`;
+
 /** Built-in translate system prompt; `{target}` → language name. */
 export const DEFAULT_LLM_TRANSLATE_PROMPT =
   "You are a speech translator for automatic speech recognition (ASR) transcripts.\n\
@@ -293,6 +305,9 @@ export const defaultConfig: AppConfig = {
   llm_model: "gpt-4o-mini",
   llm_credentials: {},
   llm_refine_prompt: "",
+  llm_organize_enabled: false,
+  llm_organize_provider: "deepseek",
+  llm_organize_prompt: "",
   llm_translate_prompt: "",
   vocabulary: [],
 };
@@ -582,6 +597,7 @@ export function stateLabel(state: RecState) {
   if (state === "recording") return "录音中";
   if (state === "processing") return "转写中";
   if (state === "refining") return "处理中";
+  if (state === "organizing") return "整理中";
   if (state === "editing") return "编辑中";
   return "就绪";
 }

@@ -70,6 +70,7 @@ import {
   activateLlmProviderPatch,
   agentModelsFor,
   defaultConfig,
+  DEFAULT_LLM_ORGANIZE_PROMPT,
   DEFAULT_LLM_TRANSLATE_PROMPT,
   hotkeySegments,
   listLlmProviders,
@@ -114,7 +115,7 @@ import {
   type SettingsTab,
 } from "@/lib/ui-session";
 
-type PolishSub = "config" | "refine" | "vocab";
+type PolishSub = "config" | "refine" | "organize" | "vocab";
 type SystemSub = "hotkeys" | "permissions";
 
 /**
@@ -125,6 +126,7 @@ type SystemSub = "hotkeys" | "permissions";
 const TAB_ALIASES: Record<string, { tab: SettingsTab; sub?: string }> = {
   llm: { tab: "polish", sub: "config" },
   refine: { tab: "polish", sub: "refine" },
+  organize: { tab: "polish", sub: "organize" },
   vocabulary: { tab: "polish", sub: "vocab" },
   hotkeys: { tab: "system", sub: "hotkeys" },
   permissions: { tab: "system", sub: "permissions" },
@@ -248,6 +250,7 @@ const TABS: { id: SettingsTab; labelKey: string; icon: typeof Shield }[] = [
 const POLISH_SUBS: { id: PolishSub; labelKey: string }[] = [
   { id: "config", labelKey: "settings.sub.config" },
   { id: "refine", labelKey: "settings.sub.refine" },
+  { id: "organize", labelKey: "settings.sub.organize" },
   { id: "vocab", labelKey: "settings.sub.vocab" },
 ];
 
@@ -638,8 +641,111 @@ function PolishPanel({
             <LlmPage embedded />
           </div>
         ) : null}
+        {sub === "organize" ? <OrganizePanel /> : null}
         {sub === "vocab" ? <VocabularyPage embedded /> : null}
       </motion.div>
+    </div>
+  );
+}
+
+function OrganizePanel() {
+  const { config, updateConfig, saveConfig } = useApp();
+  const t = useT();
+  const providers = listLlmProviders(config);
+  const selected = config.llm_organize_provider || "deepseek";
+  const prompt = config.llm_organize_prompt || DEFAULT_LLM_ORGANIZE_PROMPT;
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="set-lines">
+        <div className="set-row-line">
+          <div className="set-row-line-lab">
+            <span className="set-row-line-lab-title">
+              <Sparkles size={14} className="set-row-ico" aria-hidden />
+              {t("settings.organize.enable")}
+            </span>
+            <small>{t("settings.organize.blurb")}</small>
+          </div>
+          <div className="set-row-line-ctl">
+            <Switch
+              aria-label={t("settings.organize.enable")}
+              isSelected={config.llm_enabled && config.llm_organize_enabled}
+              isDisabled={!config.llm_enabled}
+              onChange={(value) => updateConfig("llm_organize_enabled", value)}
+            >
+              <Switch.Content className="gap-2">
+                <Switch.Control><Switch.Thumb /></Switch.Control>
+              </Switch.Content>
+            </Switch>
+          </div>
+        </div>
+        <div className="set-row-line">
+          <div className="set-row-line-lab">
+            <span className="set-row-line-lab-title">{t("settings.organize.provider")}</span>
+            <small>{t("settings.organize.providerBlurb")}</small>
+          </div>
+          <div className="set-row-line-ctl">
+            <Select
+              className="inline-flex w-auto"
+              aria-label={t("settings.organize.provider")}
+              selectedKey={selected}
+              onSelectionChange={(key) => {
+                if (key == null) return;
+                const provider = String(key) as LlmProvider;
+                const creds = resolveLlmCreds(config, provider);
+                void saveConfig(
+                  {
+                    ...config,
+                    llm_organize_provider: provider,
+                    llm_credentials: {
+                      ...config.llm_credentials,
+                      [provider]: creds,
+                    },
+                  },
+                  { silent: true },
+                );
+              }}
+            >
+              <Select.Trigger className="qsel-quiet">
+                <Select.Value>
+                  {() => llmProviderLabel(config, selected)}
+                </Select.Value>
+                <ChevronDown size={12} className="shrink-0 text-muted" />
+              </Select.Trigger>
+              <Select.Popover className="min-w-[10rem]">
+                <ListBox>
+                  {providers.map((provider) => (
+                    <ListBox.Item key={provider.id} id={provider.id} textValue={provider.label}>
+                      {provider.label}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      <TextField
+        fullWidth
+        variant="secondary"
+        value={prompt}
+        onChange={(value) => updateConfig("llm_organize_prompt", value)}
+      >
+        <Label>{t("settings.organize.prompt")}</Label>
+        <TextArea rows={12} className="min-h-[14rem] font-mono type-meta !text-[12px]" />
+      </TextField>
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          variant="ghost"
+          onPress={() => updateConfig("llm_organize_prompt", "")}
+        >
+          <RotateCcw size={14} />
+          {t("common.restoreDefault")}
+        </Button>
+      </div>
     </div>
   );
 }

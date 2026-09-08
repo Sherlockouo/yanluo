@@ -13,6 +13,7 @@ export const settings: Record<string, string> = {
   // Secondary tabs
   "settings.sub.config": "配置",
   "settings.sub.refine": "纠错学习",
+  "settings.sub.organize": "整理",
   "settings.sub.vocab": "词库",
   "settings.sub.hotkeys": "快捷键",
   "settings.sub.permissions": "权限",
@@ -20,7 +21,7 @@ export const settings: Record<string, string> = {
   // Section description lines
   "settings.tabDesc.general": "语言、录音源与外观。修改后自动保存。",
   "settings.tabDesc.asr": "识别引擎、型号与逐字对齐。",
-  "settings.tabDesc.polish": "服务商配置、纠错学习与词库。",
+  "settings.tabDesc.polish": "服务商配置、纠错学习、意图整理与词库。",
   "settings.tabDesc.agent": "内置 Claude · Codex · Pi，选一个作为默认派活 Agent。",
   "settings.tabDesc.system": "全局快捷键与 macOS 权限。",
   "settings.tabDesc.updates": "当前版本、检查更新与更新说明。",
@@ -100,6 +101,13 @@ export const settings: Record<string, string> = {
   "settings.llm.modelPlaceholder": "模型名称",
   "settings.llm.recommended": "推荐",
   "settings.llm.fewShotHint": "小模型勿开 few-shot（已自动）",
+
+  // Intent-aware organization
+  "settings.organize.enable": "启用整理",
+  "settings.organize.blurb": "润色完成后，用大模型理解意图并整理成合适格式；需先开启润色",
+  "settings.organize.provider": "整理服务商",
+  "settings.organize.providerBlurb": "建议使用 DeepSeek 等能力更强的模型；凭据在「配置」中维护",
+  "settings.organize.prompt": "整理 Prompt",
 
   // Translate prompt
   "settings.translatePrompt.title": "翻译 Prompt",

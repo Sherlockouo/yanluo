@@ -109,6 +109,18 @@ pub(crate) const DEFAULT_REFINE: &str = "\
 7. 无法确定的内容保留原文，不凭空猜测。\n\
 8. 只输出精修后的正文，不解释、不列出修改内容、不添加标题。";
 
+/// Single source of truth for the intent-aware organization prompt.
+pub(crate) const DEFAULT_ORGANIZE: &str = "\
+你是中文和中英混合文本整理助手。输入已经过 ASR 纠错，请理解用户真正想表达的意图，并把内容整理成可直接使用的成稿。\n\
+\n\
+规则：\n\
+1. 根据意图选择最合适的格式：任务、步骤、清单使用列表；消息、邮件、通知整理成可直接发送的正文；观点或说明使用自然段落。\n\
+2. 删除口水话、语气词、无意义重复和明显的自我修正，合并指代明确的零散信息。\n\
+3. 保留原文中的事实、数字、结论、语气和约束，不添加原文没有的信息，不代替用户做决定。\n\
+4. URL、邮箱、版本号、命令、代码、Markdown、环境变量、文件路径和英文术语原样保留。\n\
+5. 无法确定的内容保留原文，不凭空猜测。\n\
+6. 只输出整理后的正文，不解释、不添加“整理结果”等标题。";
+
 /// Refine char budget: above this, split on sentence boundaries so a small
 /// local model doesn't drop the tail of a long transcript (see `split_for_refine`).
 const REFINE_CHUNK_LIMIT: usize = 1200;
@@ -189,13 +201,13 @@ pub(crate) fn refine_transcript_with_cases_abortable(
     Ok(out)
 }
 
-/// Refine a single chunk: one HTTP call (with one retry on transient failure),
-/// artifact stripping, and the drift guard. Returns the original chunk when the
-/// guard rejects the model reply.
-fn refine_one_chunk(
+/// Shared OpenAI-compatible text transformation request.
+fn run_llm_transform(
     config: &AppConfig,
     input: &str,
-    fewshot_block: &str,
+    mut system: String,
+    operation: &str,
+    guard_output: bool,
     should_abort: &mut impl FnMut() -> bool,
 ) -> Result<String, String> {
     #[derive(Serialize)]
@@ -226,25 +238,6 @@ fn refine_one_chunk(
         content: String,
     }
 
-    let glossary = if config.vocabulary.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "\n词库（优先按此写法改回）: {}",
-            config.vocabulary.join(", ")
-        )
-    };
-    let base_prompt = if config.llm_refine_prompt.trim().is_empty() {
-        DEFAULT_REFINE
-    } else {
-        config.llm_refine_prompt.trim()
-    };
-    let fewshot = if fewshot_block.trim().is_empty() {
-        String::new()
-    } else {
-        format!("\n\n{}", fewshot_block.trim())
-    };
-    let mut system = format!("{base_prompt}{glossary}{fewshot}");
     let model_name = config.llm_model.trim();
     let is_qwen3 = model_name.to_ascii_lowercase().contains("qwen3");
     // Editing models may copy the entire user message. Keep instructions and
@@ -269,7 +262,7 @@ fn refine_one_chunk(
     let base = config.llm_api_base_url.trim().trim_end_matches('/');
     let url = format!("{base}/chat/completions");
     crate::elog::elog!(
-        "[llm] refine → POST {} model={} in_chars={}",
+        "[llm] {operation} → POST {} model={} in_chars={}",
         url,
         config.llm_model.trim(),
         input.chars().count()
@@ -291,7 +284,7 @@ fn refine_one_chunk(
                     break;
                 }
                 let retryable = status.is_server_error();
-                crate::elog::elog!("[llm] refine HTTP {status}: {text}");
+                crate::elog::elog!("[llm] {operation} HTTP {status}: {text}");
                 last_err = format!("LLM HTTP {status}: {text}");
                 if !retryable {
                     return Err(last_err);
@@ -299,7 +292,7 @@ fn refine_one_chunk(
             }
             Err(e) if e == "aborted" => return Err("aborted".into()),
             Err(e) => {
-                crate::elog::elog!("[llm] refine network error (attempt {}): {e}", attempt + 1);
+                crate::elog::elog!("[llm] {operation} network error (attempt {}): {e}", attempt + 1);
                 last_err = e;
             }
         }
@@ -313,7 +306,7 @@ fn refine_one_chunk(
     }
     let response_body = response_body.ok_or(last_err)?;
     let parsed: Response = serde_json::from_str(&response_body).map_err(|e| {
-        crate::elog::elog!("[llm] refine parse error: {e}");
+        crate::elog::elog!("[llm] {operation} parse error: {e}");
         e.to_string()
     })?;
     let out = parsed
@@ -330,7 +323,7 @@ fn refine_one_chunk(
     };
     // Guard against model drift (summary / hallucination / dropped sentences).
     // On rejection, keep the original ASR text rather than paste garbage.
-    if !guard_refine(input, &out) {
+    if guard_output && !guard_refine(input, &out) {
         crate::elog::elog!(
             "[llm] refine rejected by guard (in_chars={} out_chars={}) — keeping original",
             input.chars().count(),
@@ -339,11 +332,88 @@ fn refine_one_chunk(
         return Ok(input.to_string());
     }
     crate::elog::elog!(
-        "[llm] refine ok: out_chars={} changed={}",
+        "[llm] {operation} ok: out_chars={} changed={}",
         out.chars().count(),
         out != input
     );
     Ok(out)
+}
+
+fn refine_one_chunk(
+    config: &AppConfig,
+    input: &str,
+    fewshot_block: &str,
+    should_abort: &mut impl FnMut() -> bool,
+) -> Result<String, String> {
+    let glossary = if config.vocabulary.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n词库（优先按此写法改回）: {}",
+            config.vocabulary.join(", ")
+        )
+    };
+    let base_prompt = if config.llm_refine_prompt.trim().is_empty() {
+        DEFAULT_REFINE
+    } else {
+        config.llm_refine_prompt.trim()
+    };
+    let fewshot = if fewshot_block.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", fewshot_block.trim())
+    };
+    run_llm_transform(
+        config,
+        input,
+        format!("{base_prompt}{glossary}{fewshot}"),
+        "refine",
+        true,
+        should_abort,
+    )
+}
+
+fn organize_transcript_abortable(
+    config: &AppConfig,
+    input: &str,
+    should_abort: &mut impl FnMut() -> bool,
+) -> Result<String, String> {
+    if !config.llm_enabled {
+        return Err("整理依赖润色，请先开启润色".into());
+    }
+    if !config.llm_organize_enabled {
+        return Ok(input.to_string());
+    }
+    let provider = config.llm_organize_provider.trim();
+    let mut stage = config.clone();
+    if provider != config.llm_provider {
+        let creds = config
+            .llm_credentials
+            .get(provider)
+            .ok_or_else(|| format!("整理服务商 {provider} 尚未配置"))?;
+        stage.llm_api_base_url = creds.api_base_url.clone();
+        stage.llm_api_key = creds.api_key.clone();
+        stage.llm_model = creds.model.clone();
+    }
+    if stage.llm_api_base_url.trim().is_empty() {
+        return Err("整理服务商未配置 API Base URL".into());
+    }
+    if stage.llm_model.trim().is_empty() {
+        return Err("整理服务商未配置 Model".into());
+    }
+    let prompt = if config.llm_organize_prompt.trim().is_empty() {
+        DEFAULT_ORGANIZE
+    } else {
+        config.llm_organize_prompt.trim()
+    };
+    run_llm_transform(
+        &stage,
+        input,
+        prompt.to_string(),
+        "organize",
+        false,
+        should_abort,
+    )
 }
 
 /// One ASR → gold correction example for few-shot conditioning.
@@ -1325,8 +1395,19 @@ pub(crate) fn finalize_successful_result(
         crate::elog::elog!("[asr] finalize aborted before paste (gen={gen})");
         return None;
     }
+    let can_polish = config.llm_enabled
+        && !config.llm_api_base_url.trim().is_empty()
+        && !config.llm_model.trim().is_empty();
+    if config.llm_enabled && !can_polish {
+        crate::elog::elog!(
+            "[llm] refine enabled but unavailable: url_set={} model_set={}",
+            !config.llm_api_base_url.trim().is_empty(),
+            !config.llm_model.trim().is_empty()
+        );
+    }
     if source == "fn"
         && !result.text.trim().is_empty()
+        && !can_polish
         && take_accept()
     {
         return paste_immediate_result(app, result, &source, media_kind);
@@ -1334,9 +1415,6 @@ pub(crate) fn finalize_successful_result(
 
     // Fn: optional LLM 纠错 after vocab. Translate has its own stream; agent stays raw for edit.
     // Skip polish entirely when disabled or credentials incomplete — go straight to HUD editing.
-    let can_polish = config.llm_enabled
-        && !config.llm_api_base_url.trim().is_empty()
-        && !config.llm_model.trim().is_empty();
     if source == "fn"
         && can_polish
         && !result.text.trim().is_empty()
@@ -1355,11 +1433,6 @@ pub(crate) fn finalize_successful_result(
         std::thread::spawn(move || {
             let r = refine_transcript_with_cases_abortable(&cfg_clone, &blm, &fewshot, || {
                 AsrEngine::finalize_aborted(&app_handle, gen)
-                    || app_handle
-                        .state::<AsrEngine>()
-                        .inner()
-                        .immediate_accept_requested
-                        .load(Ordering::Acquire)
             });
             let _ = tx.send(r);
         });
@@ -1383,11 +1456,6 @@ pub(crate) fn finalize_successful_result(
             }
             Ok(Err(e)) if e == "aborted" => {
                 crate::elog::elog!("[llm] fn refine aborted (gen={gen})");
-                if !AsrEngine::finalize_aborted(app, gen)
-                    && take_accept()
-                {
-                    return paste_immediate_result(app, result, &source, media_kind);
-                }
                 return None;
             }
             Ok(Err(e)) => {
@@ -1402,6 +1470,64 @@ pub(crate) fn finalize_successful_result(
         if AsrEngine::finalize_aborted(app, gen) {
             crate::elog::elog!("[asr] finalize aborted after refine (gen={gen})");
             return None;
+        }
+
+        if config.llm_organize_enabled {
+            emit_floating_status(app, true, "organizing", &result.text, 0.0);
+            let before_organize = result.text.clone();
+            let cfg_clone = config.clone();
+            let app_handle = app.clone();
+            let timed_out = Arc::new(AtomicBool::new(false));
+            let timed_out_worker = Arc::clone(&timed_out);
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let r = organize_transcript_abortable(
+                    &cfg_clone,
+                    &before_organize,
+                    &mut || {
+                        timed_out_worker.load(Ordering::Acquire)
+                            || AsrEngine::finalize_aborted(&app_handle, gen)
+                    },
+                );
+                let _ = tx.send(r);
+            });
+            match rx.recv_timeout(std::time::Duration::from_secs(20)) {
+                Ok(Ok(out)) => {
+                    let changed = out != result.text;
+                    if changed {
+                        result.text = out;
+                        result.text = apply_vocabulary_with_learn(
+                            app,
+                            &result.text,
+                            &merged_vocabulary,
+                        );
+                        result.llm_text = Some(result.text.clone());
+                        result.refined = true;
+                    }
+                    crate::elog::elog!(
+                        "[llm] fn organize ok out_chars={} changed={}",
+                        result.text.chars().count(),
+                        changed
+                    );
+                }
+                Ok(Err(e)) if e == "aborted" => {
+                    crate::elog::elog!("[llm] fn organize aborted (gen={gen})");
+                    return None;
+                }
+                Ok(Err(e)) => {
+                    crate::elog::elog!("[llm] fn organize failed (using refined text): {e}");
+                    result.refine_failed = true;
+                }
+                Err(_) => {
+                    timed_out.store(true, Ordering::Release);
+                    crate::elog::elog!("[llm] fn organize timed out (20s), using refined text");
+                    result.refine_failed = true;
+                }
+            }
+            if AsrEngine::finalize_aborted(app, gen) {
+                crate::elog::elog!("[asr] finalize aborted after organize (gen={gen})");
+                return None;
+            }
         }
     }
 
@@ -1525,6 +1651,12 @@ pub(crate) fn finalize_successful_result(
     if take_accept() {
         return paste_immediate_result(app, result, &source, media_kind);
     }
+    // A quick-Fn preview paste can race between the previous generation check
+    // and this edit transition. Never resurrect editing after that paste closed HUD.
+    if AsrEngine::finalize_aborted(app, gen) {
+        crate::elog::elog!("[asr] stale finalize blocked before HUD editing (gen={gen})");
+        return None;
+    }
     let shown_text = result.text.clone();
     AsrEngine::set_pending_hud_confirm(
         app,
@@ -1566,7 +1698,10 @@ pub(crate) fn schedule_floating_idle(app: &AppHandle, delay_ms: u64) {
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         if let Ok(slot) = floating_status_slot(&app2).lock() {
-            if slot.state == "recording" || slot.state == "refining" || slot.state == "editing"
+            if slot.state == "recording"
+                || slot.state == "refining"
+                || slot.state == "organizing"
+                || slot.state == "editing"
             {
                 return;
             }
@@ -4181,7 +4316,7 @@ Just vaguely in general, we feature the Apple II. language English";
 
 #[cfg(test)]
 mod refine_artifact_tests {
-    use super::{refine_one_chunk, strip_refine_artifacts};
+    use super::{organize_transcript_abortable, refine_one_chunk, strip_refine_artifacts};
 
     #[test]
     fn refine_sends_only_transcript_as_user_message() {
@@ -4243,6 +4378,24 @@ mod refine_artifact_tests {
             assert!(!result.starts_with('#'), "{result}");
             println!("local refine {}ms: {result}", started.elapsed().as_millis());
         }
+    }
+
+    #[test]
+    #[ignore = "requires local Ollama with qwen3-asr-refine:1.7b"]
+    fn local_organize_returns_body_only() {
+        let mut config = crate::config::AppConfig::default();
+        config.llm_enabled = true;
+        config.llm_provider = "ollama".into();
+        config.llm_model = "qwen3-asr-refine:1.7b".into();
+        config.llm_api_base_url = "http://127.0.0.1:11434/v1".into();
+        config.llm_organize_enabled = true;
+        config.llm_organize_provider = "ollama".into();
+        let input = "领导今天说要让干把会议材料准备一下，然后把办公室收拾一下，然后就是把这个舞台搭建一下啊，还有什么顺便都做一下";
+        let started = std::time::Instant::now();
+        let result = organize_transcript_abortable(&config, input, &mut || false).unwrap();
+        assert!(!result.trim().is_empty());
+        assert!(!result.contains("/no_think"), "{result}");
+        println!("local organize {}ms: {result}", started.elapsed().as_millis());
     }
 
     #[test]
@@ -4814,7 +4967,7 @@ mod distill_gate_tests {
 
 #[cfg(test)]
 mod refine_prompt_sync_tests {
-    use super::DEFAULT_REFINE;
+    use super::{DEFAULT_ORGANIZE, DEFAULT_REFINE};
 
     /// The built-in refine prompt must be byte-identical across the Rust backend
     /// (what actually runs) and the frontend Settings preview
@@ -4835,6 +4988,19 @@ mod refine_prompt_sync_tests {
             frontend, DEFAULT_REFINE,
             "refine prompt drifted between constants.ts and transcription/mod.rs"
         );
+    }
+
+    #[test]
+    fn organize_matches_frontend_constant() {
+        let ts = include_str!("../../../src/lib/constants.ts");
+        let marker = "export const DEFAULT_LLM_ORGANIZE_PROMPT = `\\\n";
+        let start = ts
+            .find(marker)
+            .expect("DEFAULT_LLM_ORGANIZE_PROMPT not found in constants.ts")
+            + marker.len();
+        let rest = &ts[start..];
+        let end = rest.find("`;").expect("unterminated template literal");
+        assert_eq!(&rest[..end], DEFAULT_ORGANIZE);
     }
 }
 

@@ -13,6 +13,7 @@ export const settings: Record<string, string> = {
   // Secondary tabs
   "settings.sub.config": "Providers",
   "settings.sub.refine": "Corrections",
+  "settings.sub.organize": "Organize",
   "settings.sub.vocab": "Vocabulary",
   "settings.sub.hotkeys": "Hotkeys",
   "settings.sub.permissions": "Permissions",
@@ -20,7 +21,7 @@ export const settings: Record<string, string> = {
   // Section description lines
   "settings.tabDesc.general": "Language, audio source, and appearance. Changes save automatically.",
   "settings.tabDesc.asr": "Recognition engine, model, and word-level alignment.",
-  "settings.tabDesc.polish": "Provider setup, corrections, and vocabulary.",
+  "settings.tabDesc.polish": "Provider setup, corrections, intent organization, and vocabulary.",
   "settings.tabDesc.agent": "Built-in Claude · Codex · Pi — pick one as the default dispatch agent.",
   "settings.tabDesc.system": "Global hotkeys and macOS permissions.",
   "settings.tabDesc.updates": "Current version, update checks, and release notes.",
@@ -106,6 +107,13 @@ export const settings: Record<string, string> = {
   "settings.llm.modelPlaceholder": "Model name",
   "settings.llm.recommended": "Recommended",
   "settings.llm.fewShotHint": "Don't enable few-shot for small models (handled automatically)",
+
+  // Intent-aware organization
+  "settings.organize.enable": "Enable organization",
+  "settings.organize.blurb": "After refinement, use a stronger model to infer intent and format the text; requires refinement",
+  "settings.organize.provider": "Organization provider",
+  "settings.organize.providerBlurb": "A stronger model such as DeepSeek is recommended; manage credentials under Providers",
+  "settings.organize.prompt": "Organization prompt",
 
   // Translate prompt
   "settings.translatePrompt.title": "Translate prompt",
