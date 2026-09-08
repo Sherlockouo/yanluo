@@ -239,9 +239,10 @@ export function seedLlmCredentials(
   config: AppConfig,
 ): Record<string, LlmCredential> {
   const existing = config.llm_credentials ?? {};
-  if (Object.keys(existing).length > 0) return existing;
   const provider = config.llm_provider || "openai";
+  if (existing[provider]) return existing;
   return {
+    ...existing,
     [provider]: {
       api_base_url: config.llm_api_base_url ?? "",
       api_key: config.llm_api_key ?? "",

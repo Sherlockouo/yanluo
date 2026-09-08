@@ -105,6 +105,34 @@ export function applyTheme(theme: ThemeMode) {
   );
 }
 
+function withConfigDefaults(next: AppConfig): AppConfig {
+  const merged: AppConfig = {
+    ...defaultConfig,
+    ...next,
+    language: next.language || "auto",
+    align_enabled: next.align_enabled ?? defaultConfig.align_enabled,
+    hotkey_transcribe: next.hotkey_transcribe ?? defaultConfig.hotkey_transcribe,
+    hotkey_translate: next.hotkey_translate ?? defaultConfig.hotkey_translate,
+    hotkey_cancel: next.hotkey_cancel ?? defaultConfig.hotkey_cancel,
+    hotkey_agent: next.hotkey_agent ?? defaultConfig.hotkey_agent,
+    agent_kind: next.agent_kind ?? defaultConfig.agent_kind,
+    agent_profile_id: next.agent_profile_id ?? defaultConfig.agent_profile_id,
+    agent_profiles: next.agent_profiles?.length
+      ? next.agent_profiles
+      : defaultConfig.agent_profiles,
+    agent_cwd: next.agent_cwd ?? defaultConfig.agent_cwd,
+    agent_cwd_history: next.agent_cwd_history ?? defaultConfig.agent_cwd_history,
+    agent_claude_bin: next.agent_claude_bin ?? defaultConfig.agent_claude_bin,
+    agent_codex_bin: next.agent_codex_bin ?? defaultConfig.agent_codex_bin,
+    agent_pi_bin: next.agent_pi_bin ?? defaultConfig.agent_pi_bin,
+    agent_trusted_dirs: next.agent_trusted_dirs ?? defaultConfig.agent_trusted_dirs,
+    audio_capture_mode: next.audio_capture_mode ?? defaultConfig.audio_capture_mode,
+    extra_languages: next.extra_languages ?? defaultConfig.extra_languages,
+  };
+  merged.llm_credentials = seedLlmCredentials(merged);
+  return merged;
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const t = useT();
@@ -128,6 +156,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const modelLoadedRef = useRef(modelLoaded);
   const stateRef = useRef(state);
   const sessionModeRef = useRef<"fn" | "translate" | "transcribe">("fn");
+  const configSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const configHydratedRef = useRef(false);
+  const lastSavedConfigRef = useRef("");
+  const latestConfigRef = useRef(config);
 
   useEffect(() => {
     configRef.current = config;
@@ -159,38 +191,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [history.length]);
 
   const loadConfig = useCallback(async () => {
-    const next = await invoke<AppConfig>("get_app_config").catch(
-      () => defaultConfig,
-    );
-    const merged: AppConfig = {
-      ...defaultConfig,
-      ...next,
-      language: next.language || "auto",
-      align_enabled: next.align_enabled ?? defaultConfig.align_enabled,
-      hotkey_transcribe: next.hotkey_transcribe ?? defaultConfig.hotkey_transcribe,
-      hotkey_translate: next.hotkey_translate ?? defaultConfig.hotkey_translate,
-      hotkey_cancel: next.hotkey_cancel ?? defaultConfig.hotkey_cancel,
-      hotkey_agent: next.hotkey_agent ?? defaultConfig.hotkey_agent,
-      agent_kind: next.agent_kind ?? defaultConfig.agent_kind,
-      agent_profile_id:
-        next.agent_profile_id ?? defaultConfig.agent_profile_id,
-      agent_profiles:
-        next.agent_profiles?.length
-          ? next.agent_profiles
-          : defaultConfig.agent_profiles,
-      agent_cwd: next.agent_cwd ?? defaultConfig.agent_cwd,
-      agent_cwd_history:
-        next.agent_cwd_history ?? defaultConfig.agent_cwd_history,
-      agent_claude_bin: next.agent_claude_bin ?? defaultConfig.agent_claude_bin,
-      agent_codex_bin: next.agent_codex_bin ?? defaultConfig.agent_codex_bin,
-      agent_pi_bin: next.agent_pi_bin ?? defaultConfig.agent_pi_bin,
-      agent_trusted_dirs:
-        next.agent_trusted_dirs ?? defaultConfig.agent_trusted_dirs,
-      audio_capture_mode: next.audio_capture_mode ?? defaultConfig.audio_capture_mode,
-      extra_languages: next.extra_languages ?? defaultConfig.extra_languages,
-    };
-    merged.llm_credentials = seedLlmCredentials(merged);
-    setConfig(merged);
+    try {
+      const merged = withConfigDefaults(await invoke<AppConfig>("get_app_config"));
+      const snapshot = JSON.stringify(merged);
+      latestConfigRef.current = merged;
+      lastSavedConfigRef.current = snapshot;
+      configHydratedRef.current = true;
+      setConfig(merged);
+    } catch (error) {
+      console.error("[config] initial load failed; auto-save remains disabled:", error);
+      toast.danger(
+        tRef.current("toast.configLoadFailed", {
+          error: lookupRustMsg(String(error), tRef.current),
+        }),
+      );
+    }
   }, []);
 
   const loadHistory = useCallback(async () => {
@@ -353,45 +368,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         );
       }),
       listen<AppConfig>("config-updated", (event) => {
-        const merged: AppConfig = {
-          ...defaultConfig,
-          ...event.payload,
-          language: event.payload.language || "auto",
-          align_enabled:
-            event.payload.align_enabled ?? defaultConfig.align_enabled,
-          hotkey_transcribe:
-            event.payload.hotkey_transcribe ?? defaultConfig.hotkey_transcribe,
-          hotkey_translate:
-            event.payload.hotkey_translate ?? defaultConfig.hotkey_translate,
-          hotkey_cancel:
-            event.payload.hotkey_cancel ?? defaultConfig.hotkey_cancel,
-          hotkey_agent:
-            event.payload.hotkey_agent ?? defaultConfig.hotkey_agent,
-          agent_kind: event.payload.agent_kind ?? defaultConfig.agent_kind,
-          agent_profile_id:
-            event.payload.agent_profile_id ?? defaultConfig.agent_profile_id,
-          agent_profiles:
-            event.payload.agent_profiles?.length
-              ? event.payload.agent_profiles
-              : defaultConfig.agent_profiles,
-          agent_cwd: event.payload.agent_cwd ?? defaultConfig.agent_cwd,
-          agent_cwd_history:
-            event.payload.agent_cwd_history ?? defaultConfig.agent_cwd_history,
-          agent_claude_bin:
-            event.payload.agent_claude_bin ?? defaultConfig.agent_claude_bin,
-          agent_codex_bin:
-            event.payload.agent_codex_bin ?? defaultConfig.agent_codex_bin,
-          agent_pi_bin:
-            event.payload.agent_pi_bin ?? defaultConfig.agent_pi_bin,
-          agent_trusted_dirs:
-            event.payload.agent_trusted_dirs ?? defaultConfig.agent_trusted_dirs,
-          audio_capture_mode:
-            event.payload.audio_capture_mode ?? defaultConfig.audio_capture_mode,
-          extra_languages:
-            event.payload.extra_languages ?? defaultConfig.extra_languages,
-        };
-        merged.llm_credentials = seedLlmCredentials(merged);
-        setConfig(merged);
+        const merged = withConfigDefaults(event.payload);
+        const incoming = JSON.stringify(merged);
+        const current = JSON.stringify(latestConfigRef.current);
+        const saved = lastSavedConfigRef.current;
+        lastSavedConfigRef.current = incoming;
+        configHydratedRef.current = true;
+        if (!saved || current === saved || current === incoming) {
+          latestConfigRef.current = merged;
+          setConfig(merged);
+        } else {
+          console.info("[config] ignored stale backend echo while local edits are pending");
+        }
       }),
       listen<AgentJob>("agent-job-updated", (event) => {
         setAgentJobs((prev) => {
@@ -522,16 +510,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [loadConfig, loadHistory, loadAgentJobs, loadAgentModels, refreshAgentModels, navigate]);
 
-  // Debounce config persistence refs
-  const configSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const configInitializedRef = useRef(false);
-  const lastSavedConfigRef = useRef("");
-  const latestConfigRef = useRef(config);
-
   const saveConfig = useCallback(
     async (next = config, opts?: { silent?: boolean }) => {
-      await invoke("save_app_config", { config: next });
+      if (!configHydratedRef.current) {
+        const error = "settings have not finished loading";
+        console.error(`[config] ${error}; refusing to overwrite disk`);
+        toast.danger(tRef.current("toast.configLoadFailed", { error }));
+        return;
+      }
+      latestConfigRef.current = next;
       setConfig(next);
+      await invoke("save_app_config", { config: next });
       lastSavedConfigRef.current = JSON.stringify(next);
       if (!opts?.silent) toast.success(tRef.current("toast.configSaved"));
     },
@@ -542,25 +531,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // avoids rewriting the config once per keystroke while still feeling immediate.
   useEffect(() => {
     latestConfigRef.current = config;
-    if (!configInitializedRef.current) {
-      configInitializedRef.current = true;
-      return;
-    }
+    if (!configHydratedRef.current) return;
     if (configSaveTimerRef.current) clearTimeout(configSaveTimerRef.current);
     configSaveTimerRef.current = setTimeout(() => {
       const snapshot = JSON.stringify(config);
-      if (lastSavedConfigRef.current === snapshot) {
-        lastSavedConfigRef.current = "";
-        return;
-      }
-      invoke("save_app_config", { config }).catch((error: unknown) => {
-        console.error("[config] auto-save failed:", error);
-        toast.danger(
-          tRef.current("toast.configSaveFailed", {
-            error: lookupRustMsg(String(error), tRef.current),
-          }),
-        );
-      });
+      if (lastSavedConfigRef.current === snapshot) return;
+      invoke("save_app_config", { config })
+        .then(() => {
+          lastSavedConfigRef.current = snapshot;
+        })
+        .catch((error: unknown) => {
+          console.error("[config] auto-save failed:", error);
+          toast.danger(
+            tRef.current("toast.configSaveFailed", {
+              error: lookupRustMsg(String(error), tRef.current),
+            }),
+          );
+        });
     }, 150);
     return () => {
       if (configSaveTimerRef.current) clearTimeout(configSaveTimerRef.current);
@@ -572,7 +559,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       if (configSaveTimerRef.current) {
         clearTimeout(configSaveTimerRef.current);
-        invoke("save_app_config", { config: latestConfigRef.current }).catch(() => {});
+        const latest = latestConfigRef.current;
+        if (
+          configHydratedRef.current &&
+          lastSavedConfigRef.current !== JSON.stringify(latest)
+        ) {
+          invoke("save_app_config", { config: latest }).catch((error: unknown) => {
+            console.error("[config] final save failed:", error);
+          });
+        }
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -635,7 +630,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateConfig = useCallback(
     <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => {
-      setConfig((prev) => ({ ...prev, [key]: value }));
+      setConfig((prev) => {
+        const next = { ...prev, [key]: value };
+        latestConfigRef.current = next;
+        return next;
+      });
     },
     [],
   );

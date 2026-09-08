@@ -8,6 +8,7 @@ export const toast: Record<string, string> = {
   "toast.engineCrash": "ASR 引擎崩溃：{reason}。请重启应用。",
   "toast.configSaved": "设置已保存",
   "toast.configSaveFailed": "设置保存失败：{error}",
+  "toast.configLoadFailed": "设置读取失败，已暂停自动保存：{error}",
   "toast.skipFailed": "跳过失败: {error}",
   "toast.stopRecFailed": "停止录音失败: {error}",
   "toast.startRecFailed": "启动录音失败: {error}",
