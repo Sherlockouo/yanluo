@@ -149,6 +149,7 @@ pub(crate) fn hide_floating_before_paste(app: &AppHandle) -> Result<(), String> 
         #[cfg(not(target_os = "macos"))]
         window.hide().map_err(|e| format!("{label}: {e}"))?;
     }
+    crate::elog::elog!("[paste] HUD ordered out");
     Ok(())
 }
 

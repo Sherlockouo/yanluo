@@ -998,7 +998,7 @@ pub(crate) struct LearnFromHudPayload {
     pub(crate) learned_pairs: Vec<LearnedPairInfo>,
 }
 
-/// Confirm Fn/⇧Fn HUD edit: hide → paste → history → optional learn.
+/// Confirm Fn/⇧Fn HUD edit: clipboard → hide → paste → history → optional learn.
 #[tauri::command]
 pub(crate) fn confirm_floating_transcript(
     app: AppHandle,
@@ -1035,7 +1035,7 @@ pub(crate) fn confirm_floating_transcript(
     };
     result.text = confirmed.clone();
 
-    // Shared paste callback orders the native HUD out immediately before Cmd+V.
+    // Shared paste callback writes the clipboard, then orders HUD out before Cmd+V.
     match inject_text_via_paste_on_main(&app, &confirmed) {
         Ok(()) => {
             crate::elog::elog!(
