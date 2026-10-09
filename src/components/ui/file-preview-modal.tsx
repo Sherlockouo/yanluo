@@ -7,7 +7,7 @@ import { ExternalLink, X } from "lucide-react";
 import { AttachMediaBody } from "@/components/ui/attach-media-body";
 import { MarkdownBody } from "@/components/shared/markdown-body";
 import { toolResultToMarkdown } from "@/lib/agent-tool-md";
-import { duration, easeOut, springUI } from "@/lib/motion";
+import { duration, easeOut, springBounce } from "@/lib/motion";
 import { useT } from "@/lib/i18n";
 import type { AgentPathInfo } from "@/types";
 
@@ -112,10 +112,10 @@ export function FilePreviewModal({ item, onClose }: Props) {
             aria-modal="true"
             aria-label={item.name}
             className="agent-file-preview-panel flex h-[min(85vh,44rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl"
-            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.95, y: 24 }}
+            initial={reduce ? { opacity: 0.92 } : { opacity: 0.92, scale: 0.95, y: 24 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 16 }}
-            transition={reduce ? { duration: 0.14, ease: easeOut } : springUI}
+            transition={reduce ? { duration: 0.14, ease: easeOut } : springBounce}
           >
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-3">
               <div className="min-w-0">

@@ -8,7 +8,7 @@ import {
 } from "react";
 import type { CSSProperties } from "react";
 import { useSearchParams } from "react-router-dom";
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import {
   Button,
   Checkbox,
@@ -35,6 +35,7 @@ import {
   ExternalLink,
   FolderOpen,
   Globe,
+  HardDrive,
   Keyboard,
   Languages,
   Mic,
@@ -49,6 +50,7 @@ import {
   Trash2,
   Volume2,
   Wand2,
+  X,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -85,8 +87,15 @@ import {
   RECOMMENDED_REFINE_MODELS,
   resolveLlmCreds,
 } from "@/lib/constants";
-import { useFade } from "@/lib/motion";
 import {
+  duration,
+  easeOut,
+  revealDelay,
+  useCollapse,
+  useFade,
+} from "@/lib/motion";
+import {
+  type LocalModelHit,
   type ModelDownloadProgress,
   type ModelStatus,
   progressLabel,
@@ -301,7 +310,10 @@ function QSwitch<T extends string>({
               type="button"
               role="radio"
               aria-checked={active}
-              className={cn("o", active && "on")}
+              className={cn(
+                "o rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                active && "on",
+              )}
               onClick={() => onChange(item.id)}
             >
               {item.label}
@@ -379,7 +391,10 @@ function SubTabs<T extends string>({
             role="tab"
             aria-selected={isActive}
             aria-current={isActive ? "true" : undefined}
-            className={cn("set-subtab", isActive && "is-active")}
+            className={cn(
+              "set-subtab rounded-t-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent",
+              isActive && "is-active",
+            )}
             onClick={() => onSelect(item.id)}
           >
             {t(item.labelKey)}
@@ -655,7 +670,9 @@ function OrganizePanel() {
   const t = useT();
   const providers = listLlmProviders(config);
   const selected = config.llm_organize_provider || "deepseek";
-  const prompt = config.llm_organize_prompt;
+  const prompt = config.llm_organize_prompt.trim()
+    ? config.llm_organize_prompt
+    : DEFAULT_LLM_ORGANIZE_PROMPT;
 
   return (
     <div className="flex flex-col gap-6">
@@ -788,6 +805,7 @@ function AsrProviderPanel() {
   const { config, updateConfig, chooseModelDir, loadModel, modelLoaded, modelLoading } =
     useApp();
   const t = useT();
+  const fade = useFade();
   const [appleAvailable, setAppleAvailable] = useState(true);
   const [qwenLocal, setQwenLocal] = useState(false);
   const [status, setStatus] = useState<ModelStatus | null>(null);
@@ -795,6 +813,8 @@ function AsrProviderPanel() {
   const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
   const [downloadAligner, setDownloadAligner] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [localHits, setLocalHits] = useState<LocalModelHit[]>([]);
+  const [localHitsDismissed, setLocalHitsDismissed] = useState(false);
   const statusRequest = useRef(0);
 
   useEffect(() => {
@@ -846,6 +866,23 @@ function AsrProviderPanel() {
   useEffect(() => {
     if (config.asr_provider === "qwen") void refreshStatus();
   }, [config.asr_provider, refreshStatus]);
+
+  // Suggestion-only scan of local HuggingFace / ModelScope caches. Re-runs on
+  // dir change so an adopted (or fixed) path drops its own row from the card.
+  useEffect(() => {
+    if (config.asr_provider !== "qwen") return;
+    let alive = true;
+    void invoke<LocalModelHit[]>("detect_local_qwen_models")
+      .then((hits) => {
+        if (alive) setLocalHits(hits ?? []);
+      })
+      .catch(() => {
+        if (alive) setLocalHits([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [config.asr_provider, config.asr_model_dir, config.align_model_dir]);
 
   useEffect(() => {
     const inferred = qwenModelIdForPath(config.asr_model_dir);
@@ -916,6 +953,29 @@ function AsrProviderPanel() {
   const needsDownload = isQwen && !modelDir;
   const modelDirReady = Boolean(status?.installed && !status.needs_download);
 
+  // Suggestion, never forced: rows differ from the current dir; aligner rows
+  // only show while the aligner path is unset. Hidden entirely once the
+  // configured dir is known-good.
+  const localSuggestions = localHits.filter((hit) => {
+    if (hit.path === modelDir) return false;
+    if (hit.model_id.includes("ForcedAligner")) return !alignReady;
+    return true;
+  });
+  const showLocalSuggestions =
+    isQwen &&
+    !localHitsDismissed &&
+    localSuggestions.length > 0 &&
+    (!modelDir || (status != null && !modelDirReady));
+
+  const adoptLocalHit = (hit: LocalModelHit) => {
+    if (hit.model_id.includes("ForcedAligner")) {
+      updateConfig("align_model_dir", hit.path);
+      return;
+    }
+    updateModelDir(hit.path);
+    void refreshStatus(hit.path, hit.model_id);
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <Reveal index={0}>
@@ -956,6 +1016,13 @@ function AsrProviderPanel() {
 
         {config.asr_provider === "apple" ? (
           <p className="type-meta">{t("settings.asr.appleBlurb")}</p>
+        ) : null}
+
+        {isQwen && !qwenLocal ? (
+          <p className="type-meta text-warning">
+            <CircleAlert size={13} className="mr-1 inline shrink-0 align-[-2px]" />
+            {t("settings.asr.rebuildHint")}
+          </p>
         ) : null}
 
         {isQwen ? (
@@ -1007,19 +1074,84 @@ function AsrProviderPanel() {
               </InputGroup>
             </TextField>
 
+            <SoftCollapse open={showLocalSuggestions}>
+              <div className="flex flex-col gap-2.5 rounded-xl bg-default/40 p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 type-ui">
+                      <HardDrive size={14} className="shrink-0 opacity-70" />
+                      {t("settings.asr.localModelsFound")}
+                    </div>
+                    <div className="mt-0.5 type-meta">
+                      {t("settings.asr.localModelsBlurb")}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    isIconOnly
+                    aria-label={t("settings.asr.localModelsDismiss")}
+                    className="shrink-0"
+                    onPress={() => setLocalHitsDismissed(true)}
+                  >
+                    <X size={14} />
+                  </Button>
+                </div>
+                {localSuggestions.map((hit) => (
+                  <div
+                    key={`${hit.source}:${hit.path}`}
+                    className="flex items-center gap-2"
+                  >
+                    <span
+                      className="badge-soft shrink-0"
+                      data-tone={hit.source === "modelscope" ? "accent" : "neutral"}
+                    >
+                      {hit.source === "modelscope"
+                        ? t("settings.asr.localModelSourceMS")
+                        : t("settings.asr.localModelSourceHF")}
+                    </span>
+                    <span className="shrink-0 text-[12px] font-medium">
+                      {hit.model_id}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] opacity-60">
+                      {hit.path}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="shrink-0"
+                      onPress={() => adoptLocalHit(hit)}
+                    >
+                      {t("settings.asr.localModelUse")}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </SoftCollapse>
+
             {modelDir ? (
               <div className="flex items-center justify-between gap-3">
                 <p className="min-w-0 truncate type-meta">
-                  <span
+                  <motion.span
+                    key={
+                      status == null
+                        ? "checking"
+                        : modelDirReady
+                          ? "ready"
+                          : "invalid"
+                    }
                     className="badge-soft"
                     data-tone={modelDirReady ? "success" : "warning"}
+                    initial={fade.initial}
+                    animate={fade.animate}
+                    transition={fade.transition}
                   >
                     {status == null
                       ? t("settings.asr.checking")
                       : modelDirReady
                         ? t("settings.asr.ready")
                         : t("settings.asr.invalidDir")}
-                  </span>
+                  </motion.span>
                 </p>
                 <div className="flex shrink-0 gap-2">
                   <Button
@@ -1036,6 +1168,7 @@ function AsrProviderPanel() {
                     variant="primary"
                     className="btn-press"
                     isPending={modelLoading}
+                    isDisabled={!qwenLocal}
                     onPress={() => void loadModel(modelDir)}
                   >
                     <RefreshCw size={14} />
@@ -1047,7 +1180,7 @@ function AsrProviderPanel() {
               </div>
             ) : null}
 
-            {needsDownload ? (
+            <SoftCollapse open={needsDownload}>
               <div className="flex flex-col gap-3 rounded-xl bg-default/40 p-4">
                 <div>
                   <div className="type-ui">{t("settings.asr.needDownloadTitle")}</div>
@@ -1098,7 +1231,7 @@ function AsrProviderPanel() {
                     : t("settings.asr.startDownload")}
                 </Button>
               </div>
-            ) : null}
+            </SoftCollapse>
 
             <div className="settings-switchrow">
               <Switch
@@ -1574,7 +1707,7 @@ function LlmProviderPanel() {
 
       <div>
         <div className="set-prov-list">
-          {providers.map((p) => {
+          {providers.map((p, pi) => {
             const isCur = p.id === config.llm_provider;
             const isOpen = openId === p.id;
             const local = p.id === "ollama";
@@ -1590,12 +1723,16 @@ function LlmProviderPanel() {
                   : t("settings.llm.badgeUnset");
             const toggle = () => setOpenId(isOpen ? null : p.id);
             return (
-              <div key={p.id} className={cn("set-prov-wrap", isOpen && "is-open")}>
+              <Reveal key={p.id} index={pi}>
+              <div className={cn("set-prov-wrap", isOpen && "is-open")}>
                 <div
                   role="button"
                   tabIndex={0}
                   aria-expanded={isOpen}
-                  className={cn("set-prov-line", isCur && "current")}
+                  className={cn(
+                    "set-prov-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+                    isCur && "current",
+                  )}
                   onClick={toggle}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
@@ -1623,25 +1760,25 @@ function LlmProviderPanel() {
                   </div>
                   <button
                     type="button"
-                    className="set-prov-act"
+                    className="set-prov-act rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                     onClick={(e) => {
                       e.stopPropagation();
                       toggle();
                     }}
                   >
                     <span>{isOpen ? t("common.collapse") : t("common.edit")}</span>
-                    <ChevronDown
-                      size={12}
-                      style={{
-                        transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
-                        transition: "transform 150ms ease",
-                      }}
-                    />
+                    <motion.span
+                      className="inline-flex"
+                      animate={{ rotate: isOpen ? 180 : 0 }}
+                      transition={{ duration: duration.fast, ease: easeOut }}
+                    >
+                      <ChevronDown size={12} aria-hidden />
+                    </motion.span>
                   </button>
                   {!isCur ? (
                     <button
                       type="button"
-                      className="set-prov-ghost"
+                      className="set-prov-ghost rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                       onClick={(e) => {
                         e.stopPropagation();
                         activate(p.id);
@@ -1665,13 +1802,14 @@ function LlmProviderPanel() {
                   />
                 </SoftCollapse>
               </div>
+              </Reveal>
             );
           })}
 
           <div
             role="button"
             tabIndex={0}
-            className="set-prov-line"
+            className="set-prov-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             onClick={addProvider}
             onKeyDown={(e) => {
               if (e.key === "Enter" || e.key === " ") {
@@ -2069,13 +2207,13 @@ function GeneralPanel() {
                   {e.label}
                   <button
                     type="button"
-                    className="text-muted transition-colors hover:text-danger"
+                    className="grid place-items-center rounded-sm text-muted transition-colors hover:text-danger focus-visible:outline-2 focus-visible:outline-accent"
                     aria-label={t("settings.general.removeLanguageAria", {
                       label: e.label,
                     })}
                     onClick={() => removeLanguage(e.id)}
                   >
-                    ×
+                    <X size={11} aria-hidden />
                   </button>
                 </span>
               ))}
@@ -2431,7 +2569,7 @@ function HotkeysPanel() {
               <div className="flex shrink-0 items-center gap-2">
                 {active ? (
                   <>
-                    <span className="type-meta text-accent-soft-foreground!">
+                    <span className="type-meta text-accent-soft-foreground! animate-pulse motion-reduce:animate-none">
                       {preview
                         ? t("settings.hotkeys.releaseToConfirm", { label: preview })
                         : t("settings.hotkeys.pressCombo")}
@@ -2462,7 +2600,8 @@ function HotkeysPanel() {
         })}
       </div>
 
-      {conflict ? (
+      <SoftCollapse open={conflict != null}>
+        {conflict ? (
         <div className="rounded-xl border border-warning/40 bg-warning/5 p-3 flex flex-col gap-2">
           <div className="type-ui text-warning">
             <CircleAlert size={14} className="inline -mt-0.5 mr-1" />
@@ -2496,7 +2635,8 @@ function HotkeysPanel() {
             </Button>
           </div>
         </div>
-      ) : null}
+        ) : null}
+      </SoftCollapse>
 
       <div className="rounded-xl bg-default/40 p-3">
         <div className="type-ui mb-1">{t("settings.hotkeys.fnNoteTitle")}</div>
@@ -2525,6 +2665,7 @@ function HotkeysPanel() {
 
 function PermissionsPanel() {
   const t = useT();
+  const fade = useFade();
   const [perms, setPerms] = useState<PermissionStatus | null>(null);
   const [busy, setBusy] = useState<PermKind | null>(null);
   const [hint, setHint] = useState<string | null>(null);
@@ -2619,7 +2760,7 @@ function PermissionsPanel() {
               <div key={item.kind} className="perm-row">
                 <div
                   className={cn(
-                    "grid h-10 w-10 shrink-0 place-items-center rounded-xl",
+                    "grid h-10 w-10 shrink-0 place-items-center rounded-xl transition-colors duration-200 motion-reduce:transition-none",
                     granted
                       ? "bg-foreground/[0.06] text-foreground"
                       : "bg-default/40 text-muted",
@@ -2632,11 +2773,15 @@ function PermissionsPanel() {
                   <div className="mt-0.5 type-meta">{t(item.blurbKey)}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span
+                  <motion.span
+                    key={granted ? "ok" : "off"}
                     className={cn(
                       "perm-status",
                       granted ? "perm-status-ok" : "perm-status-off",
                     )}
+                    initial={fade.initial}
+                    animate={fade.animate}
+                    transition={fade.transition}
                   >
                     {granted ? (
                       <CheckCircle2 size={12} />
@@ -2646,7 +2791,7 @@ function PermissionsPanel() {
                     {granted
                       ? t("settings.perm.granted")
                       : t("settings.perm.notGranted")}
-                  </span>
+                  </motion.span>
                   {!granted ? (
                     <Button
                       size="sm"
@@ -2724,6 +2869,8 @@ function PermissionsPanel() {
 
 function UpdatesPanel() {
   const t = useT();
+  const collapse = useCollapse();
+  const reduce = useReducedMotion();
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [check, setCheck] = useState<UpdateCheckResult | null>(null);
   const [checking, setChecking] = useState(false);
@@ -2955,8 +3102,17 @@ function UpdatesPanel() {
 
       <SectionCard title={t("settings.updates.releaseNotes")}>
         <div className="flex flex-col gap-5">
-          {logEntries.map((entry) => (
-            <article key={`${entry.version}-${entry.date}`} className="release-entry">
+          {logEntries.map((entry, i) => (
+            <motion.article
+              key={`${entry.version}-${entry.date}`}
+              className="release-entry"
+              initial={collapse.initial}
+              animate={collapse.animate}
+              transition={{
+                ...collapse.transition,
+                delay: reduce ? 0 : revealDelay(i),
+              }}
+            >
               <header className="mb-2 flex items-baseline gap-2">
                 <h3 className="text-sm font-semibold text-foreground">
                   v{entry.version}
@@ -2975,7 +3131,7 @@ function UpdatesPanel() {
                   </li>
                 ))}
               </ul>
-            </article>
+            </motion.article>
           ))}
         </div>
       </SectionCard>

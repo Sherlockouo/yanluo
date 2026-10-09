@@ -27,7 +27,7 @@ export const learn: Record<string, string> = {
   "learn.test": "测试",
   "learn.save": "保存",
   "learn.emptyTitle": "还没学到纠错习惯",
-  "learn.emptyHint": "在 HUD 或出稿里改字后自动出现",
+  "learn.emptyHint": "在 HUD 或听写里改字后自动出现",
   "learn.searchPlaceholder": "搜索错词 / 正确词…",
   "learn.hitCount": "命中 {n}",
   "learn.enablePair": "启用 {wrong} → {right}",

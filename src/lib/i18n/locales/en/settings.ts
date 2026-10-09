@@ -6,7 +6,7 @@ export const settings: Record<string, string> = {
   "settings.tab.general": "General",
   "settings.tab.asr": "Recognition",
   "settings.tab.polish": "Polish",
-  "settings.tab.agent": "Dispatch",
+  "settings.tab.agent": "Agents",
   "settings.tab.system": "System",
   "settings.tab.updates": "Updates",
 
@@ -55,6 +55,15 @@ export const settings: Record<string, string> = {
     "Dictation, meeting, interview, and VAD segmentation settings · most users never need them.",
   "settings.asr.modelDir": "Model directory",
   "settings.asr.browse": "Browse",
+  "settings.asr.localModelsFound": "Models already on this machine",
+  "settings.asr.localModelsBlurb":
+    "Found in your HuggingFace / ModelScope cache. Click “Use” to adopt one, or ignore this and set a path manually.",
+  "settings.asr.localModelUse": "Use",
+  "settings.asr.localModelSourceHF": "HuggingFace cache",
+  "settings.asr.localModelSourceMS": "ModelScope cache",
+  "settings.asr.localModelsDismiss": "Dismiss this hint",
+  "settings.asr.rebuildHint":
+    "Local Qwen backend is not enabled in this build: on macOS rebuild with `--features qwen-local` (MLX); Linux/Windows use the same flag and point LIBTORCH at a libtorch 2.7 install (CPU or CUDA).",
   "settings.asr.downloadAligner":
     "Also fetch the word-alignment model (ForcedAligner) when downloading",
   "settings.asr.alignModelDir": "Aligner model directory",
@@ -121,7 +130,7 @@ export const settings: Record<string, string> = {
   // Translate prompt
   "settings.translatePrompt.title": "Translate prompt",
   "settings.translatePrompt.blurb":
-    "Used by the Drafts translate tab · {placeholder} is replaced with the target language name",
+    "Used by the Dictation translate tab · {placeholder} is replaced with the target language name",
   "settings.translatePrompt.placeholder": "{placeholder} → target language name",
 
   // General panel
@@ -149,14 +158,14 @@ export const settings: Record<string, string> = {
   "settings.general.sfxOn": "On",
   "settings.general.sfxOff": "Off",
   "settings.general.tour": "Product tour",
-  "settings.general.tourBlurb": "Replay the Drafts / Dispatch / Settings highlights",
+  "settings.general.tourBlurb": "Replay the Dictation / Agents / Settings highlights",
   "settings.general.tourButton": "Replay tour",
 
   // Hotkeys panel
   "settings.hotkeys.slotTranscribe": "Draft",
   "settings.hotkeys.slotTranslate": "Translate",
   "settings.hotkeys.slotCancel": "Cancel",
-  "settings.hotkeys.slotAgent": "Dispatch",
+  "settings.hotkeys.slotAgent": "Agents",
   "settings.hotkeys.notSet": "Not set",
   "settings.hotkeys.boundToast": "Set: {label}",
   "settings.hotkeys.captureStartFailed": "Could not start hotkey capture: {msg}",
@@ -190,7 +199,8 @@ export const settings: Record<string, string> = {
   "settings.perm.authorize": "Authorize",
   "settings.perm.relaunch": "Relaunch app",
   "settings.perm.helpTitle": "Notes",
-  "settings.perm.helpLine1": "· System Settings lists this app as Yanluo (not 言落)",
+  "settings.perm.helpLine1":
+    "· System Settings lists this app as Sayi (dev builds may show as sayi)",
   "settings.perm.helpLine2":
     "· Signed builds keep Mic / Speech / Screen with the Bundle ID",
   "settings.perm.helpLine3":
@@ -221,7 +231,7 @@ export const settings: Record<string, string> = {
   // Dispatch agent panel
   "settings.agent.notSet": "Not set",
   "settings.agent.intro":
-    "Yanluo has built-in support for the Claude · Codex · Pi CLIs. Fill in the path and default model, then pick one as the default dispatch agent.",
+    "Sayi has built-in support for the Claude · Codex · Pi CLIs. Fill in the path and default model, then pick one as the default dispatch agent.",
   "settings.agent.binNotFound": "{kind} not found",
   "settings.agent.whichFailed": "which failed: {msg}",
   "settings.agent.modelsRefreshed": "Model list refreshed",

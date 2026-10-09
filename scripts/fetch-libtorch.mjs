@@ -83,7 +83,7 @@ function assetFor() {
 }
 
 function markerPath() {
-  return path.join(outDir, ".yanluo-libtorch-variant");
+  return path.join(outDir, ".sayi-libtorch-variant");
 }
 
 function alreadyOk(variant) {

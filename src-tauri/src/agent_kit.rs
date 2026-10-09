@@ -7,16 +7,16 @@ use std::path::Path;
 use crate::config::{default_agent_workdir, ensure_default_agent_workdir};
 
 /// Bump when kit files change — rewrite on mismatch.
-pub(crate) const AGENT_KIT_VERSION: &str = "1";
+pub(crate) const AGENT_KIT_VERSION: &str = "2";
 
 const AGENTS_MD: &str = include_str!("../agent_kit/AGENTS.md");
-const SKILL_SETTINGS: &str = include_str!("../agent_kit/skills/yanluo-settings.md");
-const YANLUO_CONFIG: &str = include_str!("../agent_kit/bin/yanluo-config");
+const SKILL_SETTINGS: &str = include_str!("../agent_kit/skills/sayi-settings.md");
+const SAYI_CONFIG: &str = include_str!("../agent_kit/bin/sayi-config");
 
 /// Ensure kit files exist under the default agent workdir. Idempotent.
 pub(crate) fn sync_agent_kit() -> Result<std::path::PathBuf, String> {
     let dir = ensure_default_agent_workdir()?;
-    let stamp = dir.join(".yanluo-kit-version");
+    let stamp = dir.join(".sayi-kit-version");
     let current = fs::read_to_string(&stamp).unwrap_or_default();
     if current.trim() == AGENT_KIT_VERSION && dir.join("AGENTS.md").is_file() {
         return Ok(dir);
@@ -34,18 +34,18 @@ fn write_kit(dir: &Path) -> Result<(), String> {
     fs::create_dir_all(&bin).map_err(|e| format!("mkdir bin: {e}"))?;
 
     write_file(&dir.join("AGENTS.md"), AGENTS_MD)?;
-    write_file(&skills.join("yanluo-settings.md"), SKILL_SETTINGS)?;
-    let script = bin.join("yanluo-config");
-    write_file(&script, YANLUO_CONFIG)?;
+    write_file(&skills.join("sayi-settings.md"), SKILL_SETTINGS)?;
+    let script = bin.join("sayi-config");
+    write_file(&script, SAYI_CONFIG)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let mut perms = fs::metadata(&script)
-            .map_err(|e| format!("stat yanluo-config: {e}"))?
+            .map_err(|e| format!("stat sayi-config: {e}"))?
             .permissions();
         perms.set_mode(0o755);
         fs::set_permissions(&script, perms)
-            .map_err(|e| format!("chmod yanluo-config: {e}"))?;
+            .map_err(|e| format!("chmod sayi-config: {e}"))?;
     }
     Ok(())
 }
@@ -69,20 +69,20 @@ mod tests {
 
     #[test]
     fn kit_templates_nonempty() {
-        assert!(AGENTS_MD.contains("yanluo-config"));
+        assert!(AGENTS_MD.contains("sayi-config"));
         assert!(SKILL_SETTINGS.contains("asr_model_dir"));
-        assert!(YANLUO_CONFIG.contains("WHITELIST"));
+        assert!(SAYI_CONFIG.contains("WHITELIST"));
     }
 
     #[test]
     fn sync_writes_files() {
-        let tmp = env::temp_dir().join(format!("yanluo-kit-test-{}", std::process::id()));
+        let tmp = env::temp_dir().join(format!("sayi-kit-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(&tmp).unwrap();
         write_kit(&tmp).unwrap();
         assert!(tmp.join("AGENTS.md").is_file());
-        assert!(tmp.join("skills/yanluo-settings.md").is_file());
-        assert!(tmp.join("bin/yanluo-config").is_file());
+        assert!(tmp.join("skills/sayi-settings.md").is_file());
+        assert!(tmp.join("bin/sayi-config").is_file());
         let _ = fs::remove_dir_all(&tmp);
     }
 }

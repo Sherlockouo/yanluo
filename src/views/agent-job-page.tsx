@@ -410,7 +410,7 @@ const EventRow = memo(function EventRow({
   const delay = shouldAnimate ? Math.min(staggerIndex, 3) * 0.04 : 0;
   return (
     <motion.div
-      initial={shouldAnimate ? { opacity: 0, y: 10 } : false}
+      initial={shouldAnimate ? { opacity: 0.92, y: 8 } : false}
       animate={{ opacity: 1, y: 0 }}
       transition={{ ...springUI, delay }}
     >
@@ -907,6 +907,7 @@ export function AgentJobPage() {
                         : "neutral"
                 }
               >
+                {active ? <span className="agent-badge-dot" /> : null}
                 {t(jobStatusKey(job.status))}
               </span>
             </div>
@@ -985,7 +986,7 @@ export function AgentJobPage() {
                     <motion.button
                       type="button"
                       className="dlink self-center py-2"
-                      whileTap={{ scale: 0.97 }}
+                      whileTap={reduceMotion ? undefined : { scale: 0.97 }}
                       onClick={() => setShowAllEvents(true)}
                     >
                       {t("agent.olderMessages", { n: hiddenEventCount })}
@@ -1032,7 +1033,7 @@ export function AgentJobPage() {
                             preview?.path === a.path && "is-selected",
                           )}
                           initial={
-                            reduceMotion ? false : { opacity: 0, scale: 0.8 }
+                            reduceMotion ? false : { opacity: 0.92, scale: 0.96 }
                           }
                           animate={{ opacity: 1, scale: 1 }}
                           transition={springUI}
@@ -1080,23 +1081,19 @@ export function AgentJobPage() {
                     </div>
                   ) : null}
 
-                  <AnimatePresence initial={false}>
-                    {preview &&
-                    replyAttach.some((a) => a.path === preview.path) ? (
-                      <motion.div
-                        key="composer-preview"
-                        initial={{ opacity: 0, x: 20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={{ opacity: 0, x: 20 }}
-                        transition={springUI}
-                      >
-                        <AttachPreview
-                          item={preview as Attachment}
-                          onClose={() => setPreview(null)}
-                        />
-                      </motion.div>
+                  <SoftCollapse
+                    open={Boolean(
+                      preview &&
+                        replyAttach.some((a) => a.path === preview.path),
+                    )}
+                  >
+                    {preview ? (
+                      <AttachPreview
+                        item={preview as Attachment}
+                        onClose={() => setPreview(null)}
+                      />
                     ) : null}
-                  </AnimatePresence>
+                  </SoftCollapse>
 
                   <div className="agent-composer">
                     <TextField
@@ -1165,7 +1162,7 @@ export function AgentJobPage() {
                             aria-label={t("agent.addAttachment")}
                             data-add-menu
                             className="agent-add-menu absolute bottom-full left-2 z-50 mb-1.5 flex min-w-[220px] flex-col gap-0.5 rounded-xl border border-border bg-surface p-1 shadow-lg"
-                            initial={{ opacity: 0, y: 6, scale: 0.98 }}
+                            initial={{ opacity: 0.92, y: 6, scale: 0.98 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 6, scale: 0.98 }}
                             transition={springUI}
@@ -1286,7 +1283,7 @@ export function AgentJobPage() {
         {sideOpen ? (
             <motion.aside
               key="agent-side"
-              initial={{ opacity: 0, x: 12 }}
+              initial={{ opacity: 0.92, x: 12 }}
               animate={{ opacity: 1, x: 0 }}
               transition={springUI}
               className="agent-side-scroll flex w-full shrink-0 flex-col gap-2 overflow-auto border-t border-border pt-3 lg:w-72 lg:border-t-0 lg:border-l lg:pl-3 lg:pt-0"

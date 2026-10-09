@@ -34,11 +34,10 @@ import type {
 } from "@/types";
 import { defaultConfig } from "@/lib/constants";
 import { friendlyAgentError } from "@/lib/agent-errors";
-import { useSmoothedRms } from "@/hooks/useAudioBars";
 import { useStreamingReveal } from "@/hooks/useStreamingReveal";
-import { AudioBars } from "@/components/ui/audio-bars";
+import { AudioBars, type LiveMeter } from "@/components/ui/audio-bars";
 import { cn } from "@/lib/cn";
-import { easeOut, springBounce } from "@/lib/motion";
+import { easeOut, springUI } from "@/lib/motion";
 import { useT } from "@/lib/i18n";
 import { lookupRustMsg } from "@/lib/i18n/rust-msg";
 import { playSfx, unlockSfx, warmSfx } from "@/lib/sfx";
@@ -52,6 +51,8 @@ const CAPSULE_H = 56;
 /** Confirm/edit: wider + taller so multi-line select/edit is usable. */
 const CAPSULE_EDIT_W = 560;
 const CAPSULE_EDIT_H = 120;
+/** Live edit stays IN the bar: same width, modest anchored growth upward. */
+const LIVE_EDIT_H = 96;
 const AGENT_W = 520;
 /** Pills row above + capsule row (attachments inline — no extra strip). */
 const AGENT_BASE_H = 88;
@@ -183,11 +184,13 @@ export function AsrHud() {
     rms: 0,
     bands: [],
   });
-  /** Meter isolated from floating-status/keepMeter — VAD commit must not freeze bars. */
-  const [meter, setMeter] = useState<{ rms: number; bands: number[] }>({
-    rms: 0,
-    bands: [],
-  });
+  /**
+   * Meter isolated from floating-status/keepMeter — VAD commit must not freeze
+   * bars. A ref, not state: `audio-level` fires every 16ms and re-rendering
+   * the capsule per tick starved the webview main thread (input felt laggy).
+   * AudioBars reads this ref inside its own rAF loop.
+   */
+  const meterRef = useRef<LiveMeter>({ rms: 0, bands: [] });
   const [agent, setAgent] = useState<AgentKind>("claude");
   const [cwd, setCwd] = useState("");
   const [cwdHistory, setCwdHistory] = useState<string[]>([]);
@@ -198,7 +201,6 @@ export function AsrHud() {
   const [pickerMode, setPickerMode] = useState<"" | "agent" | "cwd">("");
   const [profiles, setProfiles] = useState(defaultConfig.agent_profiles);
   const [profileId, setProfileId] = useState(defaultConfig.agent_profile_id);
-  const [refineFailed, setRefineFailed] = useState(false);
 
   const payloadRef = useRef(payload);
   const editRef = useRef<HTMLTextAreaElement>(null);
@@ -232,6 +234,8 @@ export function AsrHud() {
   const confirmEditing = !isAgent && editing;
   const editTextRef = useRef(editText);
   const confirmingRef = useRef(false);
+  /** Live-edit text carried into the confirm card when Fn lands mid-edit. */
+  const liveCarryRef = useRef<string | null>(null);
   useEffect(() => {
     editTextRef.current = editText;
   }, [editText]);
@@ -245,7 +249,6 @@ export function AsrHud() {
     setPickerMode("");
     setError(null);
     setBusy(false);
-    setRefineFailed(false);
     confirmingRef.current = false;
     dispatchingRef.current = false;
   }, []);
@@ -275,8 +278,12 @@ export function AsrHud() {
   }, [isAgent, confirmEditing, resize]);
 
   useEffect(() => {
-    if (!editing) return;
-    setEditText(payload.text || "");
+    if (!editing) {
+      liveCarryRef.current = null;
+      return;
+    }
+    // Mid-edit Fn: the user's live edits win over the raw/refined stream.
+    setEditText(liveCarryRef.current ?? (payload.text || ""));
   }, [editing, payload.text]);
 
   // Focus once on enter edit — do not re-selectAll on every text sync (kills drag-select).
@@ -331,6 +338,7 @@ export function AsrHud() {
   const startVoice = useCallback(async () => {
     setError(null);
     resetAgentSessionUi();
+    meterRef.current = { rms: 0, bands: [] };
     setPayload((prev) => ({
       ...prev,
       text: "",
@@ -526,23 +534,13 @@ export function AsrHud() {
           ) {
             return {
               ...next,
-              rms: next.rms > 0 ? next.rms : 0,
-              bands: Array.isArray(next.bands) ? next.bands : [],
               committed: "",
               active: "",
               text: "",
             };
           }
-          const keepMeter = sameSession;
           return {
             ...next,
-            rms: next.rms > 0 ? next.rms : keepMeter ? prev.rms : next.rms,
-            bands:
-              Array.isArray(next.bands) && next.bands.length > 0
-                ? next.bands
-                : keepMeter
-                  ? prev.bands
-                  : next.bands ?? [],
             committed:
               next.committed != null && next.committed !== ""
                 ? next.committed
@@ -567,7 +565,7 @@ export function AsrHud() {
         if (event.payload.cwd != null) setCwd(event.payload.cwd || "");
         if (!event.payload.visible || event.payload.state === "idle") {
           resetAgentSessionUi();
-          setMeter({ rms: 0, bands: [] });
+          meterRef.current = { rms: 0, bands: [] };
           void invoke("set_agent_picker", { mode: "", itemCount: 1 }).catch(
             () => {},
           );
@@ -584,8 +582,7 @@ export function AsrHud() {
         const raw = event.payload;
         if (typeof raw === "number") {
           if (!Number.isFinite(raw)) return;
-          const rms = Math.max(0, Math.min(1, raw));
-          setMeter((prev) => ({ ...prev, rms }));
+          meterRef.current.rms = Math.max(0, Math.min(1, raw));
           return;
         }
         const rms = Number(raw?.rms);
@@ -593,10 +590,10 @@ export function AsrHud() {
         const bands = Array.isArray(raw.bands)
           ? raw.bands.map((v) => Math.max(0, Math.min(1, Number(v) || 0)))
           : [];
-        setMeter({
+        meterRef.current = {
           rms: Math.max(0, Math.min(1, rms)),
           bands,
-        });
+        };
       }),
     );
     add(
@@ -657,11 +654,14 @@ export function AsrHud() {
       }),
     );
     add(
-      listen<{ text?: string; asr_text?: string; refine_failed?: boolean }>("hud-edit-ready", (event) => {
-        const t = event.payload?.text ?? event.payload?.asr_text ?? "";
-        setEditText(t);
-        setRefineFailed(event.payload?.refine_failed ?? false);
-        setError(null);
+      listen<{ text?: string; asr_text?: string; refine_failed?: boolean; organize_error?: string | null }>("hud-edit-ready", (event) => {
+        const text = event.payload?.text ?? event.payload?.asr_text ?? "";
+        // Carried live edits (Fn pressed mid live-edit) beat the refined stream.
+        setEditText(liveCarryRef.current ?? text);
+        setError(
+          event.payload?.organize_error ??
+            (event.payload?.refine_failed ? t("hud.refineFailed") : null),
+        );
         requestAnimationFrame(() => {
           editRef.current?.focus();
           editRef.current?.select();
@@ -863,7 +863,7 @@ export function AsrHud() {
         if (t.closest("input,textarea,button,a,[data-no-drag],.hud-edit-field")) {
           return;
         }
-        // Edit mode: only bars/colon drag — rest is for text select.
+        // Edit mode: only explicit handles drag — rest is for text select.
         if (
           (confirmEditing || agentEditing) &&
           !t.closest(".hud-drag-handle")
@@ -880,22 +880,22 @@ export function AsrHud() {
               "flex h-full w-full items-center justify-center pointer-events-none",
               isAgent && "px-0",
             )}
-            initial={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.35 }}
+            initial={reducedMotion ? { opacity: 0.92 } : { opacity: 0.92, scale: 0.96 }}
             animate={{
               opacity: 1,
               scale: 1,
-              transition: reducedMotion ? { duration: 0.14 } : springBounce,
+              transition: reducedMotion ? { duration: 0.12 } : springUI,
             }}
             exit={reducedMotion
-              ? { opacity: 0, transition: { duration: 0.14 } }
-              : { opacity: 0, scale: 0.7, transition: { type: "tween", duration: 0.15, ease: easeOut } }
+              ? { opacity: 0, transition: { duration: 0.12 } }
+              : { opacity: 0, scale: 0.98, transition: { type: "tween", duration: 0.12, ease: easeOut } }
             }
           >
           <div className="pointer-events-auto flex h-full w-full items-center justify-center">
           {isAgent ? (
             <AgentCapsule
               payload={payload}
-              meter={meter}
+              meterRef={meterRef}
               agentLabel={agentLabel}
               cwd={cwd}
               pickerMode={pickerMode}
@@ -921,17 +921,19 @@ export function AsrHud() {
           ) : (
             <FloatingCapsule
               payload={payload}
-              meter={meter}
+              meterRef={meterRef}
               editText={editText}
               editing={confirmEditing}
               busy={busy}
               error={error}
-              refineFailed={refineFailed}
               editRef={editRef}
               onEditChange={setEditText}
               onEditKey={onEditKey}
               onConfirm={confirmTranscript}
               onCancel={cancelTranscript}
+              onCarryLiveEdit={(text) => {
+                liveCarryRef.current = text;
+              }}
             />
           )}
           </div>
@@ -944,7 +946,7 @@ export function AsrHud() {
 
 function AgentCapsule({
   payload,
-  meter,
+  meterRef,
   agentLabel,
   cwd,
   pickerMode,
@@ -966,7 +968,7 @@ function AgentCapsule({
   onRemoveAttach,
 }: {
   payload: FloatingPayload;
-  meter: { rms: number; bands: number[] };
+  meterRef: RefObject<LiveMeter>;
   agentLabel: string;
   cwd: string;
   pickerMode: "" | "agent" | "cwd";
@@ -990,7 +992,6 @@ function AgentCapsule({
   const t = useT();
   const recording = payload.state === "recording";
   const processing = payload.state === "processing";
-  const smoothed = useSmoothedRms(meter.rms, recording);
   const agentVpRef = useRef<HTMLDivElement>(null);
   const agentStripRef = useRef<HTMLSpanElement>(null);
 
@@ -1063,7 +1064,7 @@ function AgentCapsule({
         {processing ? (
           <span className="hud-spinner" aria-label={t("hud.processing")} />
         ) : recording ? (
-          <AudioBars rms={smoothed} bands={meter.bands} active />
+          <AudioBars meter={meterRef} active />
         ) : null}
 
         {attachments.length > 0 ? (
@@ -1208,30 +1209,30 @@ function formatTimer(sec: number): string {
 
 function FloatingCapsule({
   payload,
-  meter,
+  meterRef,
   editText,
   editing,
   busy,
   error,
-  refineFailed,
   editRef,
   onEditChange,
   onEditKey,
   onConfirm,
   onCancel,
+  onCarryLiveEdit,
 }: {
   payload: FloatingPayload;
-  meter: { rms: number; bands: number[] };
+  meterRef: RefObject<LiveMeter>;
   editText: string;
   editing: boolean;
   busy: boolean;
   error: string | null;
-  refineFailed: boolean;
   editRef: RefObject<HTMLTextAreaElement | null>;
   onEditChange: (v: string) => void;
   onEditKey: (e: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
   onConfirm: () => void;
   onCancel: () => void;
+  onCarryLiveEdit: (text: string) => void;
 }) {
   const t = useT();
   const refining = payload.state === "refining";
@@ -1241,7 +1242,6 @@ function FloatingCapsule({
   const recording = payload.state === "recording";
   const switching = Boolean(payload.switching);
   const translating = payload.intention === "translate";
-  const smoothed = useSmoothedRms(meter.rms, recording);
   const lastTextRef = useRef("");
   const prevRecordingRef = useRef(false);
   const textViewportRef = useRef<HTMLDivElement>(null);
@@ -1264,6 +1264,18 @@ function FloatingCapsule({
   const [warnShake, setWarnShake] = useState(false);
   const [timerBlink, setTimerBlink] = useState(false);
   const [autoSubmitHint, setAutoSubmitHint] = useState(false);
+
+  // Live edit: user fixes streaming text mid-recording. Enter pastes the
+  // edited text immediately (skips refine/organize); the backend harvests the
+  // diff (base_text → confirmed) through the same learn pipeline as the
+  // post-refine HUD edit.
+  const [liveEditing, setLiveEditing] = useState(false);
+  const [liveEditText, setLiveEditText] = useState("");
+  const [liveEditBusy, setLiveEditBusy] = useState(false);
+  const [liveEditError, setLiveEditError] = useState<string | null>(null);
+  /** Chars of the backend's committed stream already merged into the editor. */
+  const absorbedRef = useRef(0);
+  const liveEditAreaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (recSec === 80) {
@@ -1402,7 +1414,7 @@ function FloatingCapsule({
     textViewportRef,
     textStripRef,
     flowKey,
-    !editing && !switching,
+    !editing && !switching && !liveEditing,
   );
 
   useEffect(() => {
@@ -1416,13 +1428,14 @@ function FloatingCapsule({
     }).catch(() => {});
   }, []);
 
+  const editHeight = CAPSULE_EDIT_H + (error ? 40 : 0);
   useEffect(() => {
     if (!editing) return;
     void invoke("resize_floating_hud", {
       width: CAPSULE_EDIT_W,
-      height: CAPSULE_EDIT_H,
+      height: editHeight,
     }).catch(() => {});
-  }, [editing]);
+  }, [editing, editHeight]);
 
   // B3: Phase label for processing/refining
   const phaseLabel = pipelineStage
@@ -1435,13 +1448,131 @@ function FloatingCapsule({
         ? t("hud.translating")
         : "";
 
-  const capsuleH = editing ? CAPSULE_EDIT_H : CAPSULE_H;
+  // Leave live edit when the session moves on (refine done → editing takes
+  // over; session dead → nothing to confirm).
+  useEffect(() => {
+    if (!liveEditing) return;
+    if (editing || (!recording && !processing && !pipelineStage)) {
+      if (editing) {
+        // Fn landed mid live-edit: carry the user's edits (plus the in-flight
+        // hypothesis tail) into the confirm card so nothing typed is lost.
+        const activeTail = active.trim();
+        const text =
+          `${liveEditText.trim()}${activeTail ? ` ${activeTail}` : ""}`.trim();
+        if (text) onCarryLiveEdit(text);
+      } else {
+        void invoke("resize_floating_hud", {
+          width: CAPSULE_W,
+          height: CAPSULE_H,
+        }).catch(() => {});
+      }
+      setLiveEditing(false);
+      setLiveEditBusy(false);
+    }
+  }, [liveEditing, editing, recording, processing, pipelineStage]);
+
+  const beginLiveEdit = () => {
+    if (editing || loading || switching || liveEditBusy || !recording) return;
+    // Absorb the stable committed stream into the editor; the in-flight
+    // hypothesis stays OUTSIDE (ghost line) so it can never double-merge on
+    // commit. New committed segments keep flowing in while the user edits.
+    const stream = hasSplit ? committed : payload.text;
+    const base = stream.trim();
+    if (!base) return;
+    absorbedRef.current = stream.length;
+    setLiveEditText(base);
+    setLiveEditError(null);
+    setLiveEditing(true);
+    // Stay in the bar: same width/position, modest anchored growth only.
+    void invoke("resize_floating_hud", {
+      width: CAPSULE_W,
+      height: LIVE_EDIT_H,
+    }).catch(() => {});
+    requestAnimationFrame(() => liveEditAreaRef.current?.focus());
+  };
+
+  // Simultaneous edit + recognize: newly committed segments append to the end
+  // of the editor while the user works. Appending never displaces a mid-text
+  // caret; an end-of-text caret rides along to the new end. Rollback (stream
+  // shrinking below the absorbed mark) is skipped — user text is never touched.
+  useEffect(() => {
+    if (!liveEditing || liveEditBusy) return;
+    const stream = hasSplit ? committed : payload.text;
+    if (!stream) return;
+    const absorbed = absorbedRef.current;
+    if (stream.length <= absorbed) return;
+    const addition = stream.slice(absorbed);
+    absorbedRef.current = stream.length;
+    setLiveEditText((prev) => {
+      const el = liveEditAreaRef.current;
+      const atEnd =
+        !!el && el.selectionStart === prev.length && el.selectionEnd === prev.length;
+      if (atEnd) {
+        requestAnimationFrame(() => {
+          if (!el) return;
+          el.selectionStart = el.selectionEnd = (prev + addition).length;
+        });
+      }
+      return prev + addition;
+    });
+  }, [liveEditing, liveEditBusy, hasSplit, committed, payload.text]);
+
+  const cancelLiveEdit = () => {
+    if (liveEditBusy) return;
+    setLiveEditing(false);
+    setLiveEditError(null);
+    void invoke("resize_floating_hud", {
+      width: CAPSULE_W,
+      height: CAPSULE_H,
+    }).catch(() => {});
+  };
+
+  const confirmLiveEdit = async () => {
+    if (liveEditBusy) return;
+    // Nothing dictated is ever lost: the in-flight hypothesis rides onto the
+    // confirmed text; base = the full recognized stream for the learn diff.
+    const activeTail = active.trim();
+    const text = `${liveEditText.trim()}${activeTail ? ` ${activeTail}` : ""}`.trim();
+    if (!text) return;
+    const recognized = `${(hasSplit ? committed : payload.text).trim()}${
+      activeTail ? ` ${activeTail}` : ""
+    }`.trim();
+    setLiveEditBusy(true);
+    setLiveEditError(null);
+    try {
+      await invoke("confirm_live_hud_edit", {
+        text,
+        baseText: recognized,
+      });
+      // Success: backend cancels the session and hides the HUD (idle emit).
+      setLiveEditing(false);
+    } catch (e) {
+      setLiveEditError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLiveEditBusy(false);
+    }
+  };
+
+  const onLiveEditKey = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void confirmLiveEdit();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelLiveEdit();
+    }
+  };
+
+  const capsuleH = editing ? editHeight : liveEditing ? LIVE_EDIT_H : CAPSULE_H;
 
   return (
     <div
       className={cn(
         "hud-capsule",
         editing && "hud-capsule-editing",
+        liveEditing && "hud-capsule-live-edit",
         loading && "hud-capsule-refining",
         switching && "hud-capsule-switching",
         justRefined && "hud-capsule-refined",
@@ -1458,7 +1589,7 @@ function FloatingCapsule({
       ) : null}
       <div className="hud-inner">
         {/* B2: processing with preserved text → spinner + dimmed text */}
-        {pipelineStage ? (
+        {editing ? null : pipelineStage ? (
           <div className="hud-brand-bars hud-drag-handle" aria-hidden>
             <div className="hud-brand-bar" />
             <div className="hud-brand-bar" />
@@ -1478,12 +1609,7 @@ function FloatingCapsule({
         ) : busy ? (
           <span className="hud-spinner" aria-label={t("hud.confirming")} />
         ) : recording ? (
-            <AudioBars
-              rms={smoothed}
-              bands={meter.bands}
-              active
-              className="hud-live-bars hud-drag-handle"
-            />
+            <AudioBars meter={meterRef} active className="hud-live-bars hud-drag-handle" />
         ) : (
           <div className="hud-brand-bars hud-drag-handle" aria-hidden>
             <div className="hud-brand-bar" />
@@ -1493,9 +1619,11 @@ function FloatingCapsule({
             <div className="hud-brand-bar" />
           </div>
         )}
-        <span className="hud-colon hud-drag-handle" aria-hidden>
-          :
-        </span>
+        {!editing && !liveEditing && (
+          <span className="hud-colon hud-drag-handle" aria-hidden>
+            :
+          </span>
+        )}
         {editing ? (
           <>
             <textarea
@@ -1512,7 +1640,6 @@ function FloatingCapsule({
               onPointerDown={(e) => e.stopPropagation()}
             />
             <div className="hud-edit-actions">
-              {refineFailed && <span className="hud-refine-failed-hint">{t("hud.raw")}</span>}
               <button
                 className="hud-edit-btn hud-edit-btn-cancel"
                 aria-label={t("hud.cancelEsc")}
@@ -1533,11 +1660,46 @@ function FloatingCapsule({
               </button>
             </div>
           </>
+        ) : liveEditing ? (
+          <>
+            <textarea
+              ref={liveEditAreaRef}
+              rows={1}
+              aria-label={t("hud.liveEditPlaceholder")}
+              placeholder={t("hud.liveEditPlaceholder")}
+              value={liveEditText}
+              disabled={liveEditBusy}
+              className="hud-edit-input hud-live-edit-input min-w-0 flex-1"
+              data-no-drag
+              onChange={(e) => setLiveEditText(e.target.value)}
+              onKeyDown={onLiveEditKey}
+              onPointerDown={(e) => e.stopPropagation()}
+            />
+            {activeShown ? (
+              <div className="hud-live-ghost" aria-hidden>
+                {activeShown}
+              </div>
+            ) : (
+              <span className="hud-live-edit-hint" aria-hidden>
+                {t("hud.liveEditHint")}
+              </span>
+            )}
+          </>
         ) : (
           <div
             ref={textViewportRef}
+            data-no-drag={recording && !loading && !switching ? true : undefined}
+            title={
+              recording && !loading && !switching
+                ? t("hud.liveEditEnter")
+                : undefined
+            }
+            onClick={
+              recording && !loading && !switching ? beginLiveEdit : undefined
+            }
             className={cn(
               "hud-text-viewport",
+              recording && !loading && !switching && "cursor-text",
               overflowing && "hud-text-overflow",
               pipelineStage && "hud-text-refining",
               switching && "hud-text-switching",
@@ -1585,7 +1747,7 @@ function FloatingCapsule({
             ) : null}
           </div>
         )}
-        {/* B4: Recording duration timer */}
+        {/* B4: Recording duration timer — stays during live edit (still recording) */}
         {recording && !editing ? (
           <span
             className={cn(
@@ -1602,6 +1764,11 @@ function FloatingCapsule({
           <span className="hud-auto-submit-hint">{t("hud.autoSubmit")}</span>
         ) : null}
       </div>
+      {(editing || liveEditing) && (editing ? error : liveEditError) ? (
+        <div role="alert" className="absolute bottom-3 left-5 right-5 max-h-8 overflow-y-auto text-[11px] leading-4 text-danger">
+          {lookupRustMsg((editing ? error : liveEditError) as string, t)}
+        </div>
+      ) : null}
     </div>
   );
 }

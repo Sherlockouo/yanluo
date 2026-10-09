@@ -2,7 +2,7 @@
  * Mine vocabulary candidates from ASR refine diffs.
  * Emits `错词=正确` pairs and plain hotwords; filters sentence rewrites.
  */
-import { diffTexts, type DiffPart } from "@/components/ui/refine-diff";
+import { diffTexts, type DiffPart } from "./text-diff.ts";
 
 export type LearnCandidate = {
   /** Ready for vocabulary: `wrong=right` or plain term. */

@@ -7,7 +7,11 @@ export const hud: Record<string, string> = {
   "hud.switching": "切换中",
   "hud.pasted": "已粘贴",
   "hud.raw": "原文",
+  "hud.refineFailed": "AI 纠错未完成，已完整保留识别原文。",
   "hud.confirmHint": "Enter 确认 · Esc 取消",
+  "hud.liveEditPlaceholder": "边听边改 · 新识别自动追加 · Enter 粘贴",
+  "hud.liveEditEnter": "点击文字边听边改",
+  "hud.liveEditHint": "Esc 返回识别 · Enter 粘贴",
   "hud.autoSubmit": "即将自动提交",
   "hud.noContent": "无内容",
   "hud.clipboardEmpty": "剪贴板无文件/图片",
@@ -65,4 +69,5 @@ export const hud: Record<string, string> = {
   "hud.rustMsg.未配置 API Base URL": "未配置 API Base URL",
   "hud.rustMsg.未配置 Model": "未配置 Model",
   "hud.rustMsg.正在录音中，请先结束录音": "正在录音中，请先结束录音",
+  "hud.rustMsg.当前不在录音状态": "当前不在录音状态",
 };

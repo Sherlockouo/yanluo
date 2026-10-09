@@ -129,15 +129,17 @@ export function TranslatePage({
       )}
 
       {entries.length === 0 ? (
-        <div className="dropzone" style={{ minHeight: 200 }}>
-          <span className="dropzone-ic">
-            <Languages size={22} aria-hidden />
-          </span>
-          <span className="dropzone-t">{t("translate.emptyTitle")}</span>
-          <span className="dropzone-fmt">
-            {t("translate.emptyHint", { lang: targetLabel })}
-          </span>
-        </div>
+        <Reveal>
+          <div className="dropzone" style={{ minHeight: 200 }}>
+            <span className="dropzone-ic">
+              <Languages size={22} aria-hidden />
+            </span>
+            <span className="dropzone-t">{t("translate.emptyTitle")}</span>
+            <span className="dropzone-fmt">
+              {t("translate.emptyHint", { lang: targetLabel })}
+            </span>
+          </div>
+        </Reveal>
       ) : (
         <div className="recs">
           {entries.map((entry, i) => {

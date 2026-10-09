@@ -9,6 +9,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { useT } from "@/lib/i18n";
+import { cn } from "@/lib/cn";
 
 export type AttachMediaItem = {
   path: string;
@@ -104,10 +105,25 @@ export function AttachMediaBody({
       <img
         src={src}
         alt={item.name}
-        className={mediaClass}
+        className={cn(
+          mediaClass,
+          compact &&
+            "cursor-pointer transition-opacity duration-150 ease-out hover:opacity-85",
+        )}
         onError={() => setBroken(true)}
         onClick={compact ? openInSystem : undefined}
         role={compact ? "button" : undefined}
+        tabIndex={compact ? 0 : undefined}
+        onKeyDown={
+          compact
+            ? (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openInSystem();
+                }
+              }
+            : undefined
+        }
       />
     );
   }

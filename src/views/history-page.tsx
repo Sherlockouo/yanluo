@@ -7,11 +7,13 @@ import {
   Check,
   ChevronDown,
   Copy,
+  History,
   MoreHorizontal,
   Pencil,
   RotateCcw,
   Save,
   Search,
+  SearchX,
   Send,
   Trash2,
 } from "lucide-react";
@@ -33,7 +35,7 @@ import { isVideoMediaKind } from "@/lib/alignment";
 import { cn } from "@/lib/cn";
 import { translateTargetLabel } from "@/lib/constants";
 import { exportHistoryEntry, historyEntryTitle } from "@/lib/export-transcript";
-import { springUI, useCollapse } from "@/lib/motion";
+import { easeOut, springBounce, springUI, useCollapse } from "@/lib/motion";
 import { writePendingDispatchPrompt } from "@/lib/ui-session";
 import { useI18n, useT } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
@@ -227,7 +229,7 @@ export function HistoryPage({
               onClick={() => setCleanupOpen(false)}
             />
             <motion.div
-              initial={reducedMotion ? { opacity: 1 } : { opacity: 0, scale: 0.96, y: 4 }}
+              initial={reducedMotion ? { opacity: 1 } : { opacity: 0.92, scale: 0.96, y: 4 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 4 }}
               transition={springUI}
@@ -293,7 +295,15 @@ export function HistoryPage({
         ? createPortal(
             <>
               {headerStatus ? (
-                <span className="dmast-meta">{headerStatus}</span>
+                <motion.span
+                  key={headerStatus}
+                  className="dmast-meta"
+                  initial={reducedMotion ? false : { opacity: 0.92, y: 3 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ type: "tween", duration: 0.16, ease: easeOut }}
+                >
+                  {headerStatus}
+                </motion.span>
               ) : null}
               {headerAction}
             </>,
@@ -305,10 +315,15 @@ export function HistoryPage({
       )}
 
       {history.length === 0 ? (
-        <div className="dropzone" style={{ minHeight: 200 }}>
-          <span className="dropzone-t">{t("history.emptyTitle")}</span>
-          <span className="dropzone-fmt">{t("history.emptyHint")}</span>
-        </div>
+        <Reveal>
+          <div className="dropzone" style={{ minHeight: 200 }}>
+            <span className="dropzone-ic">
+              <History size={22} aria-hidden />
+            </span>
+            <span className="dropzone-t">{t("history.emptyTitle")}</span>
+            <span className="dropzone-fmt">{t("history.emptyHint")}</span>
+          </div>
+        </Reveal>
       ) : (
         <>
           <div className="history-search">
@@ -328,9 +343,14 @@ export function HistoryPage({
           </div>
 
           {filtered.length === 0 ? (
-            <div className="dropzone" style={{ minHeight: 160 }}>
-              <span className="dropzone-t">{t("history.noMatch")}</span>
-            </div>
+            <Reveal>
+              <div className="dropzone" style={{ minHeight: 160 }}>
+                <span className="dropzone-ic">
+                  <SearchX size={22} aria-hidden />
+                </span>
+                <span className="dropzone-t">{t("history.noMatch")}</span>
+              </div>
+            </Reveal>
           ) : (
             <div className="recs">
               <AnimatePresence initial={false}>
@@ -343,7 +363,11 @@ export function HistoryPage({
                   lastDayKey = dayKey || lastDayKey;
                   const row = (
                     <div
-                      className={cn("rec is-clickable", open && "exp")}
+                      className={cn(
+                        "rec is-clickable",
+                        open && "exp",
+                        deletingId === entry.id && "pointer-events-none opacity-50",
+                      )}
                       data-history-id={entry.id}
                     >
                       <HistoryRow
@@ -378,7 +402,6 @@ export function HistoryPage({
                       key={entry.id}
                       exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: -12 }}
                       transition={springUI}
-                      style={{ willChange: "opacity, transform" }}
                     >
                       {showDayHeader ? (
                         <div className="rec-day">{dayHeaderLabel(entry.created_at, t, locale)}</div>
@@ -483,10 +506,10 @@ function ClearAllModal({
             aria-modal="true"
             aria-label={t("history.confirmClearAria")}
             className="w-full max-w-sm rounded-2xl border border-border bg-surface p-6 shadow-2xl"
-            initial={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.95, y: 24 }}
+            initial={reducedMotion ? { opacity: 0.92 } : { opacity: 0.92, scale: 0.95, y: 24 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.95, y: 24 }}
-            transition={{ type: "spring", bounce: 0.2, duration: 0.3 }}
+            transition={reducedMotion ? { duration: 0.14, ease: easeOut } : springBounce}
           >
             <h2 className="text-[15px] font-semibold text-foreground">
               {t("history.clearAllTitle", { n: count })}
@@ -578,7 +601,7 @@ function HistoryRow({
       <button
         type="button"
         onClick={onToggle}
-        className="min-w-0 flex-1 text-left"
+        className="min-w-0 flex-1 cursor-pointer text-left"
       >
         <div className="rec-l">
           <span>{new Date(entry.created_at).toLocaleString()}</span>
@@ -648,7 +671,7 @@ function HistoryRow({
               onClick={() => setMenuOpen(false)}
             />
             <motion.div
-              initial={reducedMotion ? { opacity: 1 } : { opacity: 0, scale: 0.96, y: 4 }}
+              initial={reducedMotion ? { opacity: 1 } : { opacity: 0.92, scale: 0.96, y: 4 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 4 }}
               transition={springUI}
@@ -779,13 +802,13 @@ function ExpandedViewer({
   return (
     <div className="expbody">
       {isTranslate && showDiff ? (
-        <div className="mb-4">
+        <Reveal className="mb-4">
           <SemanticPair before={view.raw_text} after={view.text} />
-        </div>
+        </Reveal>
       ) : showDiff ? (
-        <div className="mb-4">
+        <Reveal className="mb-4">
           <RefineDiff before={view.raw_text} after={view.text} />
-        </div>
+        </Reveal>
       ) : null}
 
       {mediaSrc ? (

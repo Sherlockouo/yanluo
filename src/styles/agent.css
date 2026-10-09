@@ -106,6 +106,28 @@
   color: var(--muted);
 }
 
+/* Header status pill — tone cross-fades on status flip; live dot pulses */
+.agent-job-header .badge-soft {
+  gap: 5px;
+  transition:
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.agent-badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: agent-pulse 1.6s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-badge-dot {
+    animation: none;
+  }
+}
 
 .agent-msg-block,
 .agent-chat-bubble,
@@ -210,10 +232,13 @@
   animation: agent-pulse 1.6s ease-in-out infinite;
 }
 
-/* Timeline row enter — opacity + transform only, ≤220ms, enter-only */
+/* Timeline row enter — opacity + transform only, ≤220ms, enter-only.
+   Reference only: EventRow (tsx) owns row enter via framer-motion;
+   view-motion.css disables this on .agent-chat-row.agent-row-motion.
+   Never start at opacity 0 — a blank first frame reads as a hitch. */
 @keyframes agent-row-in {
   from {
-    opacity: 0;
+    opacity: 0.92;
     transform: translateY(4px);
   }
   to {
@@ -287,6 +312,7 @@
   align-items: flex-start;
   gap: 12px;
   padding: 14px 10px;
+  border-radius: 12px;
   transition:
     background 140ms ease,
     transform 100ms ease-out;
@@ -311,6 +337,11 @@
   letter-spacing: 0.01em;
   line-height: 1.4;
   color: var(--muted);
+}
+
+/* Status word cross-fades tone when a job flips running → done/error */
+.agent-job-kicker span {
+  transition: color 180ms ease;
 }
 
 .agent-job-kicker .is-status-active {
@@ -475,11 +506,29 @@
   border-radius: var(--radius-lg);
   border: 0;
   background: color-mix(in oklab, var(--foreground) 4%, var(--surface));
-  transition: transform 100ms ease-out;
+  transition:
+    background 140ms ease,
+    transform 100ms ease-out;
+}
+
+.agent-tool-card:hover {
+  background: color-mix(in oklab, var(--foreground) 5.5%, var(--surface));
 }
 
 .agent-tool-card:active {
   transform: scale(0.985);
+}
+
+/* Fold head: quiet hover affordance on the chevron */
+.agent-tool-card-head .lucide-chevron-down {
+  transition:
+    transform 150ms ease,
+    opacity 120ms ease;
+}
+
+.agent-tool-card-head:hover .lucide-chevron-down,
+.agent-tool-card-head[data-hovered="true"] .lucide-chevron-down {
+  opacity: 0.75;
 }
 
 .agent-tool-card-head {
@@ -634,6 +683,8 @@
   border-radius: var(--radius-md);
   border: 0;
   background: var(--surface-secondary);
+  /* faint inset hairline keeps the block defined on bright surfaces */
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 5%, transparent);
   font-size: 0.8125em;
   line-height: 1.5;
 }
@@ -663,12 +714,23 @@
   color: var(--muted);
 }
 
+/* Hairline row separators — box-shadow on cells (border-collapse eats row shadows) */
+.agent-md :where(thead th) {
+  box-shadow: inset 0 -1px 0 color-mix(in oklab, var(--muted) 22%, transparent);
+}
+
+.agent-md :where(tbody tr + tr td) {
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--muted) 14%, transparent);
+}
+
 .agent-md :where(blockquote) {
   margin: 0.65em 0;
   padding: 0.45em 0.85em;
   border-left: 0;
   border-radius: var(--radius-sm);
   background: var(--default);
+  /* quiet quote marker — 2px accent bar, no border */
+  box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent) 40%, transparent);
   color: color-mix(in oklab, var(--foreground) 78%, var(--muted));
 }
 
@@ -740,7 +802,8 @@
 
 .agent-composer:focus-within {
   background: var(--surface);
-  box-shadow: none;
+  /* quiet accent halo — borderless design keeps the ring a shadow */
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--accent) 24%, transparent);
 }
 
 .agent-composer-field {
@@ -812,6 +875,11 @@
   font-size: 11px;
   letter-spacing: 0.01em;
   color: var(--foreground);
+  transition: background 120ms ease;
+}
+
+.agent-attach-chip:hover {
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
 }
 
 .agent-attach-chip-name {
@@ -886,6 +954,12 @@
   /* lg 档 squircle — capsule 9999 仅 HUD */
   border-radius: 14px;
   cursor: pointer;
+  /* ghost↔primary variant swap + disabled fade stay smooth */
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease,
+    transform 100ms ease-out;
 }
 
 .agent-composer-send.is-pause {
@@ -925,6 +999,7 @@
 .agent-composer-send[aria-disabled="true"] {
   opacity: 0.35;
   cursor: not-allowed;
+  transform: none;
 }
 
 /* Reply attachment chips — quiet mono tokens (same language as .agent-attach-chip) */
@@ -1148,11 +1223,17 @@
   .agent-msg-copy:active,
   .agent-attach-chip-x,
   .agent-attach-chip-x:active,
+  .agent-composer-send,
+  .agent-composer-send:active,
   .agent-profile-trigger,
   .agent-profile-trigger:active,
   .agent-model-trigger,
   .agent-model-trigger:active {
     transform: none;
+  }
+
+  .agent-chat-timeline {
+    scroll-behavior: auto;
   }
 
   .agent-job-row {

@@ -1,8 +1,10 @@
 import { useMemo, useRef, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
+import { Cloud } from "lucide-react";
 import type { WordWeight } from "@/lib/word-freq";
 import { duration, easeOut } from "@/lib/motion";
+import { EmptyState } from "@/components/shared/page-shell";
 import { useT } from "@/lib/i18n";
 
 const W = 960;
@@ -270,9 +272,10 @@ export function WordCloud({ words, emptyHint }: Props) {
 
   if (words.length === 0) {
     return (
-      <div className="home-cloud-empty" role="status">
-        {resolvedEmptyHint}
-      </div>
+      <EmptyState
+        icon={<Cloud size={20} aria-hidden />}
+        title={resolvedEmptyHint}
+      />
     );
   }
 
@@ -299,40 +302,65 @@ export function WordCloud({ words, emptyHint }: Props) {
         viewBox={`0 0 ${W} ${H}`}
         role="img"
         aria-label={t("common.wordCloud.aria")}
-        initial={reduce ? false : { opacity: 0 }}
+        initial={reduce ? false : { opacity: 0.96 }}
         animate={{ opacity: 1 }}
         transition={{ duration: duration.slow, ease: easeOut }}
       >
         {placed.map((p) => {
           const key = `${p.word}-${p.rank}`;
-          const hot = inside && hoverKey === key;
+          const hot = hoverKey === key;
           const live = byKey.get(key);
           const x = live?.x ?? p.x;
           const y = live?.y ?? p.y;
           const scale = live?.scale ?? 1;
+          // Generous invisible hit area — glyph-only hover on small words
+          // felt dead; rect keeps the whole cluster clickable.
+          const hw = approxWidth(p.word, p.fontSize) / 2 + 8;
+          const hh = (p.fontSize * 1.2) / 2 + 8;
           return (
             <motion.g
               key={key}
-              initial={false}
-              animate={{ x, y, scale }}
+              initial={reduce ? false : { opacity: 0.92, scale: 0.94 }}
+              animate={{ x, y, scale, opacity: 1 }}
               transition={{
                 type: "spring",
                 stiffness: 340,
                 damping: 30,
                 mass: 0.32,
+                opacity: { duration: duration.fast, ease: easeOut },
               }}
               style={{ cursor: "pointer" }}
+              role="button"
+              tabIndex={0}
               onPointerEnter={() => setHoverKey(key)}
               onPointerLeave={() =>
                 setHoverKey((cur) => (cur === key ? null : cur))
               }
+              onFocus={() => setHoverKey(key)}
+              onBlur={() =>
+                setHoverKey((cur) => (cur === key ? null : cur))
+              }
               onClick={() => openWord(p)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openWord(p);
+                }
+              }}
             >
               <title>
                 {p.entryId
                   ? t("common.wordCloud.titleOpen", { word: p.word, count: p.count })
                   : t("common.wordCloud.title", { word: p.word, count: p.count })}
               </title>
+              <rect
+                x={-hw}
+                y={-hh}
+                width={hw * 2}
+                height={hh * 2}
+                fill="transparent"
+                aria-hidden
+              />
               <text
                 x={0}
                 y={0}
@@ -343,6 +371,7 @@ export function WordCloud({ words, emptyHint }: Props) {
                   fontSize: p.fontSize,
                   fill: fillForRank(p.rank, placed.length, hot),
                   fontWeight: hot || p.rank < 3 ? 600 : 500,
+                  transition: reduce ? undefined : "fill 140ms ease-out",
                 }}
               >
                 {p.word}

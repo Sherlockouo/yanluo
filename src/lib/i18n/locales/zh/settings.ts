@@ -6,7 +6,7 @@ export const settings: Record<string, string> = {
   "settings.tab.general": "常规",
   "settings.tab.asr": "识别",
   "settings.tab.polish": "润色",
-  "settings.tab.agent": "派活",
+  "settings.tab.agent": "智能体",
   "settings.tab.system": "系统",
   "settings.tab.updates": "更新",
 
@@ -22,7 +22,7 @@ export const settings: Record<string, string> = {
   "settings.tabDesc.general": "语言、录音源与外观。修改后自动保存。",
   "settings.tabDesc.asr": "识别引擎、型号与逐字对齐。",
   "settings.tabDesc.polish": "服务商配置、纠错学习、意图整理与词库。",
-  "settings.tabDesc.agent": "内置 Claude · Codex · Pi，选一个作为默认派活 Agent。",
+  "settings.tabDesc.agent": "内置 Claude · Codex · Pi，选一个作为默认智能体。",
   "settings.tabDesc.system": "全局快捷键与 macOS 权限。",
   "settings.tabDesc.updates": "当前版本、检查更新与更新说明。",
 
@@ -52,6 +52,15 @@ export const settings: Record<string, string> = {
     "口述、会议、采访场景与 VAD 分段参数 · 多数用户无需调整。",
   "settings.asr.modelDir": "模型目录",
   "settings.asr.browse": "浏览",
+  "settings.asr.localModelsFound": "检测到本机已有模型",
+  "settings.asr.localModelsBlurb":
+    "来自 HuggingFace / ModelScope 缓存，点「使用」直接采用；也可以忽略，手动填写或下载。",
+  "settings.asr.localModelUse": "使用",
+  "settings.asr.localModelSourceHF": "HuggingFace 缓存",
+  "settings.asr.localModelSourceMS": "ModelScope 缓存",
+  "settings.asr.localModelsDismiss": "忽略本条提醒",
+  "settings.asr.rebuildHint":
+    "当前构建未启用本地 Qwen 后端：macOS 用 `--features qwen-local`（MLX）重新构建；Linux/Windows 同参数，并需设置 LIBTORCH 指向 libtorch 2.7（CPU 或 CUDA）。",
   "settings.asr.downloadAligner": "下载时一并获取逐字对齐模型（ForcedAligner）",
   "settings.asr.alignModelDir": "对齐模型目录",
   "settings.asr.redownload": "重新下载",
@@ -115,7 +124,7 @@ export const settings: Record<string, string> = {
   // Translate prompt
   "settings.translatePrompt.title": "翻译 Prompt",
   "settings.translatePrompt.blurb":
-    "出稿-翻译 tab 使用此 Prompt · {placeholder} 会替换为目标语言名",
+    "听写-翻译 tab 使用此 Prompt · {placeholder} 会替换为目标语言名",
   "settings.translatePrompt.placeholder": "{placeholder} → 目标语言名",
 
   // General panel
@@ -142,14 +151,14 @@ export const settings: Record<string, string> = {
   "settings.general.sfxOn": "开",
   "settings.general.sfxOff": "关",
   "settings.general.tour": "产品引导",
-  "settings.general.tourBlurb": "再走一遍出稿 / 派活 / 设置要点",
+  "settings.general.tourBlurb": "再走一遍文稿 / 智能体 / 设置要点",
   "settings.general.tourButton": "再看一遍引导",
 
   // Hotkeys panel
-  "settings.hotkeys.slotTranscribe": "出稿",
+  "settings.hotkeys.slotTranscribe": "听写",
   "settings.hotkeys.slotTranslate": "翻译",
   "settings.hotkeys.slotCancel": "取消",
-  "settings.hotkeys.slotAgent": "派活",
+  "settings.hotkeys.slotAgent": "智能体",
   "settings.hotkeys.notSet": "未设置",
   "settings.hotkeys.boundToast": "已设置：{label}",
   "settings.hotkeys.captureStartFailed": "无法开始录制快捷键: {msg}",
@@ -182,7 +191,7 @@ export const settings: Record<string, string> = {
   "settings.perm.authorize": "去授权",
   "settings.perm.relaunch": "重启应用",
   "settings.perm.helpTitle": "说明",
-  "settings.perm.helpLine1": "· 系统设置里找 Yanluo（不是「言落」）",
+  "settings.perm.helpLine1": "· 系统设置里找 Sayi（开发态可能显示为 sayi）",
   "settings.perm.helpLine2": "· 正式签名安装包：麦克风 / 语音识别 / 屏幕录制随 Bundle ID 保留",
   "settings.perm.helpLine3": "· 辅助功能 / 输入监视跟可执行路径绑定，换路径或重装常需再开一次",
   "settings.perm.helpLine4": "· 临时签名 / 开发包每次 codesign 身份不同，权限会清掉",
@@ -210,7 +219,7 @@ export const settings: Record<string, string> = {
   // Dispatch agent panel
   "settings.agent.notSet": "未设置",
   "settings.agent.intro":
-    "言落内置支持 Claude · Codex · Pi 三种 CLI。填好路径与默认模型，选一个作为默认派活 Agent。",
+    "Sayi 内置支持 Claude · Codex · Pi 三种 CLI。填好路径与默认模型，选一个作为默认智能体。",
   "settings.agent.binNotFound": "未找到 {kind}",
   "settings.agent.whichFailed": "which 失败: {msg}",
   "settings.agent.modelsRefreshed": "模型列表已刷新",

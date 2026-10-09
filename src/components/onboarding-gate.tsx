@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Link } from "react-router-dom";
@@ -9,7 +16,7 @@ import { listen } from "@tauri-apps/api/event";
 import { CheckCircle2, CircleAlert, Download, Keyboard, Mic, Shield } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
-import { duration, easeOut, springUI } from "@/lib/motion";
+import { duration, easeOut, revealDelay, springBounce, springUI } from "@/lib/motion";
 import { useApp } from "@/app-context";
 import { ONBOARD_STORAGE_KEY, INTRO_DONE_EVENT, readIntroDone } from "@/lib/first-run";
 import { readTourDone, requestStartTour } from "@/components/spotlight-tour";
@@ -48,6 +55,10 @@ type PermRequestResult = {
 };
 type OnboardStep = "perms" | "engine";
 
+const FOCUS_RING =
+  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent/60";
+const QUIET_BTN = `rounded text-[13px] text-muted transition-colors hover:text-foreground disabled:opacity-45 ${FOCUS_RING}`;
+
 /**
  * Quiet first-run: mic + 辅助功能 + 热键, then engine (Apple now / Qwen download).
  * Tokenizer ships with model download — no manual HF step.
@@ -64,6 +75,35 @@ export function OnboardingGate() {
   const [modelReady, setModelReady] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Move keyboard focus into the dialog on open / step change.
+  useEffect(() => {
+    if (!open) return;
+    const id = window.requestAnimationFrame(() => panelRef.current?.focus());
+    return () => window.cancelAnimationFrame(id);
+  }, [open, step]);
+
+  // Minimal Tab cycle so keyboard focus can't escape behind the modal.
+  const trapTab = (event: ReactKeyboardEvent) => {
+    if (event.key !== "Tab") return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const focusables = panel.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusables.length === 0) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const activeEl = document.activeElement;
+    if (event.shiftKey && (activeEl === panel || activeEl === first)) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && activeEl === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
 
   useEffect(() => {
     const tryOpen = () => {
@@ -228,23 +268,39 @@ export function OnboardingGate() {
           transition={{ duration: duration.normal, ease: easeOut }}
         >
           <motion.div
-            key={`onboard-panel-${step}`}
+            ref={panelRef}
             role="dialog"
             aria-modal="true"
+            tabIndex={-1}
+            onKeyDown={trapTab}
             aria-label={
               step === "perms"
                 ? t("onboarding.permsTitle")
                 : t("onboarding.engineAria")
             }
-            className="flex w-full max-w-md flex-col overflow-hidden rounded-2xl bg-surface p-6 shadow-2xl"
-            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.95, y: 16 }}
+            className="flex w-full max-w-md flex-col overflow-hidden rounded-2xl bg-surface p-6 shadow-2xl outline-none"
+            initial={reduce ? { opacity: 0.92 } : { opacity: 0.92, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 12 }}
             transition={reduce ? { duration: 0.14, ease: easeOut } : springUI}
           >
+            {/* Enter-only step swap — keyed remount, no exit stacking. */}
+            <motion.div
+              key={showDone ? "done" : step}
+              initial={reduce ? false : { opacity: 0.96, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: duration.fast, ease: easeOut }}
+            >
             {showDone ? (
               <div className="flex flex-col items-center justify-center gap-3 py-8">
-                <CheckCircle2 size={36} className="text-accent-fg" />
+                <motion.span
+                  className="grid place-items-center"
+                  initial={reduce ? false : { opacity: 0.92, scale: 0.6 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={reduce ? { duration: 0 } : springBounce}
+                >
+                  <CheckCircle2 size={36} className="text-accent-soft-foreground" />
+                </motion.span>
                 <span className="type-section">{t("onboarding.ready")}</span>
               </div>
             ) : step === "perms" ? (
@@ -254,6 +310,7 @@ export function OnboardingGate() {
 
                 <div className="mt-4">
                   <PermRow
+                    index={0}
                     icon={Mic}
                     title={t("onboarding.micTitle")}
                     desc={t("onboarding.micDesc")}
@@ -262,6 +319,7 @@ export function OnboardingGate() {
                     onAuthorize={() => void requestPerm("microphone")}
                   />
                   <PermRow
+                    index={1}
                     icon={Shield}
                     title={t("onboarding.axTitle")}
                     desc={t("onboarding.axDesc")}
@@ -269,7 +327,14 @@ export function OnboardingGate() {
                     busy={busy === "accessibility"}
                     onAuthorize={() => void requestPerm("accessibility")}
                   />
-                  <div className="perm-row">
+                  <motion.div
+                    className="perm-row"
+                    initial={reduce ? false : { opacity: 0.92, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={
+                      reduce ? { duration: 0 } : { ...springUI, delay: revealDelay(2) }
+                    }
+                  >
                     <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-default/40 text-muted">
                       <Keyboard size={16} />
                     </div>
@@ -288,18 +353,18 @@ export function OnboardingGate() {
                     </div>
                     <Link
                       to="/settings?tab=system&sub=hotkeys"
-                      className="shrink-0 font-medium text-[13px] text-muted transition-colors hover:text-foreground"
+                      className={`shrink-0 font-medium ${QUIET_BTN}`}
                       onClick={finish}
                     >
                       {t("onboarding.change")}
                     </Link>
-                  </div>
+                  </motion.div>
                 </div>
 
                 <div className="mt-5 flex items-center justify-between gap-3">
                   <button
                     type="button"
-                    className="text-[13px] text-muted transition-colors hover:text-foreground"
+                    className={QUIET_BTN}
                     onClick={goEngineOrFinish}
                   >
                     {t("onboarding.skip")}
@@ -315,20 +380,35 @@ export function OnboardingGate() {
                 <p className="mt-1 type-meta">{t("onboarding.engineSubtitle")}</p>
 
                 <div className="mt-4 flex flex-col gap-3">
-                  <button
-                    type="button"
-                    className="onboard-choice"
-                    disabled={downloading}
-                    onClick={useApple}
+                  <motion.div
+                    initial={reduce ? false : { opacity: 0.92, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={
+                      reduce ? { duration: 0 } : { ...springUI, delay: revealDelay(0) }
+                    }
                   >
-                    <div className="type-ui">{t("onboarding.appleTitle")}</div>
-                    <div className="mt-0.5 type-meta">{t("onboarding.appleDesc")}</div>
-                  </button>
+                    <button
+                      type="button"
+                      className={cn("onboard-choice", FOCUS_RING)}
+                      disabled={downloading}
+                      onClick={useApple}
+                    >
+                      <div className="type-ui">{t("onboarding.appleTitle")}</div>
+                      <div className="mt-0.5 type-meta">{t("onboarding.appleDesc")}</div>
+                    </button>
+                  </motion.div>
 
+                  <motion.div
+                    initial={reduce ? false : { opacity: 0.92, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={
+                      reduce ? { duration: 0 } : { ...springUI, delay: revealDelay(1) }
+                    }
+                  >
                   {modelReady ? (
                     <button
                       type="button"
-                      className="onboard-choice onboard-choice-accent"
+                      className={cn("onboard-choice onboard-choice-accent", FOCUS_RING)}
                       disabled={downloading}
                       onClick={() => void useExistingQwen()}
                     >
@@ -372,12 +452,13 @@ export function OnboardingGate() {
                       </Button>
                     </div>
                   )}
+                  </motion.div>
                 </div>
 
                 <div className="mt-5 flex items-center justify-between gap-3">
                   <button
                     type="button"
-                    className="text-[13px] text-muted transition-colors hover:text-foreground"
+                    className={QUIET_BTN}
                     disabled={downloading}
                     onClick={() => setStep("perms")}
                   >
@@ -385,7 +466,7 @@ export function OnboardingGate() {
                   </button>
                   <button
                     type="button"
-                    className="text-[13px] text-muted transition-colors hover:text-foreground"
+                    className={QUIET_BTN}
                     disabled={downloading}
                     onClick={useApple}
                   >
@@ -394,6 +475,7 @@ export function OnboardingGate() {
                 </div>
               </>
             )}
+            </motion.div>
           </motion.div>
         </motion.div>
       ) : null}
@@ -409,6 +491,7 @@ function PermRow({
   granted,
   busy,
   onAuthorize,
+  index = 0,
 }: {
   icon: typeof Mic;
   title: string;
@@ -416,10 +499,19 @@ function PermRow({
   granted: boolean;
   busy: boolean;
   onAuthorize: () => void;
+  index?: number;
 }) {
   const t = useT();
+  const reduce = useReducedMotion();
   return (
-    <div className="perm-row">
+    <motion.div
+      className="perm-row"
+      initial={reduce ? false : { opacity: 0.92, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={
+        reduce ? { duration: 0 } : { ...springUI, delay: revealDelay(index) }
+      }
+    >
       <div
         className={cn(
           "grid h-10 w-10 shrink-0 place-items-center rounded-xl",
@@ -445,6 +537,6 @@ function PermRow({
           </Button>
         ) : null}
       </div>
-    </div>
+    </motion.div>
   );
 }

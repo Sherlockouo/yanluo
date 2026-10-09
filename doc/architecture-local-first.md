@@ -1,8 +1,8 @@
-# Local-first 架构 — Yanluo（言落）
+# Local-first 架构 — Sayi
 
 > 源自 Linear 式 local-first（[skill](https://performance.dev/how-is-linear-so-fast-a-technical-breakdown)）。适配本仓库 **Tauri 桌面 + 本地 ASR/LLM**，非纯 Web SaaS。
 >
-> 做功能前必读；会话约束见 `.cursor/rules/local-first.mdc`。
+> 做功能前必读。
 
 ## 一句话
 
@@ -59,7 +59,7 @@ IndexedDB 不是必须——桌面端文件 + 内存 store 已是 local-first。
 - `mode="wait"` + Outlet、opacity 从 0 起的整页闪白。
 - 动画 `height: auto` 做展开（改 opacity/y）。
 
-## 与流式 ASR 文档关系
+## 与流式 ASR 的关系
 
-流式/VAD/KV 权威仍是 [`design-streaming-asr-vad.md`](./design-streaming-asr-vad.md) + roadmap。  
+流式/VAD/KV 细节以 `src-tauri` 内实现与提交历史为准。
 本文管 **产品层体感与数据流**；两者同时遵守。

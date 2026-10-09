@@ -1,6 +1,8 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import "./dev/tauri-mock";
+import "./dev/perf-probe";
 import { App } from "./App";
 import { I18nProvider } from "./lib/i18n";
 import "./global.css";
@@ -27,6 +29,14 @@ function dismissBootShell() {
   window.setTimeout(() => shell.remove(), 240);
 }
 
+let bootFinished = false;
+function finishBoot() {
+  if (bootFinished) return;
+  bootFinished = true;
+  dismissBootShell();
+  void revealMainWindow();
+}
+
 createRoot(root).render(
   <React.StrictMode>
     <I18nProvider>
@@ -38,7 +48,9 @@ createRoot(root).render(
 // Double rAF: layout + paint of React tree, then reveal.
 requestAnimationFrame(() => {
   requestAnimationFrame(() => {
-    dismissBootShell();
-    void revealMainWindow();
+    finishBoot();
   });
 });
+
+// WKWebView may pause rAF while the window is hidden or inactive.
+window.setTimeout(finishBoot, 300);

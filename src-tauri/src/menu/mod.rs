@@ -1,28 +1,21 @@
-use tauri::menu::{
-    AboutMetadata, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu,
-};
-#[cfg(not(target_os = "macos"))]
-use tauri::menu::SubmenuBuilder;
-use tauri::{AppHandle, Emitter, Manager};
+use crate::config::*;
 use crate::hud::{emit_floating_status, floating_status_slot};
 use crate::state::*;
-use crate::config::*;
+#[cfg(not(target_os = "macos"))]
+use tauri::menu::SubmenuBuilder;
+use tauri::menu::{AboutMetadata, Menu, MenuItemBuilder, PredefinedMenuItem, Submenu};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Standard macOS / desktop app menu (About · Settings · Edit · Window · Help).
 /// Language / LLM live in the Settings UI — not as top-level menu bar hacks.
 pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
     let pkg = app.package_info();
-    let app_name = "Yanluo".to_string();
+    let app_name = "Sayi".to_string();
     let about_metadata = AboutMetadata {
         name: Some(app_name.clone()),
         version: Some(pkg.version.to_string()),
         copyright: app.config().bundle.copyright.clone(),
-        authors: app
-            .config()
-            .bundle
-            .publisher
-            .clone()
-            .map(|p| vec![p]),
+        authors: app.config().bundle.publisher.clone().map(|p| vec![p]),
         ..Default::default()
     };
 
@@ -34,7 +27,7 @@ pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
         .build(app)
         .map_err(|e| e.to_string())?;
     // Custom quit — PredefinedMenuItem::quit can fight hide-on-close (Cmd+Q stuck).
-    let quit = MenuItemBuilder::with_id("app:quit", "Quit Yanluo")
+    let quit = MenuItemBuilder::with_id("app:quit", "Quit Sayi")
         .accelerator("CmdOrCtrl+Q")
         .build(app)
         .map_err(|e| e.to_string())?;
@@ -139,7 +132,7 @@ pub(crate) fn install_app_menu(app: &AppHandle) -> Result<(), String> {
 pub(crate) fn install_tray(app: &AppHandle) -> Result<(), String> {
     use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
-    let show = MenuItemBuilder::with_id("tray:show", "Show Yanluo")
+    let show = MenuItemBuilder::with_id("tray:show", "Show Sayi")
         .build(app)
         .map_err(|e| e.to_string())?;
     let settings = MenuItemBuilder::with_id("tray:settings", "Settings...")
@@ -168,7 +161,7 @@ pub(crate) fn install_tray(app: &AppHandle) -> Result<(), String> {
     TrayIconBuilder::with_id("main")
         .icon(icon)
         .menu(&tray_menu)
-        .tooltip("Yanluo")
+        .tooltip("Sayi")
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             handle_menu_event(app, event.id().as_ref());

@@ -187,7 +187,7 @@ fn download_file(
 
     let mut response = client
         .get(url)
-        .header("User-Agent", "Yanluo")
+        .header("User-Agent", "Sayi")
         .send()
         .map_err(|e| format!("下载失败 {file_label}: {e}"))?;
 
@@ -279,6 +279,126 @@ pub(crate) fn get_model_status(
     })
 }
 
+// —— Local cache detection (HuggingFace / ModelScope) ——
+
+/// A Qwen model discovered in a local hub cache. Suggestion only — the FE lets
+/// the user adopt it with one click or ignore it entirely.
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct LocalModelHit {
+    pub(crate) model_id: String,
+    /// Directory that directly holds model.safetensors (snapshot or flat dir).
+    pub(crate) path: String,
+    /// "huggingface" | "modelscope"
+    pub(crate) source: String,
+}
+
+const DETECT_MODEL_IDS: [&str; 3] = [
+    "Qwen3-ASR-0.6B",
+    "Qwen3-ASR-1.7B",
+    "Qwen3-ForcedAligner-0.6B",
+];
+
+/// Hub-cache roots to scan, most authoritative first. Env overrides respected
+/// (HF_HUB_CACHE / HF_HOME / MODELSCOPE_CACHE); duplicates collapse.
+fn detect_cache_roots() -> Vec<(PathBuf, &'static str)> {
+    let mut roots: Vec<(PathBuf, &'static str)> = Vec::new();
+    let mut push = |p: PathBuf, source: &'static str| {
+        if !p.as_os_str().is_empty() && !roots.iter().any(|(e, _)| e == &p) {
+            roots.push((p, source));
+        }
+    };
+    let env = |key: &str| std::env::var(key).ok().map(|v| v.trim().to_string());
+    if let Some(v) = env("HF_HUB_CACHE") {
+        push(PathBuf::from(v), "huggingface");
+    }
+    if let Some(v) = env("HF_HOME") {
+        push(PathBuf::from(v).join("hub"), "huggingface");
+    }
+    if let Some(home) = dirs::home_dir() {
+        push(home.join(".cache/huggingface/hub"), "huggingface");
+    }
+    if let Some(v) = env("MODELSCOPE_CACHE") {
+        // Both layouts exist across ModelScope versions: cache root holding
+        // `hub/…` (older) and the hub dir itself holding `models/…` (newer).
+        let base = PathBuf::from(&v);
+        push(base.join("hub"), "modelscope");
+        push(base, "modelscope");
+    }
+    if let Some(home) = dirs::home_dir() {
+        push(home.join(".cache/modelscope/hub"), "modelscope");
+    }
+    roots
+}
+
+/// ModelScope escapes `.` as `___` in some flat layouts (0.6B → 0___6B).
+fn model_dirname_variants(model_id: &str) -> [String; 2] {
+    [model_id.to_string(), model_id.replace('.', "___")]
+}
+
+/// Weight-bearing dir for a hub entry: freshest valid snapshot, or the entry
+/// itself when files sit flat (ModelScope `models/Qwen/<name>` layout).
+fn best_weight_dir(entry: &Path) -> Option<PathBuf> {
+    let snapshots = entry.join("snapshots");
+    if snapshots.is_dir() {
+        let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
+        if let Ok(revs) = fs::read_dir(&snapshots) {
+            for rev in revs.filter_map(|e| e.ok()).map(|e| e.path()) {
+                if rev.is_dir() && has_model_weights(&rev) {
+                    let mtime = fs::metadata(&rev)
+                        .and_then(|m| m.modified())
+                        .unwrap_or(std::time::UNIX_EPOCH);
+                    if best.as_ref().is_none_or(|(t, _)| mtime > *t) {
+                        best = Some((mtime, rev));
+                    }
+                }
+            }
+        }
+        if let Some((_, p)) = best {
+            return Some(p);
+        }
+    }
+    if has_model_weights(entry) {
+        return Some(entry.to_path_buf());
+    }
+    None
+}
+
+/// Scan standard HuggingFace / ModelScope caches for locally downloaded Qwen
+/// models. Read-only; missing roots are skipped. Cheap (one read_dir per root).
+#[tauri::command]
+pub(crate) fn detect_local_qwen_models() -> Vec<LocalModelHit> {
+    scan_local_qwen_models(&detect_cache_roots())
+}
+
+fn scan_local_qwen_models(roots: &[(PathBuf, &'static str)]) -> Vec<LocalModelHit> {
+    let mut hits: Vec<LocalModelHit> = Vec::new();
+    for (root, source) in roots {
+        for model_id in DETECT_MODEL_IDS {
+            if hits.iter().any(|h| h.model_id == model_id) {
+                continue;
+            }
+            let variants = model_dirname_variants(model_id);
+            let mut candidates: Vec<PathBuf> = Vec::new();
+            for name in &variants {
+                candidates.push(root.join(format!("models--Qwen--{name}")));
+                candidates.push(root.join("models/Qwen").join(name));
+                candidates.push(root.join("Qwen").join(name));
+            }
+            for entry in candidates {
+                if let Some(path) = best_weight_dir(&entry) {
+                    hits.push(LocalModelHit {
+                        model_id: model_id.to_string(),
+                        path: path.to_string_lossy().to_string(),
+                        source: source.to_string(),
+                    });
+                    break;
+                }
+            }
+        }
+    }
+    hits
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +414,87 @@ mod tests {
             model_status_path(Some(""), "/models/stale", installed.clone()),
             installed
         );
+    }
+
+    /// Unique temp dir (no tempfile dev-dependency).
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "sayi-detect-{tag}-{}",
+            std::process::id() as u64 + std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&dir).expect("create scratch");
+        dir
+    }
+
+    fn touch_weights(dir: &Path) {
+        fs::create_dir_all(dir).expect("mkdir");
+        fs::write(dir.join("model.safetensors"), b"weights").expect("write");
+    }
+
+    #[test]
+    fn scan_finds_hf_snapshot_layout() {
+        let root = scratch("hf");
+        let snap = root.join("models--Qwen--Qwen3-ASR-1.7B/snapshots/abc123");
+        touch_weights(&snap);
+        // Distractor: a second model that must not leak into results.
+        let other = root.join("models--Org--Other/snapshots/x");
+        touch_weights(&other);
+
+        let hits = scan_local_qwen_models(&[(root.clone(), "huggingface")]);
+        assert_eq!(hits.len(), 1, "only the known Qwen id is reported: {hits:?}");
+        assert_eq!(hits[0].model_id, "Qwen3-ASR-1.7B");
+        assert_eq!(hits[0].source, "huggingface");
+        assert_eq!(hits[0].path, snap.to_string_lossy());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn scan_finds_modelscope_flat_layouts_plain_and_escaped() {
+        let root = scratch("ms");
+        // Current modelscope: models/<org>/<name> (files flat, no snapshots/).
+        touch_weights(&root.join("models/Qwen/Qwen3-ASR-0.6B"));
+        // Escaped-dot variant some versions write (0.6B → 0___6B).
+        touch_weights(&root.join("models/Qwen/Qwen3-ForcedAligner-0___6B"));
+
+        let hits = scan_local_qwen_models(&[(root.clone(), "modelscope")]);
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        let ids: Vec<&str> = hits.iter().map(|h| h.model_id.as_str()).collect();
+        assert!(ids.contains(&"Qwen3-ASR-0.6B"));
+        assert!(ids.contains(&"Qwen3-ForcedAligner-0.6B"));
+        assert!(hits.iter().all(|h| h.source == "modelscope"));
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn scan_prefers_first_root_and_skips_incomplete_entries() {
+        let ms_root = scratch("ms-priority");
+        // Incomplete ModelScope dir (no weights) must not match…
+        fs::create_dir_all(ms_root.join("models/Qwen/Qwen3-ASR-1.7B")).expect("mkdir");
+        // …while the HF root holds the real one; ASR-0.6B exists in BOTH roots,
+        // and the first (huggingface) root must win.
+        let hf_root = scratch("hf-priority");
+        touch_weights(&hf_root.join("models--Qwen--Qwen3-ASR-0.6B/snapshots/r1"));
+        touch_weights(&ms_root.join("models/Qwen/Qwen3-ASR-0.6B"));
+
+        let hits = scan_local_qwen_models(&[
+            (hf_root.clone(), "huggingface"),
+            (ms_root.clone(), "modelscope"),
+        ]);
+        let asr06 = hits
+            .iter()
+            .find(|h| h.model_id == "Qwen3-ASR-0.6B")
+            .expect("0.6B found");
+        assert_eq!(asr06.source, "huggingface");
+        assert!(asr06.path.starts_with(hf_root.to_string_lossy().as_ref()));
+        assert!(!hits.iter().any(|h| h.model_id == "Qwen3-ASR-1.7B"));
+
+        fs::remove_dir_all(&hf_root).ok();
+        fs::remove_dir_all(&ms_root).ok();
     }
 }
 

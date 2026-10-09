@@ -1395,6 +1395,7 @@ pub(crate) fn finalize_successful_result(
         crate::elog::elog!("[asr] finalize aborted before paste (gen={gen})");
         return None;
     }
+    let mut organize_error = None;
     let can_polish = config.llm_enabled
         && !config.llm_api_base_url.trim().is_empty()
         && !config.llm_model.trim().is_empty();
@@ -1427,12 +1428,15 @@ pub(crate) fn finalize_successful_result(
         // P0-10: Wrap refine in a 5s total timeout via mpsc channel.
         // On timeout or non-abort failure, keep original text and mark refine_failed.
         let (tx, rx) = std::sync::mpsc::channel();
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let timed_out_worker = Arc::clone(&timed_out);
         let cfg_clone = config.clone();
         let blm = before_llm.clone();
         let app_handle = app.clone();
         std::thread::spawn(move || {
             let r = refine_transcript_with_cases_abortable(&cfg_clone, &blm, &fewshot, || {
-                AsrEngine::finalize_aborted(&app_handle, gen)
+                timed_out_worker.load(Ordering::Acquire)
+                    || AsrEngine::finalize_aborted(&app_handle, gen)
             });
             let _ = tx.send(r);
         });
@@ -1463,6 +1467,7 @@ pub(crate) fn finalize_successful_result(
                 result.refine_failed = true;
             }
             Err(_timeout) => {
+                timed_out.store(true, Ordering::Release);
                 crate::elog::elog!("[llm] fn refine timed out (5s), using original text");
                 result.refine_failed = true;
             }
@@ -1516,11 +1521,13 @@ pub(crate) fn finalize_successful_result(
                 }
                 Ok(Err(e)) => {
                     crate::elog::elog!("[llm] fn organize failed (using refined text): {e}");
+                    organize_error = Some(format!("整理失败：{e}；当前保留润色文本"));
                     result.refine_failed = true;
                 }
-                Err(_) => {
+                Err(e) => {
                     timed_out.store(true, Ordering::Release);
-                    crate::elog::elog!("[llm] fn organize timed out (20s), using refined text");
+                    crate::elog::elog!("[llm] fn organize worker failed (20s limit): {e}");
+                    organize_error = Some(format!("整理未完成：{e}；当前保留润色文本"));
                     result.refine_failed = true;
                 }
             }
@@ -1679,6 +1686,7 @@ pub(crate) fn finalize_successful_result(
             "asr_text": result.raw_text,
             "text": result.text,
             "refine_failed": result.refine_failed,
+            "organize_error": organize_error,
         }),
     );
     crate::elog::elog!(
@@ -1811,6 +1819,8 @@ pub(crate) mod apple_speech_ffi {
         fn asr_speech_recognize_file(
             path: *const c_char,
             locale: *const c_char,
+            contexts: *const *const c_char,
+            context_count: usize,
             out_buf: *mut c_char,
             out_len: usize,
             err_buf: *mut c_char,
@@ -1818,6 +1828,8 @@ pub(crate) mod apple_speech_ffi {
         ) -> i32;
         fn asr_speech_stream_start(
             locale: *const c_char,
+            contexts: *const *const c_char,
+            context_count: usize,
             cb: PartialFn,
             ctx: *mut c_void,
             err_buf: *mut c_char,
@@ -1880,15 +1892,27 @@ pub(crate) mod apple_speech_ffi {
         (partial.cb)(text);
     }
 
-    pub(crate) fn recognize(path: &str, locale: &str) -> Result<String, String> {
+    fn context_ptrs(contexts: &[String]) -> Result<(Vec<CString>, Vec<*const c_char>), String> {
+        let strings: Vec<CString> = contexts
+            .iter()
+            .map(|value| CString::new(value.as_str()).map_err(|_| "context contains NUL".to_string()))
+            .collect::<Result<_, _>>()?;
+        let ptrs = strings.iter().map(|value| value.as_ptr()).collect();
+        Ok((strings, ptrs))
+    }
+
+    pub(crate) fn recognize(path: &str, locale: &str, contexts: &[String]) -> Result<String, String> {
         let path_c = CString::new(path).map_err(|_| "audio path contains NUL".to_string())?;
         let locale_c = CString::new(locale).map_err(|_| "locale contains NUL".to_string())?;
+        let (_context_strings, context_ptrs) = context_ptrs(contexts)?;
         let mut out = vec![0u8; 64 * 1024];
         let mut err = vec![0u8; 2048];
         let rc = unsafe {
             asr_speech_recognize_file(
                 path_c.as_ptr(),
                 locale_c.as_ptr(),
+                context_ptrs.as_ptr(),
+                context_ptrs.len(),
                 out.as_mut_ptr().cast(),
                 out.len(),
                 err.as_mut_ptr().cast(),
@@ -1904,17 +1928,21 @@ pub(crate) mod apple_speech_ffi {
 
     pub(crate) fn stream_start(
         locale: &str,
+        contexts: &[String],
         on_partial: Box<dyn Fn(String) + Send + 'static>,
     ) -> Result<(), String> {
         if STREAM_ACTIVE.load(Ordering::Acquire) {
             cancel_stream();
         }
         let locale_c = CString::new(locale).map_err(|_| "locale contains NUL".to_string())?;
+        let (_context_strings, context_ptrs) = context_ptrs(contexts)?;
         let ctx = Box::into_raw(Box::new(PartialCtx { cb: on_partial }));
         let mut err = vec![0u8; 2048];
         let rc = unsafe {
             asr_speech_stream_start(
                 locale_c.as_ptr(),
+                context_ptrs.as_ptr(),
+                context_ptrs.len(),
                 Some(apple_partial_trampoline),
                 ctx.cast(),
                 err.as_mut_ptr().cast(),
@@ -1993,12 +2021,14 @@ pub(crate) mod apple_speech_ffi {
         app: tauri::AppHandle,
         recording: Arc<AtomicBool>,
         locale: String,
+        contexts: Vec<String>,
     ) {
         use tauri::Emitter;
         std::thread::spawn(move || {
             let app_for_cb = app.clone();
             if let Err(e) = stream_start(
                 &locale,
+                &contexts,
                 Box::new(move |text| {
                     let partial = super::PartialResult::display(text.clone());
                     let _ = app_for_cb.emit("partial-result", &partial);
@@ -2073,7 +2103,8 @@ pub(crate) fn transcribe_with_apple_speech(
         "[asr] apple speech in-process: locale={locale} path={}",
         audio_file.path().display()
     );
-    let text = apple_speech_ffi::recognize(&audio_path, &locale)?;
+    let contexts = apple_contextual_strings(&config.vocabulary);
+    let text = apple_speech_ffi::recognize(&audio_path, &locale, &contexts)?;
     Ok(TranscriptionResult {
         text: text.clone(),
         raw_text: text,
@@ -2805,6 +2836,31 @@ pub(crate) fn language_for_apple(language: &str) -> String {
         "" | "auto" => "zh-CN".into(),
         other => other.to_string(),
     }
+}
+
+/// Apple Speech hints: plain entries and the canonical side of correction pairs.
+pub(crate) fn apple_contextual_strings(vocabulary: &[String]) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for raw in vocabulary {
+        let term = raw.trim();
+        let standard = term
+            .split_once('=')
+            .or_else(|| term.split_once('→'))
+            .or_else(|| term.split_once("->"))
+            .map(|(_, right)| right.trim())
+            .unwrap_or(term);
+        if standard.is_empty() {
+            continue;
+        }
+        if seen.insert(standard.to_lowercase()) {
+            out.push(standard.to_string());
+            if out.len() == 100 {
+                break;
+            }
+        }
+    }
+    out
 }
 
 /// Vocabulary post-process:
@@ -4320,6 +4376,22 @@ mod refine_artifact_tests {
     use super::{organize_transcript_abortable, refine_one_chunk, strip_refine_artifacts};
 
     #[test]
+    #[ignore = "diagnostic: uses saved organization provider and may call its API"]
+    fn configured_organize_formats_task_list() {
+        let config: crate::config::AppConfig = serde_json::from_str(
+            &std::fs::read_to_string(crate::config::config_path()).unwrap(),
+        ).unwrap();
+        assert!(config.llm_enabled && config.llm_organize_enabled);
+        let input = "帮我整理成待办清单，明天上午准备会议材料，然后收拾办公室，最后搭建舞台。";
+        let output = organize_transcript_abortable(&config, input, &mut || false)
+            .expect("configured organization must succeed");
+        assert!(!output.trim().is_empty());
+        assert_ne!(output.trim(), input, "organization returned the original request");
+        assert!(output.lines().count() >= 3, "expected a task list: {output}");
+        println!("{output}");
+    }
+
+    #[test]
     fn refine_sends_only_transcript_as_user_message() {
         use std::io::{BufRead, BufReader, Read, Write};
         use std::net::TcpListener;
@@ -5069,7 +5141,22 @@ mod guard_refine_tests {
 
 #[cfg(test)]
 mod apply_vocabulary_tests {
-    use super::apply_vocabulary;
+    use super::{apply_vocabulary, apple_contextual_strings};
+
+    #[test]
+    fn apple_context_uses_only_canonical_spellings() {
+        let vocab = vec![
+            " Python ".into(),
+            "配森=Python".into(),
+            "数据裤→PostgreSQL".into(),
+            "麦赛口->MySQL".into(),
+            "=  ".into(),
+        ];
+        assert_eq!(
+            apple_contextual_strings(&vocab),
+            vec!["Python", "PostgreSQL", "MySQL"]
+        );
+    }
 
     #[test]
     fn homophone_pair_replaced() {

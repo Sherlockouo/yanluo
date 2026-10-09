@@ -859,15 +859,31 @@ function ScrubTrack({
       aria-valuemax={duration || 0}
       aria-valuenow={duration ? (progress / 100) * duration : 0}
       tabIndex={0}
-      className="relative h-2 w-full grow cursor-pointer touch-none rounded-full bg-default"
+      className="group relative h-2 w-full grow cursor-pointer touch-none rounded-full bg-default outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
       onPointerDown={onPointerDown}
+      onKeyDown={(e) => {
+        if (!duration) return;
+        const current = (progress / 100) * duration;
+        const step = Math.min(5, Math.max(1, duration / 20));
+        let next: number | null = null;
+        if (e.key === "ArrowLeft") next = current - step;
+        else if (e.key === "ArrowRight") next = current + step;
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = duration;
+        if (next == null) return;
+        e.preventDefault();
+        onScrub(Math.min(Math.max(next, 0), duration));
+      }}
     >
+      {/* scaleX keeps the fill on the compositor — no width relayout at 10 Hz */}
       <div
-        className="absolute inset-y-0 left-0 rounded-full bg-accent"
-        style={{ width: `${Math.min(Math.max(progress, 0), 100)}%` }}
+        className="absolute inset-y-0 left-0 w-full origin-left rounded-full bg-accent"
+        style={{
+          transform: `scaleX(${Math.min(Math.max(progress, 0), 100) / 100})`,
+        }}
       />
       <div
-        className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-foreground ring-2 ring-accent"
+        className="absolute top-1/2 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent-foreground ring-2 ring-accent transition-transform duration-100 ease-out group-hover:scale-110 group-focus-visible:scale-110"
         style={{ left: `${Math.min(Math.max(progress, 0), 100)}%` }}
       />
     </div>

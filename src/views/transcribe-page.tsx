@@ -19,10 +19,10 @@ import {
 import type { HistoryEntry, TranscriptionResult } from "@/types";
 import { providerLabel, TRANSCRIBE_FILE_FILTERS } from "@/lib/constants";
 import { isVideoMediaKind } from "@/lib/alignment";
-import { ModeSwitch, PageHeader, PageShell } from "@/components/shared/page-shell";
+import { ModeSwitch, PageHeader, PageShell, Reveal } from "@/components/shared/page-shell";
 import { TranscriptExportMenu } from "@/components/ui/transcript-export-menu";
 import { useApp } from "@/app-context";
-import { springUI, duration, easeOut } from "@/lib/motion";
+import { springUI, springBounce, duration, easeOut } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
@@ -159,6 +159,7 @@ export function TranscribePage({
   actionSlot?: HTMLElement | null;
 } = {}) {
   const t = useT();
+  const reducedMotion = useReducedMotion();
   const {
     config,
     history,
@@ -203,16 +204,17 @@ export function TranscribePage({
     ? "processing"
     : view;
 
-  // List after paint — history IPC / filter must not block tab enter.
-  const [listReady, setListReady] = useState(false);
-  useEffect(() => deferWork(() => setListReady(true), 0), []);
-
-  const sessionEntries = useMemo(() => {
-    if (!listReady) return [];
-    return history
-      .filter((e) => (e.source ?? "fn") === "transcribe")
-      .slice(0, 30);
-  }, [history, listReady]);
+  // History is already in-memory (app context) — the filter is µs even at ~1k
+  // entries. Render rows in the FIRST frame: an empty→list staged swap would
+  // invalidate the whole section texture mid enter-animation (WKWebView
+  // re-raster = the tab-click hitch).
+  const sessionEntries = useMemo(
+    () =>
+      history
+        .filter((e) => (e.source ?? "fn") === "transcribe")
+        .slice(0, 30),
+    [history],
+  );
 
   const modelBlocked = config.asr_provider === "qwen" && !modelLoaded;
   const canStart = Boolean(selectedPath) && !modelBlocked && !processing;
@@ -456,9 +458,15 @@ export function TranscribePage({
           screen === "result" ? (
             <>
               {sessionEntries.length > 0 ? (
-                <span className="dmast-meta">
+                <motion.span
+                  key={sessionEntries.length}
+                  className="dmast-meta"
+                  initial={reducedMotion ? false : { opacity: 0.92, y: 3 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ type: "tween", duration: 0.16, ease: easeOut }}
+                >
                   {t("transcribe.recordsCount", { n: sessionEntries.length })}
-                </span>
+                </motion.span>
               ) : null}
               <button type="button" className="dlink" onClick={enterUpload}>
                 ＋ {t("transcribe.newTranscription")}
@@ -788,11 +796,11 @@ function UploadPhase({
               type="button"
               aria-label={selectedPath ? t("transcribe.changeFile") : t("transcribe.chooseFile")}
               onClick={onPick}
-              className={cn("dropzone", dragOver && "is-drag")}
+              className={cn("dropzone group cursor-pointer", dragOver && "is-drag")}
             >
               {selectedPath ? (
                 <>
-                  <span className="dropzone-ic">
+                  <span className="dropzone-ic transition-transform duration-150 ease-out group-hover:scale-105 motion-reduce:transition-none">
                     {selectedIsVideo ? (
                       <FileVideo size={22} aria-hidden />
                     ) : (
@@ -806,7 +814,7 @@ function UploadPhase({
                 </>
               ) : (
                 <>
-                  <span className="dropzone-ic">
+                  <span className="dropzone-ic transition-transform duration-150 ease-out group-hover:scale-105 motion-reduce:transition-none">
                     <Upload size={22} aria-hidden />
                   </span>
                   <span className="dropzone-t">
@@ -971,7 +979,7 @@ function ProcessingPhase({
                 }}
               />
             </div>
-            <p className="mt-1.5 text-[12px] text-muted">
+            <p className="mt-1.5 text-[12px] tabular-nums text-muted">
               {downloadPercent.toFixed(0)}%
             </p>
           </>
@@ -1031,10 +1039,24 @@ function ResultPhase({
     }
   }, [expandedId, sessionEntries]);
 
+  // More rows render on scroll approach — never a timed expansion. A fixed
+  // 400ms 8→30 swap used to land right in the post-enter interaction window
+  // and re-raster the whole page (WKWebView hitch).
+  const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const cancelDefer = deferWork(() => setVisibleCount(30), 400);
-    return cancelDefer;
-  }, []);
+    const el = sentinelRef.current;
+    if (!el || visibleCount >= sessionEntries.length) return;
+    const io = new IntersectionObserver(
+      (ents) => {
+        if (ents.some((e) => e.isIntersecting)) {
+          setVisibleCount((c) => Math.min(sessionEntries.length, c + 12));
+        }
+      },
+      { rootMargin: "400px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visibleCount, sessionEntries.length]);
 
   const ensureViewer = useCallback(async () => {
     if (Viewer) return Viewer;
@@ -1074,26 +1096,23 @@ function ResultPhase({
   return (
     <div className="w-full">
       {sessionEntries.length === 0 ? (
-        <div className="dropzone dropzone-empty">
-          <span className="dropzone-ic">
-            <FileAudio size={22} aria-hidden />
-          </span>
-          <span className="dropzone-t">{t("transcribe.emptyTitle")}</span>
-          <Button variant="primary" onPress={onNew}>
-            <Plus size={16} aria-hidden />
-            {t("transcribe.startDraft")}
-          </Button>
-        </div>
+        <Reveal>
+          <div className="dropzone dropzone-empty">
+            <span className="dropzone-ic">
+              <FileAudio size={22} aria-hidden />
+            </span>
+            <span className="dropzone-t">{t("transcribe.emptyTitle")}</span>
+            <Button variant="primary" onPress={onNew}>
+              <Plus size={16} aria-hidden />
+              {t("transcribe.startDraft")}
+            </Button>
+          </div>
+        </Reveal>
       ) : (
         <div className="rlist">
           <AnimatePresence initial={false}>
-          {rows.map((entry, i) => (
-            <motion.div
-              key={entry.id}
-              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: -12 }}
-              transition={springUI}
-              style={{ willChange: "opacity, transform" }}
-            >
+          {rows.map((entry, i) => {
+            const row = (
               <HistoryRow
                 entry={entry}
                 index={i + 1}
@@ -1101,9 +1120,22 @@ function ResultPhase({
                 onSelect={() => openRow(entry.id)}
                 onDelete={() => onDelete(entry.id)}
               />
-            </motion.div>
-          ))}
+            );
+            return (
+              <motion.div
+                key={entry.id}
+                exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: -12 }}
+                transition={springUI}
+              >
+                {/* Reveal only for the first screenful — long lists stay cheap. */}
+                {i < 8 ? <Reveal index={i}>{row}</Reveal> : row}
+              </motion.div>
+            );
+          })}
           </AnimatePresence>
+          {visibleCount < sessionEntries.length ? (
+            <div ref={sentinelRef} aria-hidden style={{ height: 1 }} />
+          ) : null}
         </div>
       )}
 
@@ -1133,6 +1165,7 @@ function TranscriptResultModal({
   onClose: () => void;
 }) {
   const t = useT();
+  const reduce = useReducedMotion();
   // Esc to close.
   useEffect(() => {
     if (!open) return;
@@ -1180,10 +1213,10 @@ function TranscriptResultModal({
             aria-modal="true"
             aria-label={t("transcribe.detailAria")}
             className="flex h-[min(85vh,44rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl"
-            initial={{ opacity: 0, scale: 0.95, y: 24 }}
+            initial={reduce ? { opacity: 0.92 } : { opacity: 0.92, scale: 0.95, y: 24 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 16 }}
-            transition={{ type: "spring", bounce: 0.2, duration: 0.3 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 16 }}
+            transition={reduce ? { duration: duration.fast, ease: easeOut } : springBounce}
           >
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-3">
               <div className="flex flex-wrap items-center gap-3 font-mono text-[12px] text-muted">
@@ -1225,7 +1258,7 @@ function TranscriptResultModal({
                   {/* Left: media column — video player, or audio placeholder card */}
                   <motion.div
                     className="flex w-[60%] shrink-0 flex-col border-r border-border bg-surface-secondary/60"
-                    initial={{ opacity: 0, x: -16 }}
+                    initial={reduce ? false : { opacity: 0.92, x: -16 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ ...springUI, delay: 0.08 }}
                   >
@@ -1265,7 +1298,7 @@ function TranscriptResultModal({
                   {/* Right: transcript column — toggle + scrolling reader */}
                   <motion.div
                     className="flex min-w-0 flex-1 flex-col"
-                    initial={{ opacity: 0, x: 16 }}
+                    initial={reduce ? false : { opacity: 0.92, x: 16 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ ...springUI, delay: 0.14 }}
                   >

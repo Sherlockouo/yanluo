@@ -13,6 +13,7 @@ import {
 import { useApp } from "@/app-context";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
+import { duration, easeOut } from "@/lib/motion";
 import type { LlmProvider } from "@/types";
 
 const CUSTOM = "__custom__";
@@ -98,9 +99,9 @@ export function LlmProviderSelect({
   return (
     <motion.div
       className={cn("flex flex-wrap items-center gap-1.5", className)}
-      initial={reduce ? false : { opacity: 0.6, y: -2 }}
+      initial={reduce ? false : { opacity: 0.92, y: -2 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: duration.fast, ease: easeOut }}
       style={{ willChange: "opacity, transform" }}
     >
       <Select
@@ -128,6 +129,15 @@ export function LlmProviderSelect({
         </Select.Popover>
       </Select>
 
+      <motion.span
+        key={
+          preset.models.length > 0 && !showCustomField ? "preset" : "custom"
+        }
+        className="inline-flex items-center"
+        initial={reduce ? false : { opacity: 0.92 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: duration.fast, ease: easeOut }}
+      >
       {preset.models.length > 0 && !showCustomField ? (
         <Select
           className="inline-flex w-auto"
@@ -176,9 +186,11 @@ export function LlmProviderSelect({
           <Input
             className="h-7 !py-0 font-mono !text-[12px]"
             placeholder={t("common.llm.modelPlaceholder")}
+            autoFocus={customOpen}
           />
         </TextField>
       )}
+      </motion.span>
 
       {!ready ? (
         <Link

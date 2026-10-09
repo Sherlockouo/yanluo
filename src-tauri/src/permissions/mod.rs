@@ -104,8 +104,15 @@ fn accessibility_granted() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-fn input_monitoring_granted() -> bool {
+pub(crate) fn input_monitoring_granted() -> bool {
     unsafe { ffi::CGPreflightListenEventAccess() }
+}
+
+/// Trigger macOS's Input Monitoring request: registers this binary in TCC and
+/// may surface the system prompt. Returns the immediate request result.
+#[cfg(target_os = "macos")]
+pub(crate) fn try_request_input_monitoring() -> bool {
+    unsafe { ffi::CGRequestListenEventAccess() }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -176,9 +183,8 @@ pub fn request_permission(kind: &str) -> Result<PermissionRequestResult, String>
                 use core_foundation::dictionary::CFDictionary;
                 use core_foundation::string::CFString;
 
-                let key = unsafe {
-                    CFString::wrap_under_get_rule(ffi::kAXTrustedCheckOptionPrompt)
-                };
+                let key =
+                    unsafe { CFString::wrap_under_get_rule(ffi::kAXTrustedCheckOptionPrompt) };
                 let pairs = [(key, CFBoolean::true_value())];
                 let options = CFDictionary::from_CFType_pairs(&pairs);
                 let trusted = unsafe {
@@ -196,7 +202,7 @@ pub fn request_permission(kind: &str) -> Result<PermissionRequestResult, String>
                     // click always has a visible next step.
                     Ok(PermissionRequestResult {
                         message: format!(
-                            "请在系统设置 → 辅助功能中开启本应用（列表名 Yanluo）。开发路径：\n{}",
+                            "请在系统设置 → 辅助功能中开启本应用（列表名 Sayi）。开发路径：\n{}",
                             executable_path()
                         ),
                         granted: false,

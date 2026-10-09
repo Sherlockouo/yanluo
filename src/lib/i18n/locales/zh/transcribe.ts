@@ -39,7 +39,7 @@ export const transcribe: Record<string, string> = {
   "transcribe.downloading": "正在下载…",
   "transcribe.recognizingEllipsis": "正在识别…",
   "transcribe.emptyTitle": "还没有稿",
-  "transcribe.startDraft": "开始出稿",
+  "transcribe.startDraft": "开始听写",
   "transcribe.detailAria": "转写详情",
   "transcribe.copied": "已复制",
   "transcribe.copy": "复制",

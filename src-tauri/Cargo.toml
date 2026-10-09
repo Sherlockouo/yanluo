@@ -1,12 +1,12 @@
 [package]
-name = "yanluo"
+name = "sayi"
 version = "0.11.1"
-description = "Desktop app for Qwen3-ASR, built with Tauri 2.0"
+description = "Sayi — desktop app for Qwen3-ASR, built with Tauri 2.0"
 authors = ["Sherlockouo"]
 edition = "2021"
 
 [lib]
-name = "yanluo_lib"
+name = "sayi_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

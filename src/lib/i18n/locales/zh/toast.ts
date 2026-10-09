@@ -27,5 +27,6 @@ export const toast: Record<string, string> = {
   "toast.learned": "已学到：{wrong} → {right}",
   "toast.learnedMulti": "已学到：{first} 等 {n} 条",
   "toast.learnedCase": "已加入学习 case（识别稿 ↔ 修正稿）",
+  "toast.learnedTerm": "已学到标准写法：{term}",
   "toast.chooseModelDirTitle": "选择 ASR 模型目录",
 };

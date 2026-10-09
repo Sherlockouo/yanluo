@@ -1,8 +1,27 @@
 # Changelog
 
-All notable changes to Yanluo（言落）are documented in this file.
+All notable changes to Sayi are documented in this file.（曾用名：QuietType → Yanluo 言落 → ShuoChengao 说成稿）
 
 ## Unreleased
+
+### Fixed（点「文稿」整页冻结 ~0.5s — 实测定位）
+- **根因**：`get_ytdlp_status` 是同步 Tauri command（Tauri 2 主线程执行），每次进入文稿页都会同步
+  spawn 最多 7 个 `yt-dlp --version` Python 子进程（每个 ~0.3s），整个 app UI 冻结——探针实测
+  route-dom 仅 0-24ms 但帧率跌至 14-19/700ms、单帧最坏 414-505ms。现改为 `command(async)`
+  （移出主线程）+ 60s 会话缓存
+- 转写列表两阶段渲染（空态→列表、400ms 时 8→30 扩张）在进场动画期间强制 WKWebView 整页重栅格：
+  列表首帧直接渲染（数据本在内存），更多行改为滚动接近时渲染（IntersectionObserver 哨兵）
+- 删除列表行常驻 `willChange`（8-30 个强制合成层）；隐藏面板预挂载改 requestIdleCallback
+  （不再进页 350ms 定时引爆）
+- 首页词云 tab：三个源单次遍历聚合 + useDeferredValue，切换不再阻塞点击帧
+- `.app-content` 移除 `scroll-behavior: smooth`（与程序化滚动恢复冲突，每次进页强制滚动动画）
+- 新增 `src/dev/`（tauri-mock / perf-probe）：浏览器内复现 + 掉帧探针，dev 默认开启
+
+### Changed（品牌）
+- 产品名统一为 **Sayi**：crate / 二进制（`sayi`）、npm 包名、agent kit（`sayi-config` / `sayi-settings.md`）、
+  更新 UA / 下载目录、导出文件名兜底、打包脚本与 Release 标题
+- 不变（升级兼容）：bundle id `com.sherlockouo.yanluo`、数据目录 `Application Support/Yanluo`、
+  GitHub 仓库 `Sherlockouo/yanluo`、既有 localStorage 键
 
 ### Changed（push-then-refine：说话即出字）
 - **HUD 展示与 commit 解耦**：字幕全部视为临时假设——识别出非空文本**立刻上屏**，

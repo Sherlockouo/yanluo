@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Put Gatekeeper-fix .command next to Yanluo.app and inside the DMG volume.
+ * Put Gatekeeper-fix .command next to Sayi.app and inside the DMG volume.
  *
  * Usage (after `pnpm tauri build --bundles app,dmg`):
  *   node scripts/embed-gatekeeper-fix.mjs
@@ -41,7 +41,7 @@ function findApps() {
     const dir = path.join(root, "release", "bundle", "macos");
     if (!fs.existsSync(dir)) continue;
     for (const name of fs.readdirSync(dir)) {
-      if (name === "Yanluo.app" || name === "QuietType.app") {
+      if (name === "Sayi.app") {
         apps.push(path.join(dir, name));
       }
     }
@@ -56,7 +56,9 @@ function findDmgs() {
     if (!fs.existsSync(dir)) continue;
     for (const name of fs.readdirSync(dir)) {
       if (!name.endsWith(".dmg") || name.startsWith("rw.")) continue;
-      if (!name.startsWith("Yanluo_") && !name.startsWith("QuietType_")) continue;
+      if (!name.startsWith("Sayi_")) {
+        continue;
+      }
       dmgs.push(path.join(dir, name));
     }
   }
@@ -80,7 +82,7 @@ function stageBesideApp(appPath) {
 function embedIntoDmg(dmgPath) {
   const abs = path.resolve(dmgPath);
   const tmpRw = path.join(path.dirname(abs), `rw.${path.basename(abs)}`);
-  const mountRoot = fs.mkdtempSync(path.join(fs.realpathSync("/tmp"), "yanluo-dmg-"));
+  const mountRoot = fs.mkdtempSync(path.join(fs.realpathSync("/tmp"), "sayi-dmg-"));
 
   console.log(`[gatekeeper-fix] embedding into ${abs}`);
 

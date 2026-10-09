@@ -18,48 +18,5 @@
 @import "./styles/agent.css";
 @import "./styles/view-motion.css";
 
-/* Press utilities — pointer-down, not release. Text tabs stay opacity-only (no glyph jitter). */
-.btn-press {
-  transition: transform 100ms ease-out;
-}
-.btn-press:active {
-  transform: scale(0.97);
-}
-.card-press {
-  transition: transform 100ms ease-out;
-}
-.card-press:active {
-  transform: scale(0.985);
-}
-.row-press {
-  transition: transform 100ms ease-out;
-}
-.row-press:active {
-  transform: scale(0.99);
-}
-.chip-press {
-  transition: transform 100ms ease-out;
-}
-.chip-press:active {
-  transform: scale(0.96);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .btn-press:active,
-  .card-press:active,
-  .row-press:active,
-  .chip-press:active {
-    transform: none;
-  }
-}
-
-.dropzone:active {
-  transform: scale(0.985);
-  transition: transform 100ms ease-out;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dropzone:active {
-    transform: none;
-  }
-}
+/* Press utilities (.btn-press/.card-press/.row-press/.chip-press/.dropzone)
+   live in base.css — single definition, no cascade fights. */

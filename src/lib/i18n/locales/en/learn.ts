@@ -27,7 +27,7 @@ export const learn: Record<string, string> = {
   "learn.test": "Test",
   "learn.save": "Save",
   "learn.emptyTitle": "No correction habits learned yet",
-  "learn.emptyHint": "Appears automatically after you edit text in the HUD or Drafts",
+  "learn.emptyHint": "Appears automatically after you edit text in the HUD or Dictation",
   "learn.searchPlaceholder": "Search wrong / right words…",
   "learn.hitCount": "{n} hits",
   "learn.enablePair": "Enable {wrong} → {right}",

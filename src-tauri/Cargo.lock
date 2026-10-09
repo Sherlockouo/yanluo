@@ -4180,6 +4180,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "sayi"
+version = "0.11.1"
+dependencies = [
+ "block2",
+ "cc",
+ "chrono",
+ "core-foundation 0.10.1",
+ "core-graphics",
+ "cpal",
+ "dirs",
+ "hound",
+ "libc",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "qwen3-asr-rs",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-shell",
+ "tempfile",
+ "tokio",
+ "voice_activity_detector",
+ "webrtc-vad",
+ "window-vibrancy",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6976,37 +7007,6 @@ checksum = "32e45ad4206f6d2479085147f02bc2ef834ac85886624a23575ae137c8aa8156"
 dependencies = [
  "libc",
  "rustix",
-]
-
-[[package]]
-name = "yanluo"
-version = "0.11.1"
-dependencies = [
- "block2",
- "cc",
- "chrono",
- "core-foundation 0.10.1",
- "core-graphics",
- "cpal",
- "dirs",
- "hound",
- "libc",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "qwen3-asr-rs",
- "reqwest",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-shell",
- "tempfile",
- "tokio",
- "voice_activity_detector",
- "webrtc-vad",
- "window-vibrancy",
 ]
 
 [[package]]

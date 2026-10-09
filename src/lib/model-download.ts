@@ -18,6 +18,13 @@ export type ModelDownloadProgress = {
   percent: number | null;
 };
 
+/** Model discovered in a local HuggingFace / ModelScope hub cache. */
+export type LocalModelHit = {
+  model_id: string;
+  path: string;
+  source: "huggingface" | "modelscope";
+};
+
 export function progressLabel(p: ModelDownloadProgress): string {
   if (p.file === "(done)") return "完成";
   const pct =

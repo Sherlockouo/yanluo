@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # productName is ASCII "Yanluo" (WiX/filenames). TCC / CFBundleDisplayName / menu = Yanluo; 言落 stays for zh locale copy.
+          # productName is ASCII "Sayi" for cross-platform package paths.
           - platform: macos-aarch64
             os: macos-14
             args: --features qwen-local --bundles app,dmg
@@ -199,7 +199,7 @@ jobs:
                       continue
               elif capture:
                   out.append(line)
-          body = "\n".join(out).strip() or f"Yanluo v{version}"
+          body = "\n".join(out).strip() or f"Sayi v{version}"
           Path("release-notes.md").write_text(body + "\n", encoding="utf-8")
           print(body)
           PY
@@ -237,7 +237,7 @@ jobs:
           NO_STRIP: "true"
         with:
           tagName: ${{ steps.ver.outputs.tag }}
-          releaseName: Yanluo ${{ steps.ver.outputs.tag }}
+          releaseName: Sayi ${{ steps.ver.outputs.tag }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false

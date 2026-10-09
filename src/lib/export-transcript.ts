@@ -113,7 +113,7 @@ export function exportHistoryEntry(
   format: ExportFormat,
   textOverride?: string,
 ): void {
-  const base = safeBaseName(entry) || "yanluo";
+  const base = safeBaseName(entry) || "sayi";
   switch (format) {
     case "md":
       downloadTextFile(

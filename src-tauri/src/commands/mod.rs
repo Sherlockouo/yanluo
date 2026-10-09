@@ -65,7 +65,7 @@ pub(crate) fn get_app_info() -> AppInfo {
     let perms = permissions::get_permission_status();
     AppInfo {
         version: env!("CARGO_PKG_VERSION").to_string(),
-        name: "Yanluo".to_string(),
+        name: "Sayi".to_string(),
         platform: perms.platform,
         executable_path: perms.executable_path,
         apple_speech_available: cfg!(target_os = "macos"),
@@ -336,9 +336,9 @@ pub(crate) fn apply_learned_terms(
         let mut config = engine.inner().config.lock().map_err(|e| e.to_string())?;
         let mut history = engine.inner().history.lock().map_err(|e| e.to_string())?;
         let vocabulary = apply_learned_terms_to_state(&mut config, &mut history, &ids, &terms)?;
-        save_config_to_disk(&config)?;
         (vocabulary, config.clone(), history.clone())
     };
+    save_config_to_disk(&config)?;
     save_history_to_disk(&history)?;
     let _ = app.emit("config-updated", &config);
     Ok(vocabulary)
@@ -473,9 +473,7 @@ pub(crate) async fn distill_learn_from_ratings(
     } else {
         tauri::async_runtime::spawn_blocking(move || distill_learn_from_cases(&config, &cases))
             .await
-            .map_err(|e| format!("学习提炼任务失败: {e}"))
-            .unwrap_or_else(Err)
-            .unwrap_or_default()
+            .map_err(|e| format!("学习提炼任务失败: {e}"))??
     };
 
     // Merge deterministic pools (dedup case-insensitive). Order: AI distill
@@ -901,10 +899,12 @@ pub(crate) fn start_recording_impl(
     #[cfg(target_os = "macos")]
     if matches!(config.asr_provider, AsrProvider::Apple) {
         let locale = crate::transcription::language_for_apple(&config.language);
+        let contexts = crate::transcription::apple_contextual_strings(&config.vocabulary);
         apple_speech_ffi::spawn_apple_stream_pump(
             app.clone(),
             engine.inner().recording.clone(),
             locale,
+            contexts,
         );
     }
     crate::elog::elog!(
@@ -1008,6 +1008,47 @@ pub(crate) struct LearnFromHudPayload {
     pub(crate) before: String,
     pub(crate) after: String,
     pub(crate) learned_pairs: Vec<LearnedPairInfo>,
+    pub(crate) learned_terms: Vec<String>,
+}
+
+fn persist_term_candidates(
+    app: &AppHandle,
+    candidates: &[crate::learn::diff::CorrectionCandidate],
+) -> Result<Vec<String>, String> {
+    let terms: Vec<String> = candidates
+        .iter()
+        .filter(|candidate| candidate.kind == crate::learn::diff::CandidateKind::Term)
+        .map(|candidate| candidate.right.trim())
+        .filter(|term| !term.is_empty())
+        .map(str::to_string)
+        .collect();
+    if terms.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let state = app.state::<AsrEngine>();
+    let (added, snapshot) = {
+        let mut config = state.inner().config.lock().map_err(|e| e.to_string())?;
+        let mut seen: std::collections::HashSet<String> = config
+            .vocabulary
+            .iter()
+            .map(|term| term.trim().to_lowercase())
+            .collect();
+        let mut added = Vec::new();
+        for term in terms {
+            if seen.insert(term.to_lowercase()) {
+                config.vocabulary.insert(0, term.clone());
+                added.push(term);
+            }
+        }
+        (added, config.clone())
+    };
+    if added.is_empty() {
+        return Ok(added);
+    }
+    save_config_to_disk(&snapshot)?;
+    app.emit("config-updated", &snapshot).map_err(|e| e.to_string())?;
+    Ok(added)
 }
 
 /// Confirm Fn/⇧Fn HUD edit: clipboard → hide → paste → history → optional learn.
@@ -1091,7 +1132,7 @@ pub(crate) fn confirm_floating_transcript(
                         &c.wrong,
                         &c.right,
                         "auto_hud",
-                        c.score,
+                        c.score.max(0.9),
                     );
                     learned_pairs.push(LearnedPairInfo {
                         wrong: c.wrong.clone(),
@@ -1105,11 +1146,19 @@ pub(crate) fn confirm_floating_transcript(
                     learned_pairs.len()
                 );
             }
+            let learned_terms = match persist_term_candidates(&app, &candidates) {
+                Ok(terms) => terms,
+                Err(error) => {
+                    let _ = app.emit("partial-error", format!("词库学习保存失败：{error}"));
+                    Vec::new()
+                }
+            };
             let payload = LearnFromHudPayload {
                 entry_id: id,
                 before: learn_before,
                 after: confirmed.clone(),
                 learned_pairs,
+                learned_terms,
             };
             let _ = app.emit("learn-from-hud", &payload);
         }
@@ -1134,6 +1183,161 @@ pub(crate) fn cancel_floating_transcript(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Live HUD edit: the user fixed the streaming text while still recording and
+/// hits Enter — stop the session, paste the edited text immediately (skipping
+/// refine/organize), and harvest the diff with the same learn pipeline as the
+/// post-refine HUD edit. `base_text` is what the user saw when they started
+/// editing, so the learn diff never includes speech dictated afterwards.
+#[tauri::command]
+pub(crate) fn confirm_live_hud_edit(
+    app: AppHandle,
+    engine: tauri::State<'_, AsrEngine>,
+    text: String,
+    base_text: Option<String>,
+) -> Result<(), String> {
+    let (state, intention) = floating_status_slot(&app)
+        .lock()
+        .map(|s| (s.state.clone(), s.intention.clone()))
+        .unwrap_or_default();
+    if intention.as_deref() == Some("agent") {
+        return Err("派活态请用 Enter 派发".into());
+    }
+    if !matches!(
+        state.as_str(),
+        "recording" | "processing" | "refining" | "organizing"
+    ) {
+        return Err("当前不在录音状态".into());
+    }
+    let confirmed = text.trim().to_string();
+    if confirmed.is_empty() {
+        return Err("确认文本不能为空".into());
+    }
+
+    // Stop mic + abort the finalize this session would have run (gen bump makes
+    // any in-flight refine discard its late result instead of re-showing HUD).
+    cancel_recording_with_reason(&app, &engine, "live-edit-confirm");
+
+    // Learn baseline: the text visible when editing began; fall back to the
+    // slot's last live text, then to the confirmed text itself (no-op diff).
+    let shown = base_text
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .or_else(|| {
+            floating_status_slot(&app)
+                .lock()
+                .ok()
+                .map(|s| s.text.trim().to_string())
+                .filter(|t| !t.is_empty())
+        })
+        .unwrap_or_else(|| confirmed.clone());
+    let learn_before = shown.clone();
+    let edited = confirmed != learn_before;
+
+    match inject_text_via_paste_on_main(&app, &confirmed) {
+        Ok(()) => {
+            crate::elog::elog!(
+                "[paste] live-edit confirmed {} chars (edited={edited})",
+                confirmed.chars().count()
+            );
+        }
+        Err(e) => {
+            crate::elog::elog!("[paste] live-edit injection failed: {e}");
+            let _ = app.emit(
+                "partial-error",
+                format!("已写入剪切板，但粘贴失败（请检查辅助功能权限）: {e}"),
+            );
+        }
+    }
+
+    emit_floating_status(&app, false, "idle", "", 0.0);
+
+    let mode = {
+        let s = AsrEngine::session_mode(&app);
+        if s == "translate" { "translate" } else { "fn" }
+    };
+    let lang = engine
+        .inner()
+        .config
+        .lock()
+        .map(|c| c.language.clone())
+        .unwrap_or_else(|_| "auto".into());
+    let mut result = TranscriptionResult {
+        text: confirmed.clone(),
+        raw_text: learn_before.clone(),
+        llm_text: None,
+        language: lang,
+        duration_seconds: 0.0,
+        refined: false,
+        refine_failed: false,
+        error: None,
+        segments: Vec::new(),
+        alignment: None,
+    };
+    if result.raw_text.trim().is_empty() {
+        result.raw_text = confirmed.clone();
+    }
+
+    let entry_id = append_history_with_user(
+        &app,
+        &result,
+        mode,
+        None,
+        "audio",
+        if edited && mode == "fn" {
+            Some(confirmed.as_str())
+        } else {
+            None
+        },
+    );
+
+    if edited && mode == "fn" {
+        if let Some(id) = entry_id.clone() {
+            let candidates = crate::learn::extract_correction_pairs(&learn_before, &confirmed);
+            let mut learned_pairs = Vec::new();
+            for c in &candidates {
+                if c.kind == crate::learn::diff::CandidateKind::Pair && !c.wrong.is_empty() {
+                    engine.inner().learn_state.upsert_pair(
+                        &c.wrong,
+                        &c.right,
+                        "auto_hud",
+                        c.score.max(0.9),
+                    );
+                    learned_pairs.push(LearnedPairInfo {
+                        wrong: c.wrong.clone(),
+                        right: c.right.clone(),
+                    });
+                }
+            }
+            if !learned_pairs.is_empty() {
+                crate::elog::elog!(
+                    "[learn] auto-extracted {} pairs from live HUD edit",
+                    learned_pairs.len()
+                );
+            }
+            let learned_terms = match persist_term_candidates(&app, &candidates) {
+                Ok(terms) => terms,
+                Err(error) => {
+                    let _ = app.emit("partial-error", format!("词库学习保存失败：{error}"));
+                    Vec::new()
+                }
+            };
+            let _ = app.emit(
+                "learn-from-hud",
+                &LearnFromHudPayload {
+                    entry_id: id,
+                    before: learn_before,
+                    after: confirmed.clone(),
+                    learned_pairs,
+                    learned_terms,
+                },
+            );
+        }
+    }
+
+    let _ = app.emit("transcription-result", &result);
+    Ok(())
+}
+
 /// Mid-pipeline skip: paste visible HUD text now, abort in-flight finalize.
 pub(crate) fn accept_requested_preview(app: AppHandle, text: String) -> Result<(), String> {
     let requested = &app
@@ -1154,7 +1358,9 @@ fn accept_floating_preview(app: AppHandle, text: String) -> Result<(), String> {
     if intention.as_deref() == Some("agent") {
         return Err("派活态请用 Enter 派发".into());
     }
-    if state != "refining" && state != "organizing" && state != "processing" {
+    // Finalization may enter editing between the hotkey snapshot and this worker.
+    // The requested snapshot is still valid; do not turn that race into a lost paste.
+    if !matches!(state.as_str(), "refining" | "organizing" | "processing" | "editing") {
         return Err("当前不在处理中间态".into());
     }
 
@@ -1684,13 +1890,14 @@ pub(crate) fn learn_from_edit(
             state
                 .inner()
                 .learn_state
-                .upsert_pair(&c.wrong, &c.right, "auto_draft", c.score);
+                .upsert_pair(&c.wrong, &c.right, "auto_draft", c.score.max(0.9));
             learned.push(LearnedPairInfo {
                 wrong: c.wrong.clone(),
                 right: c.right.clone(),
             });
         }
     }
+    let learned_terms = persist_term_candidates(&app, &candidates)?;
 
     // Update history entry user_text and learn_status
     let history_snapshot = {
@@ -1706,10 +1913,11 @@ pub(crate) fn learn_from_edit(
     };
     save_history_to_disk(&history_snapshot)?;
 
-    if !learned.is_empty() {
+    if !learned.is_empty() || !learned_terms.is_empty() {
         crate::elog::elog!(
-            "[learn] auto-extracted {} pairs from edit (entry={})",
+            "[learn] auto-extracted {} pairs + {} terms from edit (entry={})",
             learned.len(),
+            learned_terms.len(),
             entry_id
         );
     }

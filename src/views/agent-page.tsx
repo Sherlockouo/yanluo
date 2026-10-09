@@ -351,9 +351,10 @@ export function AgentPage() {
       <div className="agent-list-body">
         {agentJobs.length === 0 ? (
           <div className="agent-list-empty">
-            <div className="agent-empty-guide">
-              <ol className="agent-empty-steps">
-                <li>
+            <Reveal>
+              <div className="agent-empty-guide">
+                <ol className="agent-empty-steps">
+                  <li>
                   <span className="agent-empty-step-num">①</span>
                   <span>
                     {(() => {
@@ -375,7 +376,8 @@ export function AgentPage() {
                 <li><span className="agent-empty-step-num">③</span><span>{t("agent.emptyStep3")}</span></li>
               </ol>
               <p className="agent-empty-hint">{t("agent.emptyHint")}</p>
-            </div>
+              </div>
+            </Reveal>
           </div>
         ) : (
           <div className="agent-job-list flex flex-col pb-20">
@@ -398,21 +400,23 @@ export function AgentPage() {
         <div className="agent-composer">
           {attachments.length > 0 ? (
             <div className="agent-attach-chips">
-              {attachments.map((path) => (
-                <span key={path} className="agent-attach-chip" title={path}>
-                  <Paperclip size={11} className="shrink-0 opacity-60" />
-                  <span className="agent-attach-chip-name">
-                    {path.split("/").filter(Boolean).pop() ?? path}
+              {attachments.map((path, i) => (
+                <Reveal key={path} index={i}>
+                  <span className="agent-attach-chip" title={path}>
+                    <Paperclip size={11} className="shrink-0 opacity-60" />
+                    <span className="agent-attach-chip-name">
+                      {path.split("/").filter(Boolean).pop() ?? path}
+                    </span>
+                    <button
+                      type="button"
+                      aria-label={t("agent.remove", { path })}
+                      className="agent-attach-chip-x"
+                      onClick={() => removeAttachment(path)}
+                    >
+                      <X size={11} />
+                    </button>
                   </span>
-                  <button
-                    type="button"
-                    aria-label={t("agent.remove", { path })}
-                    className="agent-attach-chip-x"
-                    onClick={() => removeAttachment(path)}
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
+                </Reveal>
               ))}
             </div>
           ) : null}

@@ -1,6 +1,6 @@
-# Skill: 言落设置（yanluo-settings）
+# Skill: Sayi 设置（sayi-settings）
 
-用 `{kit}/bin/yanluo-config` 读写白名单字段。kit = 本文件所在目录的上一级。
+用 `{kit}/bin/sayi-config` 读写白名单字段。kit = 本文件所在目录的上一级。
 
 ## 白名单（可 set）
 
@@ -31,12 +31,12 @@
 把识别模型指到已下载目录：
 
 ```bash
-./bin/yanluo-config set asr_model_dir "$HOME/Library/Application Support/Yanluo/models/Qwen3-ASR-0.6B"
-./bin/yanluo-config set asr_model_id "Qwen3-ASR-0.6B"
+./bin/sayi-config set asr_model_dir "$HOME/Library/Application Support/Yanluo/models/Qwen3-ASR-0.6B"
+./bin/sayi-config set asr_model_id "Qwen3-ASR-0.6B"
 ```
 
 口述少切段：
 
 ```bash
-./bin/yanluo-config set vad_aggression 1
+./bin/sayi-config set vad_aggression 1
 ```

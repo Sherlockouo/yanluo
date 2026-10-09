@@ -93,8 +93,29 @@ fn ytdlp_version(program: &str, base: &[String]) -> Option<String> {
     }
 }
 
-#[tauri::command]
+/// yt-dlp presence probe spawns several Python subprocesses (~0.3s each) —
+/// cache it for a minute so every draft-page mount doesn't re-probe.
+static YTDLP_STATUS_CACHE: Mutex<Option<(std::time::Instant, YtdlpStatus)>> =
+    Mutex::new(None);
+
+/// Runs OFF the main thread (`command(async)`): the probe spawns Python
+/// subprocesses synchronously and used to freeze the whole app UI for
+/// ~0.4–2s on every draft-page mount.
+#[tauri::command(async)]
 pub(crate) fn get_ytdlp_status() -> YtdlpStatus {
+    if let Some((at, cached)) = YTDLP_STATUS_CACHE.lock().ok().and_then(|g| g.clone()) {
+        if at.elapsed() < std::time::Duration::from_secs(60) {
+            return cached;
+        }
+    }
+    let status = probe_ytdlp_status();
+    if let Ok(mut guard) = YTDLP_STATUS_CACHE.lock() {
+        *guard = Some((std::time::Instant::now(), status.clone()));
+    }
+    status
+}
+
+fn probe_ytdlp_status() -> YtdlpStatus {
     let ff_dir = ffmpeg_location_dir();
     let ffmpeg_available = ff_dir.is_some() && ffmpeg_bin().is_some();
     match look_for_ytdlp() {

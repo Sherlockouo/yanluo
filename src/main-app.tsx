@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import {
   HashRouter,
   Navigate,
@@ -43,6 +43,23 @@ function LegacyAgentJobRedirect() {
 }
 
 export function MainApp() {
+  // Warm the route chunks right after first paint — the first click on a rail
+  // item then only pays component mount, not chunk fetch + parse. Each dynamic
+  // import() dedupes with the lazy() payloads above.
+  useEffect(() => {
+    const w = window as Window & { __sayiRoutesWarm?: boolean };
+    if (w.__sayiRoutesWarm) return;
+    w.__sayiRoutesWarm = true;
+    const warm = () => {
+      void import("@/views/draft-page");
+      void import("@/views/agent-page");
+      void import("@/views/settings-page");
+      void import("@/views/overview-page");
+    };
+    const raf = requestAnimationFrame(() => requestAnimationFrame(warm));
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   return (
     <HashRouter>
       <AppProvider>

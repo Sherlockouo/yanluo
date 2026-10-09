@@ -1,6 +1,6 @@
-# Yanluo（言落）— Agent kit
+# Sayi — Agent kit
 
-本目录是言落给本机 CLI agent（Claude / Codex / Pi）用的工具包。
+本目录是 Sayi 给本机 CLI agent（Claude / Codex / Pi）用的工具包。
 改**本机设置**前先读这里，不要猜路径。
 
 ## 产品是什么
@@ -20,17 +20,17 @@
 - **用脚本改**，不要手写破坏 JSON：
 
 ```bash
-./bin/yanluo-config path          # 打印 config.json 绝对路径
-./bin/yanluo-config get           # 打印全部（脱敏）
-./bin/yanluo-config get asr_model_dir
-./bin/yanluo-config set asr_model_dir "/path/to/Qwen3-ASR-0.6B"
-./bin/yanluo-config set vad_aggression 1
+./bin/sayi-config path          # 打印 config.json 绝对路径
+./bin/sayi-config get           # 打印全部（脱敏）
+./bin/sayi-config get asr_model_dir
+./bin/sayi-config set asr_model_dir "/path/to/Qwen3-ASR-0.6B"
+./bin/sayi-config set vad_aggression 1
 ```
 
-白名单与字段说明：`skills/yanluo-settings.md`。
+白名单与字段说明：`skills/sayi-settings.md`。
 
 ## 重要
 
 - 密钥（API key、credentials）**禁止**改。
-- 改完后用户切回言落窗口会从磁盘重载；模型目录变更会尝试重新加载模型。
+- 改完后用户切回 Sayi 窗口会从磁盘重载；模型目录变更会尝试重新加载模型。
 - 录音进行中改 VAD/chunk 只影响**下一段**会话。

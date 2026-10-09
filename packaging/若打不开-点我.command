@@ -1,6 +1,6 @@
 #!/bin/bash
-# Yanluo（言落）· 清除 Gatekeeper 隔离属性（未公证包下载后可能报「已损坏」）
-# 双击本文件即可；优先 Yanluo.app，兼容 QuietType.app / 旧路径
+# Sayi · 清除 Gatekeeper 隔离属性（未公证包下载后可能报「已损坏」）
+# 双击本文件即可；优先 Sayi.app，兼容旧品牌 Yanluo.app / QuietType.app 路径
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -8,6 +8,8 @@ cd "$(dirname "$0")"
 pick_app() {
   local candidate
   for candidate in \
+    "/Applications/Sayi.app" \
+    "./Sayi.app" \
     "/Applications/Yanluo.app" \
     "./Yanluo.app" \
     "/Applications/QuietType.app" \
@@ -28,14 +30,14 @@ pick_app() {
 }
 
 echo "========================================"
-echo "  Yanluo · 修复「已损坏 / 无法打开」"
+echo "  Sayi · 修复「已损坏 / 无法打开」"
 echo "========================================"
 echo
 
 APP="$(pick_app)" || {
-  echo "未找到 Yanluo.app。"
-  echo "请先把 Yanluo 拖到「应用程序」，再双击本脚本；"
-  echo "或把本脚本放到 Yanluo.app 同一文件夹后再试。"
+  echo "未找到 Sayi.app。"
+  echo "请先把 Sayi 拖到「应用程序」，再双击本脚本；"
+  echo "或把本脚本放到 Sayi.app 同一文件夹后再试。"
   echo
   read -r -p "按回车关闭…" _
   exit 1

@@ -28,6 +28,22 @@ static void asr_speech_write_out(char *out_buf, size_t out_len, NSString *text) 
   out_buf[out_len - 1] = '\0';
 }
 
+static NSArray<NSString *> *
+asr_speech_contexts(const char *const *contexts, size_t count) {
+  NSMutableArray<NSString *> *out = [NSMutableArray arrayWithCapacity:count];
+  for (size_t i = 0; contexts && i < count; i++) {
+    if (!contexts[i]) {
+      continue;
+    }
+    NSString *value = [@(contexts[i])
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (value.length > 0) {
+      [out addObject:value];
+    }
+  }
+  return out;
+}
+
 static bool asr_speech_has_usage_description(void) {
   id value = [[NSBundle mainBundle]
       objectForInfoDictionaryKey:@"NSSpeechRecognitionUsageDescription"];
@@ -99,7 +115,7 @@ static int asr_speech_check_auth(char *err_buf, size_t err_len) {
     switch (auth) {
     case SFSpeechRecognizerAuthorizationStatusDenied:
       hint = @"denied — 系统设置 → 隐私与安全性 → 语音识别，打开 "
-             @"Yanluo";
+             @"Sayi";
       break;
     case SFSpeechRecognizerAuthorizationStatusRestricted:
       hint = @"restricted by system policy";
@@ -123,6 +139,7 @@ static int asr_speech_check_auth(char *err_buf, size_t err_len) {
 /// non-zero on failure (message in err_buf). Blocks up to 60s.
 /// Safe to call from a background Rust thread.
 int asr_speech_recognize_file(const char *path, const char *locale,
+                              const char *const *contexts, size_t context_count,
                               char *out_buf, size_t out_len, char *err_buf,
                               size_t err_len) {
   if (out_buf && out_len > 0) {
@@ -161,6 +178,7 @@ int asr_speech_recognize_file(const char *path, const char *locale,
   SFSpeechURLRecognitionRequest *request =
       [[SFSpeechURLRecognitionRequest alloc] initWithURL:audioURL];
   request.shouldReportPartialResults = YES;
+  request.contextualStrings = asr_speech_contexts(contexts, context_count);
   if (@available(macOS 13.0, *)) {
     request.addsPunctuation = YES;
   }
@@ -245,7 +263,9 @@ static void asr_speech_stream_ensure_lock(void) {
 
 /// Start live recognition. Partials invoke `cb(utf8, ctx)` on a GCD queue.
 /// Returns 0 on success.
-int asr_speech_stream_start(const char *locale, asr_speech_partial_fn cb,
+int asr_speech_stream_start(const char *locale,
+                            const char *const *contexts, size_t context_count,
+                            asr_speech_partial_fn cb,
                             void *ctx, char *err_buf, size_t err_len) {
   if (err_buf && err_len > 0) {
     err_buf[0] = '\0';
@@ -275,6 +295,7 @@ int asr_speech_stream_start(const char *locale, asr_speech_partial_fn cb,
   SFSpeechAudioBufferRecognitionRequest *request =
       [[SFSpeechAudioBufferRecognitionRequest alloc] init];
   request.shouldReportPartialResults = YES;
+  request.contextualStrings = asr_speech_contexts(contexts, context_count);
   if (@available(macOS 13.0, *)) {
     request.addsPunctuation = YES;
   }

@@ -13,12 +13,13 @@ run:
 	$(TAURI) dev
 
 ## Local install with Qwen (macOS Apple Silicon).
+## Picks the freshly built app by productName (Sayi) — never a stale bundle.
 install-local:
 	$(TAURI) build --features qwen-local
 ifeq ($(UNAME_S),Darwin)
 	node scripts/stage-mlx-metallib.mjs --bundle
 	node scripts/embed-gatekeeper-fix.mjs
-	@APP=$$(ls -d src-tauri/target/release/bundle/macos/*.app 2>/dev/null | head -1); \
+	@APP=$$(ls -dt src-tauri/target/release/bundle/macos/*.app 2>/dev/null | head -1); \
 	  if [ -n "$$APP" ]; then \
 	    node scripts/stage-mlx-metallib.mjs --app "$$APP"; \
 	    codesign --force --deep --sign - "$$APP" 2>/dev/null || true; \

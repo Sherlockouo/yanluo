@@ -1,11 +1,11 @@
-import { Fragment, useMemo, useState } from "react";
-import { NavLink } from "react-router-dom";
+import { Fragment, useDeferredValue, useMemo, useState } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { PageShell } from "@/components/shared/page-shell";
+import { PageShell, Reveal } from "@/components/shared/page-shell";
 import { WordCloud } from "@/components/home/word-cloud";
-import { duration, easeOut, springUI } from "@/lib/motion";
+import { duration, easeOut } from "@/lib/motion";
 import {
-  aggregateWordFreq,
+  aggregateAllSources,
   CLOUD_SOURCES,
   type CloudSource,
 } from "@/lib/word-freq";
@@ -26,14 +26,18 @@ function readCloudSource(): CloudSource {
 
 export function OverviewPage() {
   const t = useT();
+  const navigate = useNavigate();
   const { config, modelLoaded, agentJobs, history } = useApp();
   const [cloudSource, setCloudSource] = useState<CloudSource>(readCloudSource);
   const reduceMotion = useReducedMotion();
 
-  const cloudWords = useMemo(
-    () => aggregateWordFreq(history, cloudSource, 40),
-    [history, cloudSource],
-  );
+  // All sources aggregated in ONE pass per history change — tab switches reuse
+  // the cache instead of re-tokenizing the full history on the click frame.
+  const clouds = useMemo(() => aggregateAllSources(history, 40), [history]);
+  // Tab highlight is instant (cloudSource); the cloud swap is deferred so the
+  // press feedback never waits on pack/layout work.
+  const deferredSource = useDeferredValue(cloudSource);
+  const cloudWords = clouds[deferredSource] ?? [];
 
   const setSource = (id: CloudSource) => {
     setCloudSource(id);
@@ -67,15 +71,13 @@ export function OverviewPage() {
 
   return (
     <PageShell className="page-fill mx-0 max-w-[1080px] gap-0 pb-0">
-      <span className="home-eyebrow">{t("home.eyebrow")}</span>
-      <h1 className="home-headline mt-3.5">{t("home.headline")}</h1>
+      <Reveal index={0}>
+        <span className="home-eyebrow">{t("home.eyebrow")}</span>
+        <h1 className="home-headline mt-3.5">{t("home.headline")}</h1>
+      </Reveal>
 
       <div className="mt-9 grid gap-3.5 sm:grid-cols-2">
-        <motion.div
-          initial={reduceMotion ? false : { opacity: 0.92, y: 14, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={springUI}
-        >
+        <Reveal index={1} className="h-full">
           <NavLink
             to={needsInstall ? "#" : "/draft"}
             className={`dest-card dest-card-primary card-press h-full${needsInstall ? " pointer-events-auto" : ""}`}
@@ -90,26 +92,36 @@ export function OverviewPage() {
                 {t("home.draftHintB")}
               </div>
               {needsInstall ? (
-                <NavLink
-                  to="/settings?tab=asr"
-                  className="mt-2 inline-block font-mono text-xs text-muted chip-press transition-colors hover:text-foreground"
-                  onClick={(e) => e.stopPropagation()}
+                // span, not NavLink — nested <a> inside the card's <a> is invalid
+                // HTML and swallows the click on some engines.
+                <span
+                  role="link"
+                  tabIndex={0}
+                  className="mt-2 inline-block cursor-pointer font-mono text-xs text-muted chip-press transition-colors hover:text-foreground"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    navigate("/settings?tab=asr");
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      navigate("/settings?tab=asr");
+                    }
+                  }}
                 >
                   {t("home.modelNotReady")}
-                </NavLink>
+                </span>
               ) : null}
             </div>
             <div className="dest-foot">
               <span className="kbd-key">{draftKey}</span>
             </div>
           </NavLink>
-        </motion.div>
+        </Reveal>
 
-        <motion.div
-          initial={reduceMotion ? false : { opacity: 0.92, y: 14, scale: 0.98 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ ...springUI, delay: 0.05 }}
-        >
+        <Reveal index={2} className="h-full">
           <NavLink to="/dispatch" className="dest-card card-press h-full">
             <div>
               <div className="dest-label">{t("home.dispatchCard")}</div>
@@ -123,10 +135,10 @@ export function OverviewPage() {
               <span className="kbd-key">{agentKey}</span>
             </div>
           </NavLink>
-        </motion.div>
+        </Reveal>
       </div>
 
-      <div className="home-cloud">
+      <Reveal index={3} className="home-cloud">
         <div className="home-cloud-head">
           <span className="home-cloud-label">{t("home.wordCloud")}</span>
           <div className="tswitch" role="tablist" aria-label={t("home.cloudSourceAria")}>
@@ -151,25 +163,16 @@ export function OverviewPage() {
           </div>
         </div>
         <motion.div
-          key={cloudSource}
-          initial={reduceMotion ? false : { opacity: 0.96 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.14, ease: easeOut }}
+          key={deferredSource}
+          initial={reduceMotion ? false : { opacity: 0.96, y: 4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: duration.fast, ease: easeOut }}
         >
           <WordCloud words={cloudWords} />
         </motion.div>
-      </div>
+      </Reveal>
 
-      <motion.div
-        className="home-legend mt-auto pt-10"
-        initial={reduceMotion ? false : { opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{
-          duration: duration.fast,
-          ease: easeOut,
-          delay: reduceMotion ? 0 : 0.06,
-        }}
-      >
+      <Reveal index={4} className="home-legend mt-auto pt-10">
         <span>
           <b>{draftKey}</b> {t("home.draftCard")}
         </span>
@@ -180,7 +183,7 @@ export function OverviewPage() {
           <b>{agentKey}</b> {t("home.dispatchCard")}
         </span>
         <span>{t("home.privacyNote")}</span>
-      </motion.div>
+      </Reveal>
     </PageShell>
   );
 }

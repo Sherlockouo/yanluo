@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { motion, useReducedMotion } from "framer-motion";
 import { ListBox } from "@heroui/react";
 import { FolderOpen, Plus } from "lucide-react";
 import type { AgentKind, AgentProfile, AppConfig } from "@/types";
 import { defaultConfig } from "@/lib/constants";
+import { springUI } from "@/lib/motion";
 
 function applyHudTheme(theme: "light" | "dark") {
   const root = document.documentElement;
@@ -151,6 +153,8 @@ export function AsrHudAgentMenu() {
     void invoke("set_agent_picker", { mode: "", itemCount: 1 }).catch(() => {});
   }, []);
 
+  const reducedMotion = useReducedMotion();
+
   const pickProfile = useCallback(
     (id: string) => {
       const p = agentItems.find((x) => x.id === id);
@@ -216,6 +220,18 @@ export function AsrHudAgentMenu() {
 
   return (
     <div className="hud-agent-menu-root" data-no-drag>
+      {/* Pop anchored near the pill below; key={mode} re-pops on agent↔cwd swap.
+          Enter-only — the window closes natively, no exit needed. */}
+      <motion.div
+        key={mode}
+        className="hud-agent-menu-pop"
+        style={{ transformOrigin: "bottom left" }}
+        initial={
+          reducedMotion ? { opacity: 0.92 } : { opacity: 0.92, y: 4, scale: 0.98 }
+        }
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={reducedMotion ? { duration: 0.12 } : springUI}
+      >
       <div className="hud-agent-menu-ext">
         {mode === "agent" ? (
           <ListBox
@@ -279,6 +295,7 @@ export function AsrHudAgentMenu() {
           </ListBox>
         ) : null}
       </div>
+      </motion.div>
     </div>
   );
 }

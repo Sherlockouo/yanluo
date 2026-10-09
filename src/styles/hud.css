@@ -43,6 +43,87 @@
   padding-bottom: 4px;
 }
 
+/* Live edit in the bar: same capsule footprint, modest anchored growth —
+   the stream never leaves view and recognition keeps running. */
+.hud-capsule.hud-capsule-live-edit {
+  height: 100%;
+  align-items: stretch;
+  border-radius: 18px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.hud-capsule.hud-capsule-live-edit .hud-inner {
+  align-items: flex-start;
+  gap: 10px;
+  padding-top: 3px;
+}
+
+/* Bars keep pulsing (still recording) — optically align to first text line. */
+.hud-capsule-live-edit .hud-live-bars {
+  margin-top: 6px;
+}
+
+/* Editor matches the strip's ink exactly — the text simply becomes editable. */
+.hud-capsule-live-edit .hud-live-edit-input {
+  min-height: 20px;
+  max-height: 58px;
+  padding: 1px 2px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0;
+  font-family:
+    var(--font-sans), "PingFang SC", "Hiragino Sans GB", "Helvetica Neue",
+    -apple-system, sans-serif;
+  color: rgba(255, 255, 255, 0.92);
+  background: transparent;
+  border: 0;
+  outline: none !important;
+  box-shadow: none !important;
+  resize: none;
+  overflow-y: auto;
+  field-sizing: content;
+}
+
+.hud-capsule-live-edit .hud-live-edit-input::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+html.light[data-floating="1"] .hud-capsule-live-edit .hud-live-edit-input {
+  color: rgba(16, 16, 18, 0.92);
+}
+
+html.light[data-floating="1"]
+  .hud-capsule-live-edit
+  .hud-live-edit-input::placeholder {
+  color: rgba(16, 16, 18, 0.38);
+}
+
+/* Return/confirm hint — shows only while no hypothesis ghost occupies the line. */
+.hud-live-edit-hint {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 3px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.38);
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+html.light[data-floating="1"] .hud-live-edit-hint {
+  color: rgba(16, 16, 18, 0.36);
+}
+
+/* Timer rides along during live edit (top-right, aligned to first line). */
+.hud-capsule-live-edit .hud-rec-timer {
+  margin-top: 4px;
+}
+
+
 .hud-drag-handle {
   cursor: grab;
   flex-shrink: 0;
@@ -219,6 +300,7 @@ html.light[data-floating="1"] .hud-agent-menu {
   padding: 5px 8px;
   border: 0;
   border-radius: 10px;
+  outline: none;
   background: transparent;
   color: inherit;
   font-size: 12px;
@@ -469,6 +551,22 @@ html.light[data-floating="1"] .hud-agent-send:hover:not(:disabled):not([aria-dis
   app-region: no-drag;
 }
 
+/* Hover/selection feedback — color-only transitions are vestibular-safe, so
+   they run for everyone; transform press states below stay motion-guarded. */
+.hud-agent-pill,
+.hud-agent-icon-btn,
+.hud-agent-send,
+.hud-agent-chip,
+.hud-agent-chip-x,
+.hud-lang-chip,
+.hud-lang-option,
+.hud-agent-menu-item {
+  transition:
+    background-color 100ms ease-out,
+    color 100ms ease-out,
+    opacity 100ms ease-out;
+}
+
 /* Press feedback: buttons 0.97 / chip 0.96, 100ms ease-out, reduced-motion guarded */
 @media (prefers-reduced-motion: no-preference) {
   .hud-agent-pill,
@@ -476,8 +574,14 @@ html.light[data-floating="1"] .hud-agent-send:hover:not(:disabled):not([aria-dis
   .hud-agent-send,
   .hud-agent-chip,
   .hud-agent-chip-x,
-  .hud-lang-chip {
-    transition: transform 100ms ease-out;
+  .hud-lang-chip,
+  .hud-lang-option,
+  .hud-agent-menu-item {
+    transition:
+      transform 100ms ease-out,
+      background-color 100ms ease-out,
+      color 100ms ease-out,
+      opacity 100ms ease-out;
   }
 
   .hud-agent-pill:active {
@@ -493,6 +597,11 @@ html.light[data-floating="1"] .hud-agent-send:hover:not(:disabled):not([aria-dis
   .hud-agent-chip:active,
   .hud-lang-chip:active:not(:disabled):not([aria-disabled="true"]):not([data-disabled="true"]) {
     transform: scale(0.96);
+  }
+
+  .hud-lang-option:active,
+  .hud-agent-menu-item:active {
+    transform: scale(0.98);
   }
 }
 
@@ -1197,22 +1306,174 @@ html.light[data-floating="1"] .hud-spinner {
   }
 }
 
-/* B8: Audio bars flow-in on capsule appear (translateX -8→0, delay 0.12s) */
+/* B8: Audio bars flow-in on capsule appear (translateX -4→0, delay 0.06s) */
 @media (prefers-reduced-motion: no-preference) {
   .hud-live-bars {
-    animation: hud-bars-flow-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both;
+    animation: hud-bars-flow-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) 0.06s backwards;
   }
 }
 
 @keyframes hud-bars-flow-in {
   from {
-    opacity: 0;
-    transform: translateX(-8px);
+    opacity: 0.92;
+    transform: translateX(-4px);
   }
   to {
     opacity: 1;
     transform: translateX(0);
   }
+}
+
+/* —— State-swap mount motion ————————————————————————————————————————
+   idle → recording → processing → result content swaps. Enter-only,
+   opacity ≥ 0.92, transform + opacity only, ≤160ms, compositor-driven.
+   `backwards` fill (not `both`) so completed mounts never override the
+   interactive transform transitions (press scale, chevron rotate). */
+@keyframes hud-slot-in {
+  from {
+    opacity: 0.92;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hud-opacity-in {
+  from {
+    opacity: 0.92;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes hud-menu-pop {
+  from {
+    opacity: 0.92;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes hud-menu-item-in {
+  from {
+    opacity: 0.92;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Left-slot / status mounts: brand bars, rec timer, edit actions, new chip */
+  .hud-brand-bars,
+  .hud-rec-timer,
+  .hud-edit-actions,
+  .hud-agent-attach-chip {
+    animation: hud-slot-in 0.14s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+
+  /* Spinner owns its spin transform — mount fade is opacity-only */
+  .hud-spinner {
+    animation:
+      hud-spin 0.7s linear infinite,
+      hud-opacity-in 0.14s ease-out backwards;
+  }
+
+  .hud-stage-overlay,
+  .hud-live-ghost,
+  .hud-auto-submit-hint,
+  .hud-agent-hint,
+  .hud-edit-input,
+  .hud-agent-input,
+  .hud-capsule [role="alert"] {
+    animation: hud-opacity-in 0.14s ease-out backwards;
+  }
+
+  /* Agent capsule meter: same flow-in as the fn capsule, no delay (dense row) */
+  .hud-agent-main .audio-bars {
+    animation: hud-bars-flow-in 0.16s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+
+  /* Lang menu pop (option stagger delay is inline via revealDelay) */
+  .hud-lang-menu {
+    transform-origin: bottom left;
+    animation: hud-menu-pop 0.16s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+
+  .hud-lang-option,
+  .hud-agent-menu-item {
+    animation: hud-menu-item-in 0.14s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  }
+
+  /* Agent/cwd picker stagger — mirrors revealDelay (40ms steps, capped) */
+  .hud-agent-menu-root .hud-agent-menu-item:nth-child(2) {
+    animation-delay: 40ms;
+  }
+  .hud-agent-menu-root .hud-agent-menu-item:nth-child(3) {
+    animation-delay: 80ms;
+  }
+  .hud-agent-menu-root .hud-agent-menu-item:nth-child(n + 4) {
+    animation-delay: 120ms;
+  }
+
+  /* Lang chip chevron rotate */
+  .hud-lang-chip svg {
+    transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+/* Agent-menu pop wrapper (framer springUI) keeps the ext panel sized */
+.hud-agent-menu-pop {
+  width: 100%;
+  height: 100%;
+  will-change: transform, opacity;
+}
+
+/* —— Keyboard-focus visibility on floating surfaces —— */
+.hud-lang-option {
+  outline: none;
+}
+
+.hud-lang-option:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 1.5px var(--accent, #c4784a);
+}
+
+html.light[data-floating-lang="1"] .hud-lang-option:focus-visible {
+  background: rgba(20, 20, 22, 0.1);
+}
+
+.hud-agent-menu-item[data-focused="true"] {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+html.light[data-floating="1"] .hud-agent-menu-item[data-focused="true"] {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.hud-agent-menu-item[data-focus-visible="true"] {
+  box-shadow: inset 0 0 0 1.5px var(--accent, #c4784a);
+}
+
+.hud-lang-chip[data-focus-visible="true"],
+.hud-agent-pill[data-focus-visible="true"],
+.hud-agent-icon-btn[data-focus-visible="true"],
+.hud-agent-send[data-focus-visible="true"],
+.hud-edit-btn:focus-visible {
+  box-shadow: 0 0 0 1.5px var(--accent, #c4784a);
+}
+
+/* Selected language reads a notch louder inside the list */
+.hud-lang-option.is-selected .hud-lang-option-label {
+  font-weight: 600;
 }
 
 /* B1: "正在听" muted breathing hint */
@@ -1231,10 +1492,12 @@ html.light[data-floating="1"] .hud-listen-hint {
   50% { opacity: 0.85; }
 }
 
-/* B1: First text appears → opacity 0.7→1 transition */
+/* B1: First text appears → opacity 0.7→1 transition; refining blur eases in/out */
 @media (prefers-reduced-motion: no-preference) {
   .hud-text-scroll {
-    transition: opacity 0.14s ease-out;
+    transition:
+      opacity 0.14s ease-out,
+      filter 0.16s ease-out;
   }
 }
 
@@ -1400,7 +1663,11 @@ html.light[data-floating="1"] .hud-edit-badge {
   border: 0;
   border-radius: 8px;
   cursor: pointer;
-  transition: transform 100ms ease-out;
+  transition:
+    transform 100ms ease-out,
+    background-color 100ms ease-out,
+    color 100ms ease-out,
+    opacity 100ms ease-out;
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
@@ -1444,19 +1711,6 @@ html.light[data-floating="1"] .hud-edit-btn-cancel:hover:not(:disabled) {
   }
 }
 
-/* P0-10: Refine failed hint */
-.hud-refine-failed-hint {
-  font-size: 10px;
-  font-weight: 500;
-  color: var(--warning, #A66C12);
-  opacity: 0.85;
-  white-space: nowrap;
-}
-
-html.light[data-floating="1"] .hud-refine-failed-hint {
-  color: var(--warning, #A66C12);
-}
-
 /* P1-13: 80s warning shake */
 @keyframes hud-warn-shake {
   0% { transform: scale(1); }
@@ -1484,6 +1738,27 @@ html.light[data-floating="1"] .hud-refine-failed-hint {
   .hud-rec-timer-blink {
     animation: none;
   }
+}
+
+/* Live edit: in-flight hypothesis ghosted under the editor — it commits into
+   the textarea automatically; shown dimmed so the user sees speech still lands
+   while they edit. */
+.hud-live-ghost {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 2px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.42);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+html.light[data-floating="1"] .hud-live-ghost {
+  color: rgba(16, 16, 18, 0.38);
 }
 
 /* P1-13: Auto-submit hint */

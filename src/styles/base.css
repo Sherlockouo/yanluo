@@ -64,7 +64,7 @@
   color: var(--foreground);
 }
 
-/* Primary CTA press — compositor only */
+/* —— Press rungs — pointer-down, not release. Text tabs stay opacity-only (no glyph jitter). —— */
 .btn-press {
   transition:
     transform 100ms ease-out,
@@ -74,10 +74,40 @@
   transform: scale(0.97);
   opacity: 0.92;
 }
+.card-press {
+  transition: transform 100ms ease-out;
+}
+.card-press:active {
+  transform: scale(0.985);
+}
+.row-press {
+  transition: transform 100ms ease-out;
+}
+.row-press:active {
+  transform: scale(0.99);
+}
+.chip-press {
+  transition: transform 100ms ease-out;
+}
+.chip-press:active {
+  transform: scale(0.96);
+}
+.dropzone:active {
+  transform: scale(0.985);
+  transition: transform 100ms ease-out;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .btn-press,
-  .btn-press:active {
+  .btn-press:active,
+  .card-press,
+  .card-press:active,
+  .row-press,
+  .row-press:active,
+  .chip-press,
+  .chip-press:active,
+  .dropzone,
+  .dropzone:active {
     transform: none;
     transition: none;
   }
@@ -94,6 +124,7 @@
     transition:
       transform 100ms ease-out,
       background-color 100ms ease-out,
+      color 100ms ease-out,
       box-shadow 100ms ease-out;
   }
 
@@ -131,4 +162,34 @@ select:focus-visible,
 .textarea:focus-visible {
   outline: 2px solid color-mix(in oklab, var(--accent) 45%, transparent);
   outline-offset: 1px;
+}
+
+/* Text selection — on-brand accent wash, readable in both themes */
+::selection {
+  background: color-mix(in oklab, var(--accent) 26%, transparent);
+  color: var(--foreground);
+}
+
+/* Caret follows the accent */
+input,
+textarea,
+[contenteditable="true"] {
+  caret-color: var(--accent);
+}
+
+/*
+  Focus-visible fallback — :where() keeps this at zero specificity so any
+  component-level ring (HeroUI, .setnav-item, .qsel) always wins.
+*/
+:where(
+  a,
+  button,
+  [role="button"],
+  [role="tab"],
+  [role="switch"],
+  [role="checkbox"],
+  summary
+):focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent) 55%, transparent);
+  outline-offset: 2px;
 }

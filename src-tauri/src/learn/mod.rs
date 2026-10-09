@@ -202,7 +202,7 @@ impl LearnState {
         };
         kb.pairs
             .iter()
-            .filter(|p| p.enabled && p.occurrence_count >= 2 && p.confidence >= 0.6)
+            .filter(|p| deterministic_pair_enabled(p))
             .map(|p| (p.wrong.clone(), p.right.clone()))
             .collect()
     }
@@ -292,6 +292,14 @@ impl LearnState {
         }
         save_knowledge_to_disk(&kb)
     }
+}
+
+fn deterministic_pair_enabled(pair: &CorrectionPair) -> bool {
+    let explicitly_confirmed =
+        matches!(pair.source.as_str(), "auto_hud" | "auto_draft" | "manual");
+    pair.enabled
+        && pair.confidence >= 0.6
+        && (pair.occurrence_count >= 2 || explicitly_confirmed)
 }
 
 // ---------------------------------------------------------------------------
@@ -548,6 +556,25 @@ mod tests {
         // Partial overlap
         let score = bigram_overlap("配森", "我用配森写代码");
         assert!(score > 0.0);
+    }
+
+    #[test]
+    fn one_explicit_correction_activates_but_one_auto_pair_does_not() {
+        let pair = |source: &str| CorrectionPair {
+            id: source.into(),
+            wrong: "配森".into(),
+            right: "Python".into(),
+            source: source.into(),
+            confidence: 0.9,
+            occurrence_count: 1,
+            hit_count: 0,
+            enabled: true,
+            created_at: String::new(),
+            last_seen_at: String::new(),
+        };
+        assert!(deterministic_pair_enabled(&pair("auto_hud")));
+        assert!(deterministic_pair_enabled(&pair("auto_draft")));
+        assert!(!deterministic_pair_enabled(&pair("ai_distill")));
     }
 
     #[test]

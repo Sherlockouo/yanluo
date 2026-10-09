@@ -29,7 +29,7 @@ function MenuItem({
   return (
     <button
       type="button"
-      className="flex w-full items-center px-3 py-2 text-left text-[13px] text-foreground transition-colors hover:bg-surface-secondary"
+      className="flex w-full cursor-pointer items-center px-3 py-2 text-left text-[13px] text-foreground transition-colors hover:bg-surface-secondary active:bg-default"
       onClick={onPress}
     >
       {label}
@@ -75,6 +75,8 @@ export function TranscriptExportMenu({
       <Button
         size="sm"
         variant="secondary"
+        aria-haspopup="menu"
+        aria-expanded={open}
         onPress={() => setOpen((v) => !v)}
       >
         <TriggerIcon size={14} aria-hidden />
@@ -90,7 +92,7 @@ export function TranscriptExportMenu({
             />
             <motion.div
               initial={
-                reducedMotion ? { opacity: 1 } : { opacity: 0, scale: 0.96, y: 4 }
+                reducedMotion ? { opacity: 1 } : { opacity: 0.92, scale: 0.96, y: 4 }
               }
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={

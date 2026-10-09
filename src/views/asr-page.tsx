@@ -119,7 +119,7 @@ export function AsrPage({
           </span>
           <span className="dropzone-t">还没有稿</span>
           <span className="dropzone-fmt">
-            {config.hotkey_transcribe.label} 开口出稿
+            {config.hotkey_transcribe.label} 开口成文
           </span>
         </div>
       ) : (

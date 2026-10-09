@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Yanluo whitelist config helper for agent CLIs. Edits sibling ../config.json."""
+"""Sayi whitelist config helper for agent CLIs. Edits sibling ../config.json."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def kit_dir() -> Path:
 
 
 def config_path() -> Path:
-    env = os.environ.get("YANLUO_CONFIG")
+    env = os.environ.get("SAYI_CONFIG") or os.environ.get("YANLUO_CONFIG")
     if env:
         return Path(env)
     return kit_dir().parent / "config.json"
@@ -126,9 +126,9 @@ def main(argv: list[str]) -> None:
     if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
         print(
             "usage:\n"
-            "  yanluo-config path\n"
-            "  yanluo-config get [key]\n"
-            "  yanluo-config set <key> <value>",
+            "  sayi-config path\n"
+            "  sayi-config get [key]\n"
+            "  sayi-config set <key> <value>",
             file=sys.stderr,
         )
         sys.exit(0 if len(argv) > 1 else 1)
@@ -139,7 +139,7 @@ def main(argv: list[str]) -> None:
         cmd_get(argv[2] if len(argv) > 2 else None)
     elif cmd == "set":
         if len(argv) < 4:
-            print("usage: yanluo-config set <key> <value>", file=sys.stderr)
+            print("usage: sayi-config set <key> <value>", file=sys.stderr)
             sys.exit(1)
         cmd_set(argv[2], argv[3])
     else:

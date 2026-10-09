@@ -18,7 +18,7 @@ export const history: Record<string, string> = {
   "history.clearAll": "Clear all",
   "history.clearedAll": "History cleared",
   "history.emptyTitle": "No drafts yet",
-  "history.emptyHint": "Drafts and translations will appear here",
+  "history.emptyHint": "Dictations and translations will appear here",
   "history.searchAria": "Search history",
   "history.searchPlaceholder": "Search titles or content…",
   "history.noMatch": "No matching drafts",

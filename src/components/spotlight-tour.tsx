@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
@@ -123,6 +123,7 @@ export function SpotlightTour() {
   const [active, setActive] = useState(false);
   const [index, setIndex] = useState(0);
   const [hole, setHole] = useState<Hole | null>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
 
   const finish = useCallback(() => {
     markTourDone();
@@ -131,6 +132,23 @@ export function SpotlightTour() {
     setIndex(0);
     setHole(null);
   }, []);
+
+  // Escape skips the tour; keep it on window so the tip need not be focused.
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") finish();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, finish]);
+
+  // Move keyboard focus to the step card on each step change.
+  useEffect(() => {
+    if (!active) return;
+    const id = window.requestAnimationFrame(() => tipRef.current?.focus());
+    return () => window.cancelAnimationFrame(id);
+  }, [active, index]);
 
   const start = useCallback(() => {
     unlockSfx();
@@ -223,7 +241,8 @@ export function SpotlightTour() {
         top: Math.min(window.innerHeight - 140, hole.top + hole.height + 12),
         left: Math.min(window.innerWidth - 320, Math.max(16, hole.left)),
       }
-    : { top: "40%", left: "50%", transform: "translateX(-50%)" };
+    : // Margin, not transform: framer-motion owns transform while animating.
+      { top: "40%", left: "50%", marginLeft: -150 };
 
   return createPortal(
     <AnimatePresence>
@@ -252,11 +271,13 @@ export function SpotlightTour() {
 
         <motion.div
           key={step.id}
-          className="spotlight-tip"
+          ref={tipRef}
+          tabIndex={-1}
+          className="spotlight-tip outline-none"
           style={tipStyle}
-          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: reduce ? 0.1 : duration.fast, ease: easeOut }}
+          initial={reduce ? { opacity: 1 } : { opacity: 0.92, y: 6, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: reduce ? 0 : duration.fast, ease: easeOut }}
           role="dialog"
           aria-label={t(step.titleKey)}
         >
@@ -266,7 +287,11 @@ export function SpotlightTour() {
           <div className="spotlight-tip-title">{t(step.titleKey)}</div>
           <p className="spotlight-tip-body">{t(step.bodyKey)}</p>
           <div className="spotlight-tip-actions">
-            <button type="button" className="spotlight-skip" onClick={finish}>
+            <button
+              type="button"
+              className="spotlight-skip rounded transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent/60"
+              onClick={finish}
+            >
               {t("common.tour.skip")}
             </button>
             <Button variant="primary" className="btn-press" onPress={next}>

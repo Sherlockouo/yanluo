@@ -109,6 +109,32 @@ export function DraftPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Pre-mount every keep-alive panel when the main thread is IDLE so the first
+  // click on any tab is a visibility flip instead of mount + IPC + list render.
+  // (Fixed 350ms timers used to fire three hidden heavy mounts right into the
+  // post-enter interaction window — felt as the page-enter hitch.) Panels
+  // mount hidden (`hidden` = display:none), so this costs no layout, and the
+  // one-shot panel enter (enteredModes) still plays on first ACTIVATION.
+  useEffect(() => {
+    if (visited.size >= MODES.length) return;
+    const cancels = MODES.filter((id) => !visited.has(id)).map((id, i) => {
+      const mount = () =>
+        startTransition(() => {
+          setVisited((v) => (v.has(id) ? v : new Set(v).add(id)));
+        });
+      if (typeof window.requestIdleCallback === "function") {
+        const handle = window.requestIdleCallback(mount, {
+          timeout: 2000 + i * 800,
+        });
+        return () => window.cancelIdleCallback(handle);
+      }
+      // No requestIdleCallback (WKWebView) — push well past the enter window.
+      const timer = window.setTimeout(mount, 700 + i * 450);
+      return () => window.clearTimeout(timer);
+    });
+    return () => cancels.forEach((cancel) => cancel());
+  }, [visited]);
+
   useEffect(() => {
     if (enteredModes.has(mode)) return;
     const t = window.setTimeout(() => {
@@ -180,7 +206,28 @@ export function DraftPage() {
         </div>
         <div className="dmast-row">
           <h1 className="dmast-title">{t("draft.title")}</h1>
-          <nav className="dmodes" role="tablist" aria-label={t("draft.modesAria")}>
+          <nav
+            className="dmodes"
+            role="tablist"
+            aria-label={t("draft.modesAria")}
+            aria-orientation="horizontal"
+            onKeyDown={(e) => {
+              // ARIA tab pattern: ←/→ move between modes, Home/End jump.
+              const i = MODES.indexOf(mode);
+              let next: DraftMode | null = null;
+              if (e.key === "ArrowRight") next = MODES[(i + 1) % MODES.length]!;
+              else if (e.key === "ArrowLeft")
+                next = MODES[(i - 1 + MODES.length) % MODES.length]!;
+              else if (e.key === "Home") next = MODES[0]!;
+              else if (e.key === "End") next = MODES[MODES.length - 1]!;
+              if (!next) return;
+              e.preventDefault();
+              selectMode(next);
+              e.currentTarget
+                .querySelector<HTMLButtonElement>(`[data-mode="${next}"]`)
+                ?.focus();
+            }}
+          >
             {MODES.map((id) => {
               const active = mode === id;
               return (
@@ -188,7 +235,9 @@ export function DraftPage() {
                   key={id}
                   type="button"
                   role="tab"
+                  data-mode={id}
                   aria-selected={active}
+                  tabIndex={active ? 0 : -1}
                   className={cn("dmode", active && "is-active")}
                   onClick={() => selectMode(id)}
                 >

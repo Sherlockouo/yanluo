@@ -18,7 +18,7 @@ fn main() {
             .flag("-fmodules")
             .compile("macos_native");
 
-        // Best-effort for `tauri:dev:local` / bare `target/*/yanluo`.
+        // Best-effort for `tauri:dev:local` / bare `target/*/sayi`.
         // Release packaging relies on `beforeBundleCommand` (runs after cargo).
         match stage_mlx_metallib() {
             Ok(dest) => println!("cargo:warning=staged mlx.metallib → {}", dest.display()),

@@ -6,8 +6,8 @@ export const agent: Record<string, string> = {
   "agent.status.error": "Failed",
   "agent.status.cancelled": "Cancelled",
   // Page header
-  "agent.pageKicker": "Dispatch · agent jobs",
-  "agent.pageTitle": "Dispatch",
+  "agent.pageKicker": "Agents · agent jobs",
+  "agent.pageTitle": "Agents",
   "agent.capabilities": "Capabilities",
   // Empty state
   "agent.emptyStep1": "Press {hotkey} to speak",
@@ -32,12 +32,12 @@ export const agent: Record<string, string> = {
   "agent.remove": "Remove {path}",
   // Job detail page
   "agent.task": "Task",
-  "agent.backToList": "← Dispatch",
+  "agent.backToList": "← Agents",
   "agent.backList": "Back to list",
   "agent.notFound": "Task not found",
   "agent.notFoundDesc": "May have been deleted.",
   "agent.conversation": "Conversation",
-  "agent.chatEmpty": "Dispatch",
+  "agent.chatEmpty": "Start a task",
   "agent.chatActiveHint": "Replies will appear here",
   "agent.chatIdleHint": "No conversation yet",
   "agent.olderMessages": "↑ {n} older messages",

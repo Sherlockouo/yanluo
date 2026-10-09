@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -122,6 +122,23 @@ fn hud_native_up() -> &'static AtomicBool {
     &UP
 }
 
+/// Last value applied to `set_floating_hud_keyable`. makeKeyAndOrderFront per
+/// status tick churns key-window state on the main thread and can interrupt a
+/// window drag — apply only when the desired keyable-ness flips.
+fn floating_keyable_up() -> &'static AtomicBool {
+    static UP: AtomicBool = AtomicBool::new(false);
+    &UP
+}
+
+/// Apply keyable only on change. Callers that force keyable outside this gate
+/// (e.g. `restore_floating_interaction`) must keep the flag consistent — they
+/// compute the same value, so no desync.
+pub(crate) fn apply_floating_keyable(app: &AppHandle, keyable: bool) {
+    if floating_keyable_up().swap(keyable, Ordering::AcqRel) != keyable {
+        crate::platform::set_floating_hud_keyable(app, keyable);
+    }
+}
+
 /// Called inside the paste main-thread callback. No animation, dispatch, focus
 /// restoration or disk I/O here: Cmd+V follows immediately in the same callback.
 pub(crate) fn hide_floating_before_paste(app: &AppHandle) -> Result<(), String> {
@@ -135,6 +152,10 @@ pub(crate) fn hide_floating_before_paste(app: &AppHandle) -> Result<(), String> 
     }
     bump_floating_fade_gen();
     hud_native_up().store(false, Ordering::Release);
+    // Restore the non-activating mask before paste steals the window — the
+    // queued main-thread task runs right after this callback. Diff-gated so a
+    // non-keyable session doesn't redundantly mutate the styleMask.
+    apply_floating_keyable(app, false);
     for label in ["floating", "floating-lang", "floating-agent-menu"] {
         let Some(window) = app.get_webview_window(label) else { continue };
         #[cfg(target_os = "macos")]
@@ -176,13 +197,17 @@ pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
                     // Invalidate any dismiss fade so re-summon isn't stuck at alpha 0.
                     let _ = crate::platform::bump_floating_fade_gen();
                     // Do NOT toggle Accessory/Regular here — that steals focus and
-                    // makes Fn/cancel "jump back" to Yanluo. HUD was created
+                    // makes Fn/cancel "jump back" to Sayi. HUD was created
                     // under Accessory once at launch so FullScreenAuxiliary sticks.
-                    remember_frontmost_app();
-                    // Place only on hide→show. Mid-session emits (RMS / state) must
-                    // not re-resolve — that snaps HUD away from drag / resize anchor.
+                    // Everything below (remember-frontmost, place, raise, chip
+                    // sync) runs only on the hide→show transition. Mid-session
+                    // emits (RMS / state / per-partial translate) must not
+                    // re-resolve, re-order or re-key the window — orderFront /
+                    // makeKey churn on the main thread stutters or breaks an
+                    // in-flight drag (HUD lags the cursor).
                     let need_place = !hud_native_up().swap(true, Ordering::AcqRel);
                     if need_place {
+                        remember_frontmost_app();
                         let width = window
                             .inner_size()
                             .ok()
@@ -199,23 +224,23 @@ pub(crate) fn set_floating_window_visible(app: &AppHandle, visible: bool) {
                         crate::elog::elog!(
                             "[floating] place at logical ({x:.0}, {y:.0})"
                         );
-                    }
-                    let _ = window.set_always_on_top(true);
-                    // Prefer orderFrontRegardless over Tauri show()/set_focus —
-                    // those activate the app and steal keyboard focus.
-                    #[cfg(target_os = "macos")]
-                    {
-                        raise_floating_hud_level(&window, true);
-                        crate::elog::elog!("[floating] orderFront (HUD natively visible)");
-                    }
-                    #[cfg(not(target_os = "macos"))]
-                    match window.show() {
-                        Ok(()) => {}
-                        Err(e) => {
-                            crate::elog::elog!("[floating] show() failed: {e}")
+                        let _ = window.set_always_on_top(true);
+                        // Prefer orderFrontRegardless over Tauri show()/set_focus —
+                        // those activate the app and steal keyboard focus.
+                        #[cfg(target_os = "macos")]
+                        {
+                            raise_floating_hud_level(&window, true);
+                            crate::elog::elog!("[floating] orderFront (HUD natively visible)");
                         }
+                        #[cfg(not(target_os = "macos"))]
+                        match window.show() {
+                            Ok(()) => {}
+                            Err(e) => {
+                                crate::elog::elog!("[floating] show() failed: {e}")
+                            }
+                        }
+                        sync_floating_lang_chip(&app, show_lang);
                     }
-                    sync_floating_lang_chip(&app, show_lang);
                 } else {
                     hud_native_up().store(false, Ordering::Release);
                     persist_floating_hud_position(&window);
@@ -305,8 +330,9 @@ pub(crate) fn emit_floating_status(app: &AppHandle, visible: bool, state: &str, 
     set_floating_window_visible(app, visible);
     // Agent HUD needs key focus for Raycast menus / paste (⌘. ⌘/ ⌘V); editing too.
     // AppKit: always hop to main thread (mlx-worker must not call makeKey*).
+    // Change-gated: per-partial translate emits must not re-key the window.
     let keyable = visible && (state == "editing" || mode == "agent");
-    crate::platform::set_floating_hud_keyable(app, keyable);
+    apply_floating_keyable(app, keyable);
     let _ = app.emit_to("main", "floating-status", &payload);
     let _ = app.emit_to("floating", "floating-status", &payload);
     if app.get_webview_window("floating-lang").is_some() {
@@ -412,6 +438,23 @@ fn skip_hud_move_persist() -> &'static AtomicU32 {
 pub(crate) fn mark_hud_programmatic_move() {
     // size + position often each emit Moved
     skip_hud_move_persist().fetch_add(2, Ordering::Release);
+}
+
+/// Last real-drag position persist (ms epoch). `windowDidMove` fires per frame
+/// inside the native drag loop; a sync fs::write per frame stalls the AppKit
+/// main thread and the dragged HUD falls behind the cursor.
+fn last_hud_persist_ms() -> &'static AtomicU64 {
+    static MS: AtomicU64 = AtomicU64::new(0);
+    &MS
+}
+
+const HUD_PERSIST_MIN_INTERVAL_MS: u64 = 500;
+
+fn now_unix_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 pub(crate) fn hud_position_path() -> PathBuf {
@@ -834,7 +877,14 @@ pub(crate) fn create_floating_window(app: &AppHandle) -> Result<(), String> {
                 skip.fetch_sub(1, Ordering::AcqRel);
                 // Programmatic show/resize — keep per-monitor memory intact.
             } else {
-                persist_floating_hud_position(&win_for_move);
+                // Throttled: hide path persists unconditionally, so the final
+                // resting position is never lost to this throttle.
+                let now = now_unix_ms();
+                let last = last_hud_persist_ms().load(Ordering::Acquire);
+                if now.saturating_sub(last) >= HUD_PERSIST_MIN_INTERVAL_MS {
+                    last_hud_persist_ms().store(now, Ordering::Release);
+                    persist_floating_hud_position(&win_for_move);
+                }
             }
             let show_lang = floating_status_slot(&app_for_move)
                 .lock()

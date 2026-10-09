@@ -118,7 +118,7 @@ fn hud_confirm_editing(app: &AppHandle) -> bool {
 }
 
 /// Snapshot the text shown while finalization is still running.
-fn hud_skip_pipeline_snapshot(app: &AppHandle) -> Option<(String, String)> {
+fn hud_skip_pipeline_snapshot(app: &AppHandle) -> Option<String> {
     floating_status_slot(app)
         .lock()
         .ok()
@@ -126,32 +126,30 @@ fn hud_skip_pipeline_snapshot(app: &AppHandle) -> Option<(String, String)> {
             (s.visible
                 && matches!(s.state.as_str(), "refining" | "organizing" | "processing")
                 && s.intention.as_deref() != Some("agent"))
-                .then(|| (s.state.clone(), s.text.clone()))
+                .then(|| s.text.clone())
         })
 }
 
-fn should_defer_mid_pipeline_accept(
-    mode: &str,
-    state: &str,
-    llm_enabled: bool,
-    llm_ready: bool,
-) -> bool {
-    mode == "fn"
-        && (matches!(state, "refining" | "organizing")
-            || (state == "processing" && llm_enabled && llm_ready))
+// Summoning HUD is not counted: first Fn after HUD stops recording;
+// the next Fn accepts processing/editing immediately, without waiting for LLM.
+fn fn_submits_on_key_down(visible: bool, state: &str, intention: Option<&str>) -> bool {
+    visible && intention != Some("agent")
+        && matches!(state, "processing" | "refining" | "organizing" | "editing")
 }
 
 #[cfg(test)]
-mod mid_pipeline_accept_tests {
-    use super::should_defer_mid_pipeline_accept;
+mod fn_sequence_tests {
+    use super::fn_submits_on_key_down;
 
     #[test]
-    fn enabled_refine_finishes_before_quick_fn_pastes() {
-        assert!(should_defer_mid_pipeline_accept("fn", "processing", true, true));
-        assert!(should_defer_mid_pipeline_accept("fn", "refining", true, true));
-        assert!(should_defer_mid_pipeline_accept("fn", "organizing", true, true));
-        assert!(!should_defer_mid_pipeline_accept("fn", "processing", false, true));
-        assert!(!should_defer_mid_pipeline_accept("translate", "processing", true, true));
+    fn first_press_after_hud_stops_and_second_press_submits() {
+        assert!(!fn_submits_on_key_down(false, "idle", None));
+        assert!(!fn_submits_on_key_down(true, "recording", Some("transcribe")));
+        for state in ["processing", "refining", "organizing", "editing"] {
+            assert!(fn_submits_on_key_down(true, state, Some("transcribe")));
+            assert!(!fn_submits_on_key_down(false, state, Some("transcribe")));
+            assert!(!fn_submits_on_key_down(true, state, Some("agent")));
+        }
     }
 }
 
@@ -162,7 +160,7 @@ fn emit_hud_skip_or_confirm(app: &AppHandle) -> bool {
         let _ = app.emit_to("floating", "hud-confirm-request", ());
         return true;
     }
-    if let Some((state, text)) = hud_skip_pipeline_snapshot(app) {
+    if let Some(text) = hud_skip_pipeline_snapshot(app) {
         crate::audio::discard_speculative_mic();
         if let Some(engine) = app.try_state::<AsrEngine>() {
             engine
@@ -170,30 +168,14 @@ fn emit_hud_skip_or_confirm(app: &AppHandle) -> bool {
                 .immediate_accept_requested
                 .store(true, Ordering::Release);
         }
-        let mode = AsrEngine::session_mode(app);
-        let (llm_enabled, llm_ready) = app
-            .try_state::<AsrEngine>()
-            .and_then(|engine| {
-                engine.inner().config.lock().ok().map(|config| {
-                    (
-                        config.llm_enabled,
-                        !config.llm_api_base_url.trim().is_empty()
-                            && !config.llm_model.trim().is_empty(),
-                    )
-                })
-            })
-            .unwrap_or((false, false));
-        if should_defer_mid_pipeline_accept(&mode, &state, llm_enabled, llm_ready) {
-            crate::elog::elog!(
-                "[asr] quick Fn deferred until LLM pipeline completes state={state}"
-            );
-            return true;
-        }
         if let Ok(mut slot) = floating_status_slot(app).lock() {
             slot.visible = false;
         }
-        set_floating_window_visible(app, false);
-        if !text.trim().is_empty() {
+        // Nonempty text closes HUD in the same native callback as Cmd+V.
+        // Queuing a fade here would delay that callback and race finalization.
+        if text.trim().is_empty() {
+            set_floating_window_visible(app, false);
+        } else {
             let app = app.clone();
             std::thread::spawn(move || {
                 if let Err(e) = crate::commands::accept_requested_preview(app, text)
@@ -353,14 +335,38 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                 use core_graphics::event::{EventField, KeyCode};
 
                 let fn_down = Arc::new(AtomicBool::new(false));
-                let fn_down_cb = fn_down.clone();
                 let suppress_fn_release = Arc::new(AtomicBool::new(false));
-                let suppress_fn_release_cb = suppress_fn_release.clone();
                 let chord = Arc::new(Mutex::new(CaptureChord::default()));
-                let chord_cb = chord.clone();
-                let app_cb = app.clone();
                 let escape_keycode = KeyCode::ESCAPE as i64;
                 let space_keycode = 49i64;
+                let notified_error = Arc::new(AtomicBool::new(false));
+                let mut waited_for_grant = false;
+
+                loop {
+                    // After a rename / re-sign the TCC identity changes and the
+                    // tap used to stay dead until a full app restart. Ask for
+                    // the grant right here (register + jump to the pane) and
+                    // install the moment it flips on — no restart needed.
+                    while !crate::permissions::input_monitoring_granted() {
+                        if !waited_for_grant {
+                            waited_for_grant = true;
+                            crate::elog::elog!(
+                                "[fn] Input Monitoring missing — requesting and opening settings"
+                            );
+                            let _ = crate::permissions::try_request_input_monitoring();
+                            let _ =
+                                crate::permissions::open_permission_settings("input_monitoring");
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(1500));
+                    }
+                    if waited_for_grant {
+                        crate::elog::elog!("[fn] Input Monitoring granted — installing tap");
+                    }
+
+                    let fn_down_cb = fn_down.clone();
+                    let suppress_fn_release_cb = suppress_fn_release.clone();
+                    let chord_cb = chord.clone();
+                    let app_cb = app.clone();
                 let installed = CGEventTap::with_enabled(
                     CGEventTapLocation::HID,
                     CGEventTapPlacement::HeadInsertEventTap,
@@ -370,6 +376,18 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                     vec![CGEventType::FlagsChanged, CGEventType::KeyDown],
                     move |_proxy, event_type, event| {
                         let et = event_type as u32;
+                        if et == CGEventType::TapDisabledByTimeout as u32
+                            || et == CGEventType::TapDisabledByUserInput as u32
+                        {
+                            // The watchdog disables the whole tap after a single
+                            // slow callback — previously Fn then died silently.
+                            // Stop the run loop so the outer loop reinstalls.
+                            crate::elog::elog!(
+                                "[fn] tap disabled by system (type {et}) — reinstalling"
+                            );
+                            CFRunLoop::get_current().stop();
+                            return CallbackResult::Keep;
+                        }
                         let capturing = capture_slot(&app_cb);
                         let is_capturing = !matches!(capturing, HotkeyCaptureSlot::None);
 
@@ -588,7 +606,7 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                             return CallbackResult::Keep;
                         }
 
-        // --- Normal mode: Fn action commits on *release* ---
+        // --- Start/stop chords commit on release; post-stop confirm submits on key-down ---
         // Same as capture: Fn→then→Shift still counts as ⇧+Fn.
         // Peak mods survive releasing Shift a frame before Fn.
         if let Ok(mut c) = chord_cb.lock() {
@@ -596,6 +614,19 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                 merge_mods(&mut c.peak_mods, &mods);
                 if !was_down {
                     c.fn_armed = true;
+                    let (transcribe, _, _, _) = read_hotkeys(&app_cb);
+                    let submit = floating_status_slot(&app_cb)
+                        .lock()
+                        .map(|s| fn_submits_on_key_down(s.visible, &s.state, s.intention.as_deref()))
+                        .unwrap_or(false);
+                    if submit && binding_is_fn(&transcribe)
+                        && binding_matches(&transcribe, "fn", &mods)
+                        && emit_hud_skip_or_confirm(&app_cb)
+                    {
+                        suppress_fn_release_cb.store(true, Ordering::Release);
+                        crate::elog::elog!("[fn] post-HUD confirm key-down: submit immediately");
+                        return CallbackResult::Drop;
+                    }
                     // Press→release is dead time otherwise; warm the mic now.
                     maybe_begin_speculative_mic(&app_cb);
                 }
@@ -648,11 +679,23 @@ pub(crate) fn start_fn_event_tap(app: AppHandle) {
                     },
                     CFRunLoop::run_current,
                 );
-                if installed.is_err() {
-                    let _ = app.emit(
-                        "fn-listener-error",
-                        "Fn global listener failed. Grant Accessibility/Input Monitoring permissions.",
-                    );
+                match installed {
+                    Err(()) => {
+                        crate::elog::elog!(
+                            "[fn] event tap install failed (Input Monitoring) — retrying"
+                        );
+                        if !notified_error.swap(true, Ordering::Acquire) {
+                            let _ = app.emit(
+                                "fn-listener-error",
+                                "Fn global listener failed. Grant Accessibility/Input Monitoring permissions.",
+                            );
+                        }
+                    }
+                    Ok(_) => {
+                        crate::elog::elog!("[fn] event tap run loop exited — reinstalling");
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_millis(800));
                 }
             })
             .expect("failed to spawn fn event tap thread");

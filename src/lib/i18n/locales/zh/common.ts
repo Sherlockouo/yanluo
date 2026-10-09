@@ -1,5 +1,5 @@
 export const common: Record<string, string> = {
-  "common.appName": "言落",
+  "common.appName": "Sayi",
 
   // Generic actions
   "common.save": "保存",
@@ -50,22 +50,22 @@ export const common: Record<string, string> = {
   "common.transcript.jumpToAria": "跳转到 {time}",
 
   // Spotlight tour
-  "common.tour.draftTitle": "出稿",
-  "common.tour.draftBody": "开口出稿。开会、口述、文件转写，说完桌上有稿。",
-  "common.tour.liveTitle": "热键出稿",
-  "common.tour.liveBody": "按住出稿键说话，松开关闭；翻译用旁边那组热键。",
-  "common.tour.dispatchTitle": "派活",
-  "common.tour.dispatchBody": "开口派活。把事交给本机 Claude / Codex / Pi。",
+  "common.tour.draftTitle": "文稿",
+  "common.tour.draftBody": "开口成文。开会、口述、文件转写，说完桌上有稿。",
+  "common.tour.liveTitle": "热键听写",
+  "common.tour.liveBody": "按住听写键说话，松开关闭；翻译用旁边那组热键。",
+  "common.tour.dispatchTitle": "智能体",
+  "common.tour.dispatchBody": "把任务交给本机 Claude / Codex / Pi，开口即派。",
   "common.tour.asrTitle": "识别",
   "common.tour.asrBody": "模型目录与场景在这里。切得太碎就调低灵敏度。",
   "common.tour.hotkeysTitle": "快捷键",
-  "common.tour.hotkeysBody": "出稿、翻译、派活热键都可改。权限也在系统里。",
+  "common.tour.hotkeysBody": "听写、翻译、智能体热键都可改。权限也在系统里。",
   "common.tour.skip": "跳过",
   "common.tour.done": "完成",
   "common.tour.next": "下一步",
 
   // Home word cloud
-  "common.wordCloud.empty": "还没有词 · 开口出稿后出现",
+  "common.wordCloud.empty": "还没有词 · 开口听写后出现",
   "common.wordCloud.aria": "本机高频词",
   "common.wordCloud.title": "{word} · {count} 次",
   "common.wordCloud.titleOpen": "{word} · {count} 次 · 打开记录",

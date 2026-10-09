@@ -9,6 +9,7 @@ import {
   revealDelay,
   useCollapse,
   useFadeSlide,
+  useValueSwap,
 } from "@/lib/motion";
 
 export function PageHeader({
@@ -278,5 +279,68 @@ export function SoftCollapse({
     >
       {children}
     </motion.div>
+  );
+}
+
+/**
+ * Clickable panel — keyboard-accessible <button> with hover lift + press scale
+ * via .panel-action. Never use for containers that hold form inputs (press
+ * scale must not move a field mid-type).
+ */
+export function ActionCard({
+  children,
+  className,
+  onPress,
+  disabled,
+  surface = "panel",
+  ariaLabel,
+}: {
+  children: ReactNode;
+  className?: string;
+  onPress?: () => void;
+  disabled?: boolean;
+  /** Visual surface: "panel" (padded card) or "card" (bare surface-card). */
+  surface?: "panel" | "card";
+  ariaLabel?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        surface === "card" ? "surface-card" : "panel",
+        "panel-action w-full text-left",
+        className,
+      )}
+      onClick={onPress}
+      disabled={disabled}
+      aria-label={ariaLabel}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Animated inline value — remount-fade when `value` changes (stat numbers,
+ * live counters). Enter-only, starts at opacity 0.94, no AnimatePresence.
+ */
+export function ValueSwap({
+  value,
+  className,
+}: {
+  value: string | number;
+  className?: string;
+}) {
+  const swap = useValueSwap();
+  return (
+    <motion.span
+      key={value}
+      className={cn("inline-block", className)}
+      initial={swap.initial}
+      animate={swap.animate}
+      transition={swap.transition}
+    >
+      {value}
+    </motion.span>
   );
 }

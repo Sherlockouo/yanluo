@@ -135,3 +135,40 @@ export function useCollapse() {
   const reduce = useReducedMotion();
   return useMemo(() => softCollapse(reduce), [reduce]);
 }
+
+/**
+ * Press feedback for motion components — pass the result to `whileTap`.
+ * Transform-only, interruptible, never gates input. Returns undefined under
+ * reduced motion so no animation is scheduled at all.
+ */
+export function useWhileTap(scale = 0.97) {
+  const reduce = useReducedMotion();
+  return useMemo(
+    () => (reduce ? undefined : ({ scale } as const)),
+    [reduce, scale],
+  );
+}
+
+/** Inline value change (stat numbers, live counters) — 140ms, enter-only. */
+function valueSwap(reduce: boolean | null | undefined): MotionBundle {
+  if (reduce) {
+    return {
+      initial: { opacity: 1 },
+      animate: { opacity: 1 },
+      exit: { opacity: 1 },
+      transition: { duration: 0 },
+    };
+  }
+  return {
+    initial: { opacity: 0.94, y: 4 },
+    animate: { opacity: 1, y: 0 },
+    exit: { opacity: 0, y: -3 },
+    transition: { duration: duration.fast, ease: easeOut },
+  };
+}
+
+/** Animated inline value swap — key the element by value, enter-only. */
+export function useValueSwap() {
+  const reduce = useReducedMotion();
+  return useMemo(() => valueSwap(reduce), [reduce]);
+}

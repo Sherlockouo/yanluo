@@ -1,4 +1,4 @@
-//! Yanluo (言落) backend — Tauri application wiring.
+//! Sayi backend — Tauri application wiring.
 
 mod agent;
 mod agent_kit;
@@ -124,6 +124,7 @@ pub fn main() {
             commands::set_model_dir,
             commands::get_model_dir,
             models::get_model_status,
+            models::detect_local_qwen_models,
             models::download_qwen_asr_model,
             commands::get_app_config,
             commands::reload_app_config_from_disk,
@@ -185,6 +186,7 @@ pub fn main() {
             commands::is_recording,
             commands::cancel_recording,
             commands::confirm_floating_transcript,
+            commands::confirm_live_hud_edit,
             commands::cancel_floating_transcript,
             commands::transcribe_file,
             download::get_ytdlp_status,
@@ -233,7 +235,7 @@ fn prepend_bundled_libtorch_path() {
         if let Some(dir) = exe.parent() {
             candidates.push(dir.join("libtorch").join("lib"));
             candidates.push(dir.join("torch-libs"));
-            // AppImage / some install layouts: ../lib/yanluo/libtorch/lib
+            // AppImage / some install layouts: ../lib/sayi/libtorch/lib
             candidates.push(dir.join("libtorch").join("lib"));
             if let Some(parent) = dir.parent() {
                 candidates.push(parent.join("lib").join("libtorch").join("lib"));

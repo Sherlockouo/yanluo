@@ -352,6 +352,7 @@ pub(crate) struct AppConfig {
     /// Empty = built-in translate prompt (`{target}` placeholder).
     #[serde(default)]
     pub(crate) llm_translate_prompt: String,
+    #[serde(default)]
     pub(crate) vocabulary: Vec<String>,
 }
 
@@ -835,5 +836,15 @@ mod tests {
 
         fs::write(dir.path().join("tokenizer.json"), []).unwrap();
         assert!(validate_align_model_dir(dir.path()).is_ok());
+    }
+
+    #[test]
+    fn old_config_without_vocabulary_keeps_the_rest() {
+        let original = AppConfig::default();
+        let mut json = serde_json::to_value(&original).unwrap();
+        json.as_object_mut().unwrap().remove("vocabulary");
+        let loaded: AppConfig = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded.asr_provider.label(), original.asr_provider.label());
+        assert!(loaded.vocabulary.is_empty());
     }
 }

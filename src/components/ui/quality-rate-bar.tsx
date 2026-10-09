@@ -1,7 +1,10 @@
+import { useEffect, useRef } from "react";
 import { Button } from "@heroui/react";
+import { motion, useReducedMotion } from "framer-motion";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
+import { springUI } from "@/lib/motion";
 
 export type QualityRating = "bad" | "ok" | "good";
 
@@ -32,7 +35,18 @@ export function QualityRateBar({
   label,
 }: Props) {
   const t = useT();
+  const reduce = useReducedMotion();
   const resolvedLabel = label ?? t("common.rate.label");
+  // Pop only on a real toggle — not on first mount of an already-rated row.
+  const mountedRef = useRef(false);
+  const prevRatingRef = useRef(rating);
+  useEffect(() => {
+    mountedRef.current = true;
+  }, []);
+  const toggled = mountedRef.current && prevRatingRef.current !== rating;
+  useEffect(() => {
+    prevRatingRef.current = rating;
+  }, [rating]);
   const toggle = (value: QualityRating) => {
     onRate(rating === value ? "" : value);
   };
@@ -66,9 +80,18 @@ export function QualityRateBar({
               aria-pressed={active}
               onPress={() => toggle(opt.value)}
             >
-              {opt.icon === "down" ? <ThumbsDown size={11} aria-hidden /> : null}
-              {opt.icon === "up" ? <ThumbsUp size={11} aria-hidden /> : null}
-              {t(opt.labelKey)}
+              {/* Pop on active change — keyed remount replays the enter only on toggle. */}
+              <motion.span
+                key={String(active)}
+                className="inline-flex items-center gap-1"
+                initial={reduce || !active || !toggled ? false : { opacity: 0.92, scale: 0.88 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={springUI}
+              >
+                {opt.icon === "down" ? <ThumbsDown size={11} aria-hidden /> : null}
+                {opt.icon === "up" ? <ThumbsUp size={11} aria-hidden /> : null}
+                {t(opt.labelKey)}
+              </motion.span>
             </Button>
           );
         })}

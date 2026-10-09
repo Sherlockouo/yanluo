@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/cn";
@@ -13,6 +13,26 @@ import { playSfx, unlockSfx } from "@/lib/sfx";
 import { readTourDone, requestStartTour } from "@/components/spotlight-tour";
 
 let bootArmed = false;
+
+function safelyUnlockSfx() {
+  try {
+    unlockSfx();
+  } catch {
+    // AudioContext is optional; intro lifecycle must never depend on it.
+  }
+}
+
+function safelyPlayBootSfx() {
+  try {
+    safelyUnlockSfx();
+    if (!bootArmed) {
+      bootArmed = true;
+      playSfx("boot");
+    }
+  } catch {
+    // WebView audio failures must not leave the blocking overlay mounted.
+  }
+}
 
 /** Soft ease-in-out for gradual brand reveal (not UI chrome). */
 const easeReveal = [0.4, 0, 0.2, 1] as const;
@@ -53,6 +73,22 @@ export function FirstRunIntro() {
   const reduce = useReducedMotion();
   const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<"in" | "out">("in");
+  const [skipped, setSkipped] = useState(false);
+  const timersRef = useRef<number[]>([]);
+
+  const clearTimers = useCallback(() => {
+    for (const id of timersRef.current) window.clearTimeout(id);
+    timersRef.current = [];
+  }, []);
+
+  const completeIntro = useCallback(() => {
+    markIntroDone();
+    setOpen(false);
+    window.dispatchEvent(new Event(INTRO_DONE_EVENT));
+    if (readOnboarded() && !readTourDone()) {
+      window.setTimeout(() => requestStartTour(), 160);
+    }
+  }, []);
 
   useEffect(() => {
     const id = window.requestAnimationFrame(() => {
@@ -63,46 +99,49 @@ export function FirstRunIntro() {
 
   useEffect(() => {
     if (!open) return;
-    unlockSfx();
-    if (!bootArmed) {
-      bootArmed = true;
-      playSfx("boot");
-    }
 
     // Brand moment: slow reveal settle, then linear dissolve (not UI chrome ≤220ms).
     const hold = reduce ? 360 : 1680;
     const fade = reduce ? 180 : 820;
-    const tHold = window.setTimeout(() => setPhase("out"), hold);
-    const tDone = window.setTimeout(() => {
-      markIntroDone();
-      setOpen(false);
-      window.dispatchEvent(new Event(INTRO_DONE_EVENT));
-      if (readOnboarded() && !readTourDone()) {
-        window.setTimeout(() => requestStartTour(), 160);
-      }
-    }, hold + fade);
+    timersRef.current.push(window.setTimeout(() => setPhase("out"), hold));
+    timersRef.current.push(window.setTimeout(completeIntro, hold + fade));
 
-    return () => {
-      window.clearTimeout(tHold);
-      window.clearTimeout(tDone);
-    };
-  }, [open, reduce]);
+    // Register lifecycle timers first: optional audio may fail synchronously.
+    safelyPlayBootSfx();
+
+    return clearTimers;
+  }, [open, reduce, completeIntro, clearTimers]);
+
+  // Tap anywhere to skip — the brand moment must never gate the app.
+  const skipIntro = () => {
+    safelyUnlockSfx();
+    if (phase !== "in") return;
+    clearTimers();
+    setSkipped(true);
+    setPhase("out");
+    timersRef.current.push(
+      window.setTimeout(completeIntro, reduce ? 120 : 320),
+    );
+  };
 
   return createPortal(
     <AnimatePresence>
       {open ? (
         <motion.div
           key="first-run-intro"
-          className={cn("first-run-intro", phase === "out" && "is-out")}
+          className={cn(
+            "first-run-intro cursor-pointer",
+            phase === "out" && "is-out",
+          )}
           initial={{ opacity: 1 }}
           animate={{ opacity: phase === "out" ? 0 : 1 }}
           exit={{ opacity: 0 }}
           transition={
             reduce
               ? { duration: 0.18, ease: "linear" }
-              : { duration: 0.82, ease: "linear" }
+              : { duration: skipped ? 0.3 : 0.82, ease: "linear" }
           }
-          onPointerDown={() => unlockSfx()}
+          onPointerDown={skipIntro}
           aria-hidden
         >
           <div className="first-run-intro-stage">
@@ -141,7 +180,7 @@ export function FirstRunIntro() {
                     : { duration: 1.15, ease: easeReveal, delay: 0.1 }
               }
             >
-              言落
+              Sayi
             </motion.div>
 
             <motion.div
@@ -177,7 +216,7 @@ export function FirstRunIntro() {
                     : { duration: 0.9, ease: easeReveal, delay: 0.72 }
               }
             >
-              开口有结果
+              按下 Fn，开口就成稿。
             </motion.div>
           </div>
         </motion.div>

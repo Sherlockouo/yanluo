@@ -1262,8 +1262,8 @@ fn compose_prompt(voice: &str, attachments: &[String]) -> String {
 fn with_kit_preamble(user_prompt: &str, kit_path: &Path) -> String {
     let kit = kit_path.to_string_lossy();
     let mut out = String::new();
-    out.push_str("[Yanluo] 改本机设置前先读 AGENTS.md 与 skills/yanluo-settings.md；");
-    out.push_str("用 bin/yanluo-config set …（白名单）。kit 目录: ");
+    out.push_str("[Sayi] 改本机设置前先读 AGENTS.md 与 skills/sayi-settings.md；");
+    out.push_str("用 bin/sayi-config set …（白名单）。kit 目录: ");
     out.push_str(&kit);
     out.push_str("\n---\n");
     out.push_str(user_prompt.trim());

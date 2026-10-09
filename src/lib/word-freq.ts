@@ -163,6 +163,67 @@ export function tokenize(text: string): string[] {
   return out;
 }
 
+function finalizeCounts(
+  counts: Map<string, number>,
+  newest: Map<string, { id: string; at: string }>,
+  topN: number,
+): WordWeight[] {
+  // Prefer bigrams over unigrams when both appear: demote single CJK if count low
+  const rows: WordWeight[] = [...counts.entries()]
+    .filter(([w, c]) => {
+      if (c < 1) return false;
+      // drop single CJK with count 1 (noise)
+      if (/^[一-鿿]$/.test(w) && c < 2) return false;
+      return true;
+    })
+    .map(([word, count]) => ({
+      word,
+      count,
+      weight: Math.sqrt(count),
+      entryId: newest.get(word)?.id,
+    }))
+    .sort((a, b) => b.count - a.count || a.word.localeCompare(b.word));
+
+  return rows.slice(0, topN);
+}
+
+/**
+ * One pass over history aggregating every cloud source at once — each entry is
+ * tokenized once, so switching the home-cloud tab reuses cached results and
+ * never re-walks the full history on the click's main-thread frame.
+ */
+export function aggregateAllSources(
+  entries: HistoryEntry[],
+  topN = 40,
+): Record<CloudSource, WordWeight[]> {
+  const buckets = new Map<
+    CloudSource,
+    { counts: Map<string, number>; newest: Map<string, { id: string; at: string }> }
+  >();
+  for (const s of CLOUD_SOURCES) {
+    buckets.set(s.id, { counts: new Map(), newest: new Map() });
+  }
+  for (const e of entries) {
+    const source = ((e.source ?? "fn").trim() || "fn") as CloudSource;
+    const bucket = buckets.get(source);
+    if (!bucket) continue;
+    const text = entryGoldText(e);
+    for (const w of tokenize(text)) {
+      bucket.counts.set(w, (bucket.counts.get(w) ?? 0) + 1);
+      const prev = bucket.newest.get(w);
+      if (!prev || e.created_at > prev.at) {
+        bucket.newest.set(w, { id: e.id, at: e.created_at });
+      }
+    }
+  }
+  const out = {} as Record<CloudSource, WordWeight[]>;
+  for (const s of CLOUD_SOURCES) {
+    const b = buckets.get(s.id)!;
+    out[s.id] = finalizeCounts(b.counts, b.newest, topN);
+  }
+  return out;
+}
+
 export function aggregateWordFreq(
   entries: HistoryEntry[],
   source: CloudSource,
@@ -182,23 +243,7 @@ export function aggregateWordFreq(
     }
   }
 
-  // Prefer bigrams over unigrams when both appear: demote single CJK if count low
-  const rows: WordWeight[] = [...counts.entries()]
-    .filter(([w, c]) => {
-      if (c < 1) return false;
-      // drop single CJK with count 1 (noise)
-      if (/^[\u4e00-\u9fff]$/.test(w) && c < 2) return false;
-      return true;
-    })
-    .map(([word, count]) => ({
-      word,
-      count,
-      weight: Math.sqrt(count),
-      entryId: newest.get(word)?.id,
-    }))
-    .sort((a, b) => b.count - a.count || a.word.localeCompare(b.word));
-
-  return rows.slice(0, topN);
+  return finalizeCounts(counts, newest, topN);
 }
 
 export const CLOUD_SOURCES: { id: CloudSource; label: string }[] = [

@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Stage mlx.metallib next to the Yanluo binary (and for .app bundling).
+ * Stage mlx.metallib next to the Sayi binary (and for .app bundling).
  *
  * MLX loads shaders via dladdr → Contents/MacOS/mlx.metallib (or beside cargo
- * target/{debug,release}/yanluo). Without this file it falls back to a
+ * target/{debug,release}/sayi). Without this file it falls back to a
  * compile-time absolute METAL_PATH from the build machine (CI: /Users/runner/...).
  *
  * Usage:
  *   node scripts/stage-mlx-metallib.mjs           # best-effort (dev)
  *   node scripts/stage-mlx-metallib.mjs --bundle  # for beforeBundleCommand (required)
  *   node scripts/stage-mlx-metallib.mjs --require # fail if missing
- *   node scripts/stage-mlx-metallib.mjs --app /path/to/Yanluo.app
+ *   node scripts/stage-mlx-metallib.mjs --app /path/to/Sayi.app
  */
 import fs from "node:fs";
 import path from "node:path";

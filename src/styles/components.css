@@ -20,6 +20,7 @@
   border: 0;
   border-radius: 14px;
   background: var(--surface-secondary);
+  cursor: pointer;
   transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -378,7 +379,11 @@ button.form-actions-primary,
   border-radius: 0.9rem;
   background: color-mix(in oklab, var(--heroui-default) 55%, transparent);
   border: 1px solid transparent;
-  transition: opacity 0.15s ease, transform 100ms ease-out;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    opacity 0.15s ease,
+    transform 100ms ease-out;
 }
 
 .onboard-choice:hover:not(:disabled) {
@@ -391,6 +396,7 @@ button.form-actions-primary,
 
 .onboard-choice:disabled {
   opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .onboard-choice-accent {
@@ -1376,6 +1382,7 @@ button.form-actions-primary,
   background: none;
   border: 0;
   cursor: pointer;
+  transition: color 140ms ease;
 }
 .spotlight-skip:hover {
   color: var(--foreground);

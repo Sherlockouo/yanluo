@@ -655,11 +655,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const saveVocabulary = useCallback(
     async (vocabulary: string[]) => {
-      const next = { ...config, vocabulary };
+      const next = { ...latestConfigRef.current, vocabulary };
+      latestConfigRef.current = next;
       setConfig(next);
       await saveConfig(next);
     },
-    [config, saveConfig],
+    [saveConfig],
   );
 
   const addTerm = useCallback(() => {
@@ -804,7 +805,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let unlisten: UnlistenFn | undefined;
-    void listen<{ entry_id: string; before: string; after: string; learned_pairs?: Array<{ wrong: string; right: string }> }>(
+    void listen<{ entry_id: string; before: string; after: string; learned_pairs?: Array<{ wrong: string; right: string }>; learned_terms?: string[] }>(
       "learn-from-hud",
       (event) => {
         void loadHistory();
@@ -821,6 +822,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
                   n: pairs.length,
                 });
           toast.success(msg);
+        } else if (event.payload.learned_terms?.length) {
+          toast.success(tRef.current("toast.learnedTerm", { term: event.payload.learned_terms[0] }));
         } else {
           toast.success(tRef.current("toast.learnedCase"));
         }

@@ -27,5 +27,6 @@ export const toast: Record<string, string> = {
   "toast.learned": "Learned: {wrong} → {right}",
   "toast.learnedMulti": "Learned {n} pairs, incl. {first}",
   "toast.learnedCase": "Added to learning cases (ASR draft ↔ corrected text)",
+  "toast.learnedTerm": "Learned canonical spelling: {term}",
   "toast.chooseModelDirTitle": "Choose ASR model directory",
 };

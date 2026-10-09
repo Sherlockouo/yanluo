@@ -13,6 +13,7 @@ import {
 import { Link } from "react-router-dom";
 import {
   BookOpen,
+  ChevronDown,
   MoreHorizontal,
   RotateCcw,
   Sparkles,
@@ -31,7 +32,7 @@ import { useApp } from "@/app-context";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
 import { DEFAULT_LLM_REFINE_PROMPT } from "@/lib/constants";
-import { springUI } from "@/lib/motion";
+import { duration, easeOut, springUI } from "@/lib/motion";
 import type { HistoryEntry } from "@/types";
 import { learnGold } from "@/lib/learn-cases";
 
@@ -96,6 +97,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
     testLlm,
     history,
     distillLearnFromRatings,
+    applyLearnedTerms,
   } = useApp();
 
   const reducedMotion = useReducedMotion();
@@ -219,7 +221,12 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
     }
     setDistilling(true);
     try {
-      await distillLearnFromRatings();
+      const result = await distillLearnFromRatings();
+      if (!result.terms.length && !result.source_ids.length) {
+        toast(t("learn.nothingToDistill"));
+        return;
+      }
+      await applyLearnedTerms(result.source_ids, result.terms);
       toast.success(t("learn.distillDone"));
       void fetchKnowledge();
       void fetchStats();
@@ -251,6 +258,8 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
           size="sm"
           variant="ghost"
           aria-label={t("learn.moreActionsAria")}
+          aria-haspopup="menu"
+          aria-expanded={moreMenuOpen}
           onPress={() => setMoreMenuOpen((v) => !v)}
         >
           <MoreHorizontal size={16} />
@@ -263,14 +272,19 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
               onClick={() => setMoreMenuOpen(false)}
             />
             <motion.div
+              role="menu"
               className="absolute right-0 top-full z-50 mt-1 min-w-[10rem] rounded-xl border border-border bg-surface p-1 shadow-lg"
-              initial={reducedMotion ? false : { opacity: 0, y: -4 }}
+              initial={reducedMotion ? false : { opacity: 0.92, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
               transition={springUI}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setMoreMenuOpen(false);
+              }}
             >
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-default/60"
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-default/60"
                 onClick={() => {
                   setMoreMenuOpen(false);
                   void runAiDistill();
@@ -316,10 +330,18 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
             <LlmProviderSelect triggerCls="qsel-quiet" />
             <button
               type="button"
-              className="dlink muted shrink-0"
+              className="dlink muted shrink-0 inline-flex items-center gap-1"
+              aria-expanded={configOpen}
               onClick={() => setConfigOpen((v) => !v)}
             >
-              {t("learn.configure")}{configOpen ? " ▴" : " ▾"}
+              {t("learn.configure")}
+              <motion.span
+                className="inline-flex"
+                animate={{ rotate: configOpen ? 180 : 0 }}
+                transition={{ duration: duration.fast, ease: easeOut }}
+              >
+                <ChevronDown size={12} aria-hidden />
+              </motion.span>
             </button>
           </div>
         </div>
@@ -549,15 +571,20 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
           <button
             type="button"
             className="flex w-full items-center gap-2 py-2 text-left type-meta text-muted hover:text-foreground transition-colors"
+            aria-expanded={activityOpen}
             onClick={() => setActivityOpen((v) => !v)}
           >
             <span className="type-ui text-sm">{t("learn.activityTitle")}</span>
             <span className="text-muted/60 type-micro">
               ({learnEntries.length})
             </span>
-            <span className="ml-auto text-xs">
-              {activityOpen ? "▴" : "▾"}
-            </span>
+            <motion.span
+              className="ml-auto inline-flex"
+              animate={{ rotate: activityOpen ? 180 : 0 }}
+              transition={{ duration: duration.fast, ease: easeOut }}
+            >
+              <ChevronDown size={14} aria-hidden />
+            </motion.span>
           </button>
           <SoftCollapse open={activityOpen}>
             <div className="recs">

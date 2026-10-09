@@ -1,5 +1,5 @@
 export const common: Record<string, string> = {
-  "common.appName": "Yanluo",
+  "common.appName": "Sayi",
 
   // Generic actions
   "common.save": "Save",
@@ -56,7 +56,7 @@ export const common: Record<string, string> = {
   "common.tour.liveTitle": "Hotkey drafting",
   "common.tour.liveBody":
     "Hold the draft hotkey to talk, release to stop; translation uses the other hotkey set.",
-  "common.tour.dispatchTitle": "Dispatch",
+  "common.tour.dispatchTitle": "Agents",
   "common.tour.dispatchBody":
     "Speak to dispatch. Hand tasks to local Claude / Codex / Pi.",
   "common.tour.asrTitle": "Recognition",

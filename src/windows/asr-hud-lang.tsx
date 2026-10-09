@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Button } from "@heroui/react";
 import { ChevronUp } from "lucide-react";
 import type { AppConfig, FloatingPayload } from "@/types";
@@ -12,6 +12,7 @@ import {
   defaultConfig,
 } from "@/lib/constants";
 import { cn } from "@/lib/cn";
+import { easeOut, revealDelay } from "@/lib/motion";
 import { useT } from "@/lib/i18n";
 
 function applyHudTheme(theme: "light" | "dark") {
@@ -28,6 +29,7 @@ function applyHudTheme(theme: "light" | "dark") {
  */
 export function AsrHudLangChip() {
   const t = useT();
+  const reducedMotion = useReducedMotion();
   const [payload, setPayload] = useState<FloatingPayload>({
     visible: false,
     state: "idle",
@@ -151,7 +153,7 @@ export function AsrHudLangChip() {
     >
       {menuOpen ? (
         <div className="hud-lang-menu" role="listbox" aria-label={t("hud.targetLang")}>
-          {langOptions.map(([code, label]) => {
+          {langOptions.map(([code, label], i) => {
             const selected = code === target;
             return (
               <span
@@ -160,6 +162,7 @@ export function AsrHudLangChip() {
                 tabIndex={0}
                 aria-selected={selected}
                 className={cn("hud-lang-option", selected && "is-selected")}
+                style={{ animationDelay: `${revealDelay(i)}s` }}
                 onClick={() => pick(code)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
@@ -196,13 +199,15 @@ export function AsrHudLangChip() {
           else openMenu();
         }}
       >
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="wait">
           <motion.span
             key={target}
-            initial={{ opacity: 0, y: 3 }}
+            initial={reducedMotion ? { opacity: 1 } : { opacity: 0.92, y: 2 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -3 }}
-            transition={{ duration: 0.16 }}
+            exit={reducedMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
+            transition={
+              reducedMotion ? { duration: 0 } : { duration: 0.12, ease: easeOut }
+            }
           >
             {short}
           </motion.span>

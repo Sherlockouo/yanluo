@@ -7,7 +7,11 @@ export const hud: Record<string, string> = {
   "hud.switching": "Switching",
   "hud.pasted": "Pasted",
   "hud.raw": "raw",
+  "hud.refineFailed": "AI refinement did not finish. The full transcript was kept.",
   "hud.confirmHint": "Enter to confirm · Esc to cancel",
+  "hud.liveEditPlaceholder": "Edit while dictating — new text appends · Enter pastes",
+  "hud.liveEditEnter": "Click text to edit while dictating",
+  "hud.liveEditHint": "Esc back to live · Enter pastes",
   "hud.autoSubmit": "Auto-submit soon",
   "hud.noContent": "No content",
   "hud.clipboardEmpty": "No files/images in clipboard",
@@ -65,4 +69,5 @@ export const hud: Record<string, string> = {
   "hud.rustMsg.未配置 API Base URL": "API Base URL not configured",
   "hud.rustMsg.未配置 Model": "Model not configured",
   "hud.rustMsg.正在录音中，请先结束录音": "Recording in progress — stop recording first",
+  "hud.rustMsg.当前不在录音状态": "Not in a recording session",
 };
