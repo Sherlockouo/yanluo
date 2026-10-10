@@ -1,6 +1,6 @@
 /** Session memory for tab selection + per-tab scroll (.app-content). */
 
-export type DraftMode = "file" | "live" | "translate" | "history";
+export type DraftMode = "live" | "translate" | "history";
 
 export type SettingsTab =
   | "general"
@@ -24,7 +24,7 @@ export type SettingsUiSession = {
 const DRAFT_KEY = "yanluo:draft-ui";
 const SETTINGS_KEY = "yanluo:settings-ui";
 
-const DRAFT_MODES: DraftMode[] = ["file", "live", "translate", "history"];
+const DRAFT_MODES: DraftMode[] = ["live", "translate", "history"];
 const SETTINGS_TABS: SettingsTab[] = [
   "general",
   "asr",
@@ -84,7 +84,7 @@ export function patchDraftUi(
     scrollPatch?: Partial<Record<DraftMode, number>>;
   },
 ): DraftUiSession {
-  const prev = readDraftUi() ?? { mode: "file" as DraftMode, scroll: {} };
+  const prev = readDraftUi() ?? { mode: "live" as DraftMode, scroll: {} };
   const next: DraftUiSession = {
     mode: patch.mode ?? prev.mode,
     scroll: {

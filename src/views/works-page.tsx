@@ -1,10 +1,11 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@heroui/react";
 import { FileAudio, FileVideo, FolderOpen } from "lucide-react";
 import { useApp } from "@/app-context";
 import { PageHeader, PageShell } from "@/components/shared/page-shell";
 import { useT } from "@/lib/i18n";
+import { TranscribePage } from "@/views/transcribe-page";
 import { isVideoMediaKind } from "@/lib/alignment";
 import type { Work } from "@/types";
 
@@ -21,11 +22,18 @@ export function WorksPage() {
 
   return (
     <PageShell className="max-w-5xl">
-      <PageHeader title={t("works.list.title")} />
+      <PageHeader
+        title={t("works.list.title")}
+        action={
+          <Button variant="primary" onPress={() => navigate("/works/new")}>
+            {t("works.list.newWork")}
+          </Button>
+        }
+      />
       {sorted.length === 0 ? (
         <div className="dropzone dropzone-empty">
           <span className="dropzone-t">{t("works.list.empty")}</span>
-          <Button variant="primary" onPress={() => navigate("/draft?mode=file")}>
+          <Button variant="primary" onPress={() => navigate("/works/new")}>
             {t("works.list.goTranscribe")}
           </Button>
         </div>
@@ -96,5 +104,29 @@ function WorkRow({
         <FolderOpen size={14} aria-hidden />
       </Button>
     </div>
+  );
+}
+
+/** 新转写 — the file/URL transcription flow, saved as a work and opened on completion. */
+export function NewWorkPage() {
+  const t = useT();
+  const navigate = useNavigate();
+  const onTranscribed = useCallback(
+    (workId: string) => navigate(`/works/${workId}`, { replace: true }),
+    [navigate],
+  );
+
+  return (
+    <PageShell className="max-w-5xl">
+      <PageHeader
+        title={t("works.new.title")}
+        action={
+          <Button variant="ghost" onPress={() => navigate("/works")}>
+            {t("works.back")}
+          </Button>
+        }
+      />
+      <TranscribePage embedded forceUpload onTranscribed={onTranscribed} />
+    </PageShell>
   );
 }

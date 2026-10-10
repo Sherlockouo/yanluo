@@ -165,10 +165,16 @@ export function TranscribePage({
   embedded = false,
   active = true,
   actionSlot,
+  forceUpload = false,
+  onTranscribed,
 }: {
   embedded?: boolean;
   active?: boolean;
   actionSlot?: HTMLElement | null;
+  /** Always the upload/processing flow (作品 新转写). */
+  forceUpload?: boolean;
+  /** Called with the new work id once the transcription is saved as a work. */
+  onTranscribed?: (workId: string) => void;
 } = {}) {
   const t = useT();
   const reducedMotion = useReducedMotion();
@@ -187,8 +193,9 @@ export function TranscribePage({
   const idParam = searchParams.get("id");
 
   // URL is source of truth; sessionStorage seeds first paint / restores after nav.
-  const view: View =
-    viewParam === "result" || viewParam === "upload"
+  const view: View = forceUpload
+    ? "upload"
+    : viewParam === "result" || viewParam === "upload"
       ? viewParam
       : (stored?.view ??
         (history.some((e) => (e.source ?? "fn") === "transcribe")
@@ -414,6 +421,11 @@ export function TranscribePage({
     if (newest.id === jobBaselineId) return;
     // New entry appeared (or first entry after empty baseline).
     if (jobBaselineId == null || newest.id !== jobBaselineId) {
+      // Work-first flow: the work id is back-linked after create_work, so wait for it.
+      if (onTranscribed) {
+        if (newest.work_id) onTranscribed(newest.work_id);
+        return;
+      }
       go("result", {
         id: newest.id,
         processingName: null,
@@ -428,7 +440,7 @@ export function TranscribePage({
         void invoke("cleanup_download_job", { jobDir: dir }).catch(() => {});
       }
     }
-  }, [go, jobBaselineId, processingName, sessionEntries]);
+  }, [go, jobBaselineId, processingName, sessionEntries, onTranscribed]);
 
   // Backend error while processing — also success path refreshes history.
   useEffect(() => {

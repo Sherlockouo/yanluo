@@ -33,6 +33,8 @@ export const works: Record<string, string> = {
   "works.list.title": "Works",
   "works.list.empty": "No works yet. Transcribe a file and it is saved here automatically.",
   "works.list.goTranscribe": "Transcribe a file",
+  "works.list.newWork": "New transcription",
+  "works.new.title": "New transcription",
   "works.list.artifacts": "AI outputs {n}",
   "works.list.research": "Research {n}",
   "works.reader.hint": "Select text to highlight or comment",

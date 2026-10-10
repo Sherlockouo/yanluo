@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import { ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { PageShell } from "@/components/shared/page-shell";
 import { AsrPage } from "@/views/asr-page";
-import { TranscribePage } from "@/views/transcribe-page";
 import { HistoryPage } from "@/views/history-page";
 import { TranslatePage } from "@/views/translate-page";
 import { asrLanguageOptions, providerLabel } from "@/lib/constants";
@@ -18,7 +17,9 @@ import {
   type DraftMode,
 } from "@/lib/ui-session";
 
-const MODES: DraftMode[] = ["file", "live", "translate", "history"];
+// Bare /draft (no mode param) lands on live; 文件 transcription moved to 作品.
+const DEFAULT_MODE: DraftMode = "live";
+const MODES: DraftMode[] = ["live", "translate", "history"];
 
 function resolveInitialMode(param: string | null): {
   mode: DraftMode;
@@ -29,7 +30,7 @@ function resolveInitialMode(param: string | null): {
   if (stored && isDraftMode(stored.mode)) {
     return { mode: stored.mode, fromStorage: true };
   }
-  return { mode: "file", fromStorage: false };
+  return { mode: DEFAULT_MODE, fromStorage: false };
 }
 
 /**
@@ -91,7 +92,7 @@ export function DraftPage() {
   useEffect(() => {
     if (!seeded.current.fromStorage) return;
     const m = seeded.current.mode;
-    if (m === "file") return; // file = no mode param by convention
+    if (m === DEFAULT_MODE) return; // default mode = no mode param by convention
     setSearchParams(
       (prev) => {
         const p = new URLSearchParams(prev);
@@ -171,7 +172,7 @@ export function DraftPage() {
       if (next == null && seeded.current.fromStorage) return;
     }
     if (next == null) {
-      if (modeRef.current !== "file") applyMode(modeRef.current, "file");
+      if (modeRef.current !== DEFAULT_MODE) applyMode(modeRef.current, DEFAULT_MODE);
       return;
     }
     if (isDraftMode(next) && next !== modeRef.current) {
@@ -187,7 +188,7 @@ export function DraftPage() {
     setSearchParams(
       (prev) => {
         const p = new URLSearchParams(prev);
-        if (id === "file") p.delete("mode");
+        if (id === DEFAULT_MODE) p.delete("mode");
         else p.set("mode", id);
         return p;
       },
@@ -250,13 +251,6 @@ export function DraftPage() {
             )}
             aria-hidden={mode !== id}
           >
-            {id === "file" ? (
-              <TranscribePage
-                embedded
-                active={mode === "file"}
-                actionSlot={actionEl}
-              />
-            ) : null}
             {id === "live" ? (
               <AsrPage embedded active={mode === "live"} actionSlot={actionEl} />
             ) : null}

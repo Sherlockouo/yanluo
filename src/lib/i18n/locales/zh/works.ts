@@ -33,6 +33,8 @@ export const works: Record<string, string> = {
   "works.list.title": "作品",
   "works.list.empty": "还没有作品。转写一个文件后，它会自动保存到这里。",
   "works.list.goTranscribe": "去转写文件",
+  "works.list.newWork": "新转写",
+  "works.new.title": "新转写",
   "works.list.artifacts": "AI 产物 {n}",
   "works.list.research": "研究 {n}",
   "works.reader.hint": "选中文字即可高亮或评论",
