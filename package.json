@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "test": "node --experimental-strip-types src/lib/alignment.test.ts && node --experimental-strip-types src/lib/word-freq.test.ts && node --experimental-strip-types src/lib/learn-from-refine.test.ts && node --experimental-strip-types src/lib/vocabulary.test.ts",
+    "test": "node --experimental-strip-types src/lib/alignment.test.ts && node --experimental-strip-types src/lib/word-freq.test.ts && node --experimental-strip-types src/lib/learn-from-refine.test.ts && node --experimental-strip-types src/lib/vocabulary.test.ts && node --experimental-strip-types src/lib/timestamps.test.ts",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",

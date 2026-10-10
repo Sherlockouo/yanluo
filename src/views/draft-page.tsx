@@ -1,5 +1,6 @@
 import { startTransition, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { PageShell } from "@/components/shared/page-shell";
 import { AsrPage } from "@/views/asr-page";
 import { TranscribePage } from "@/views/transcribe-page";
@@ -206,46 +207,23 @@ export function DraftPage() {
         </div>
         <div className="dmast-row">
           <h1 className="dmast-title">{t("draft.title")}</h1>
-          <nav
-            className="dmodes"
-            role="tablist"
+          <ToggleButtonGroup
             aria-label={t("draft.modesAria")}
-            aria-orientation="horizontal"
-            onKeyDown={(e) => {
-              // ARIA tab pattern: ←/→ move between modes, Home/End jump.
-              const i = MODES.indexOf(mode);
-              let next: DraftMode | null = null;
-              if (e.key === "ArrowRight") next = MODES[(i + 1) % MODES.length]!;
-              else if (e.key === "ArrowLeft")
-                next = MODES[(i - 1 + MODES.length) % MODES.length]!;
-              else if (e.key === "Home") next = MODES[0]!;
-              else if (e.key === "End") next = MODES[MODES.length - 1]!;
-              if (!next) return;
-              e.preventDefault();
-              selectMode(next);
-              e.currentTarget
-                .querySelector<HTMLButtonElement>(`[data-mode="${next}"]`)
-                ?.focus();
+            selectionMode="single"
+            disallowEmptySelection
+            selectedKeys={[mode]}
+            onSelectionChange={(keys) => {
+              const id = [...keys][0] as DraftMode | undefined;
+              if (id != null && id !== mode) selectMode(id);
             }}
+            size="sm"
           >
-            {MODES.map((id) => {
-              const active = mode === id;
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  data-mode={id}
-                  aria-selected={active}
-                  tabIndex={active ? 0 : -1}
-                  className={cn("dmode", active && "is-active")}
-                  onClick={() => selectMode(id)}
-                >
-                  {t(`draft.mode.${id}`)}
-                </button>
-              );
-            })}
-          </nav>
+            {MODES.map((id) => (
+              <ToggleButton key={id} id={id}>
+                {t(`draft.mode.${id}`)}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
         </div>
         <div className="dmast-sub" data-tour="draft-hotkeys">
           <span>

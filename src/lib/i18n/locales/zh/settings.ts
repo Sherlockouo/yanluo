@@ -15,6 +15,13 @@ export const settings: Record<string, string> = {
   "settings.sub.refine": "纠错学习",
   "settings.sub.organize": "整理",
   "settings.sub.vocab": "词库",
+  "settings.sub.works": "作品",
+  "settings.works.provider": "作品生成服务商",
+  "settings.works.providerBlurb": "摘要 / 纪要 / 笔记等内容生成使用的 LLM · 默认跟随主模型",
+  "settings.works.providerFollow": "跟随主模型",
+  "settings.works.promptKind": "产物类型",
+  "settings.works.promptKindBlurb": "为每类产物单独覆盖提示词 · 恢复默认即清空覆盖",
+  "settings.works.prompt": "提示词（覆盖内置默认）",
   "settings.sub.hotkeys": "快捷键",
   "settings.sub.permissions": "权限",
 
@@ -67,6 +74,23 @@ export const settings: Record<string, string> = {
   "settings.asr.reload": "重新加载",
   "settings.asr.loadModel": "加载模型",
   "settings.asr.notLoadedWarning": "模型未加载 — 点「加载模型」后才能用 Fn 录音识别。",
+
+  // 云识别 (cloud ASR — file transcription only)
+  "cloudAsr.title": "云识别",
+  "cloudAsr.blurb": "云端识别供应商，仅用于文件 / 链接转写；Fn 实时听写始终用本地引擎。",
+  "cloudAsr.provider": "供应商",
+  "cloudAsr.model": "模型",
+  "cloudAsr.diarize": "说话人分离",
+  "cloudAsr.diarizeBlurb": "按说话人切分并在逐字稿中标注（需供应商支持，长音频会更慢）",
+  "cloudAsr.dashscopeKeyShared": "留空则复用「润色」里的通义（DashScope）Key",
+  "cloudAsr.engineAria": "识别引擎",
+  "cloudAsr.engineQwen": "本地 Qwen",
+  "cloudAsr.engineApple": "Apple",
+  "cloudAsr.engineCloud": "云端",
+  "cloudAsr.engineCloudBlurb": "云端识别仅用于文件 / 链接转写，Fn 实时听写不可用。",
+  "cloudAsr.notConfigured": "未配置 {label} 的 API Key —",
+  "cloudAsr.configureLink": "去设置配置",
+  "cloudAsr.speaker": "说话人 {n}",
 
   // VAD advanced fields
   "settings.vad.scene": "场景",
@@ -153,6 +177,10 @@ export const settings: Record<string, string> = {
   "settings.general.tour": "产品引导",
   "settings.general.tourBlurb": "再走一遍文稿 / 智能体 / 设置要点",
   "settings.general.tourButton": "再看一遍引导",
+  "settings.general.worksDir": "作品目录",
+  "settings.general.worksDirBlurb": "文件转写作品（逐字稿 / 笔记）的存放位置 · 留空用默认目录",
+  "settings.general.worksDirDefault": "默认目录",
+  "settings.general.worksDirOpen": "在 Finder 中打开",
 
   // Hotkeys panel
   "settings.hotkeys.slotTranscribe": "听写",

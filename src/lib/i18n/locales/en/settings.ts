@@ -15,6 +15,13 @@ export const settings: Record<string, string> = {
   "settings.sub.refine": "Corrections",
   "settings.sub.organize": "Organize",
   "settings.sub.vocab": "Vocabulary",
+  "settings.sub.works": "Works",
+  "settings.works.provider": "Works generation provider",
+  "settings.works.providerBlurb": "LLM used for summaries / minutes / notes · defaults to the main model",
+  "settings.works.providerFollow": "Follow main model",
+  "settings.works.promptKind": "Artifact kind",
+  "settings.works.promptKindBlurb": "Override the prompt per artifact kind · restore default clears the override",
+  "settings.works.prompt": "Prompt (overrides the built-in default)",
   "settings.sub.hotkeys": "Hotkeys",
   "settings.sub.permissions": "Permissions",
 
@@ -72,6 +79,23 @@ export const settings: Record<string, string> = {
   "settings.asr.loadModel": "Load model",
   "settings.asr.notLoadedWarning":
     "Model not loaded — press “Load model” before Fn recording can recognize.",
+
+  // Cloud ASR (file transcription only)
+  "cloudAsr.title": "Cloud recognition",
+  "cloudAsr.blurb": "Cloud ASR provider for file / link transcription only; live Fn dictation always uses a local engine.",
+  "cloudAsr.provider": "Provider",
+  "cloudAsr.model": "Model",
+  "cloudAsr.diarize": "Speaker diarization",
+  "cloudAsr.diarizeBlurb": "Split and label paragraphs by speaker (provider must support it; slower on long audio)",
+  "cloudAsr.dashscopeKeyShared": "Leave empty to reuse the DashScope key from Polish settings",
+  "cloudAsr.engineAria": "Recognition engine",
+  "cloudAsr.engineQwen": "Local Qwen",
+  "cloudAsr.engineApple": "Apple",
+  "cloudAsr.engineCloud": "Cloud",
+  "cloudAsr.engineCloudBlurb": "Cloud recognition works for file / link transcription only — not for live Fn dictation.",
+  "cloudAsr.notConfigured": "No API key for {label} —",
+  "cloudAsr.configureLink": "Configure in Settings",
+  "cloudAsr.speaker": "Speaker {n}",
 
   // VAD advanced fields
   "settings.vad.scene": "Scene",
@@ -160,6 +184,10 @@ export const settings: Record<string, string> = {
   "settings.general.tour": "Product tour",
   "settings.general.tourBlurb": "Replay the Dictation / Agents / Settings highlights",
   "settings.general.tourButton": "Replay tour",
+  "settings.general.worksDir": "Works folder",
+  "settings.general.worksDirBlurb": "Where file-transcription works (transcripts / notes) live · empty = default",
+  "settings.general.worksDirDefault": "Default folder",
+  "settings.general.worksDirOpen": "Reveal in Finder",
 
   // Hotkeys panel
   "settings.hotkeys.slotTranscribe": "Draft",

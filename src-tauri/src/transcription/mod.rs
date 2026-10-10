@@ -16,6 +16,8 @@ use crate::paste::*;
 mod translate_stream;
 pub(crate) use translate_stream::*;
 
+pub(crate) mod cloud;
+
 /// Shared blocking HTTP client for LLM calls. Always use a timeout — bare
 /// `Client::new()` can hang forever (Ollama cold load / bad URL) and freeze
 /// any Tauri command that runs on the async runtime without `spawn_blocking`.
@@ -202,7 +204,7 @@ pub(crate) fn refine_transcript_with_cases_abortable(
 }
 
 /// Shared OpenAI-compatible text transformation request.
-fn run_llm_transform(
+pub(crate) fn run_llm_transform(
     config: &AppConfig,
     input: &str,
     mut system: String,
@@ -1621,7 +1623,28 @@ pub(crate) fn finalize_successful_result(
             })
         };
 
-        append_history(app, result, &source, audio_path, media_kind);
+        let history_id = append_history(app, result, &source, audio_path.clone(), media_kind);
+
+        // 作品目录: folder per file/URL transcription. Failure must not fail
+        // the transcription — log and move on.
+        match crate::works::create_work(
+            &config,
+            result,
+            audio_path.as_deref(),
+            "file",
+            media_kind,
+            history_id.clone(),
+        ) {
+            Ok(work) => {
+                if let Some(hid) = history_id.as_deref() {
+                    crate::history::set_history_work_id(app, hid, &work.id);
+                }
+                let _ = app.emit("works-updated", ());
+            }
+            Err(e) => {
+                crate::elog::elog!("[works] create_work failed: {e}");
+            }
+        }
 
         if AsrEngine::finalize_aborted(app, gen) {
             crate::elog::elog!("[asr] finalize aborted after history (gen={gen})");
@@ -1719,91 +1742,6 @@ pub(crate) fn schedule_floating_idle(app: &AppHandle, delay_ms: u64) {
         }
         emit_floating_status(&app2, false, "idle", "", 0.0);
     });
-}
-
-pub(crate) fn transcribe_with_elevenlabs(config: &AppConfig, samples: &[f32]) -> Result<TranscriptionResult, String> {
-    if config.elevenlabs_api_key.trim().is_empty() {
-        return Err("ElevenLabs API Key not configured".into());
-    }
-    let wav = samples_to_wav_bytes(samples)?;
-    let part = reqwest::blocking::multipart::Part::bytes(wav)
-        .file_name("recording.wav")
-        .mime_str("audio/wav")
-        .map_err(|e| e.to_string())?;
-    let mut form = reqwest::blocking::multipart::Form::new()
-        .part("file", part)
-        .text("model_id", config.elevenlabs_model.clone())
-        .text("language_code", normalize_language_for_elevenlabs(&config.language))
-        .text("tag_audio_events", "false")
-        .text("timestamps_granularity", "word");
-    if !config.vocabulary.is_empty() {
-        form = form.text("keyterms", config.vocabulary.join(", "));
-    }
-
-    #[derive(Deserialize)]
-    struct ElevenLabsWord {
-        text: String,
-        start: Option<f64>,
-        end: Option<f64>,
-        #[serde(rename = "type")]
-        kind: Option<String>,
-    }
-
-    #[derive(Deserialize)]
-    struct ElevenLabsResponse {
-        text: Option<String>,
-        language_code: Option<String>,
-        words: Option<Vec<ElevenLabsWord>>,
-    }
-
-    let response = reqwest::blocking::Client::new()
-        .post("https://api.elevenlabs.io/v1/speech-to-text")
-        .header("xi-api-key", config.elevenlabs_api_key.trim())
-        .multipart(form)
-        .send()
-        .map_err(|e| e.to_string())?;
-    if !response.status().is_success() {
-        return Err(format!("ElevenLabs HTTP {}", response.status()));
-    }
-    let parsed: ElevenLabsResponse = response.json().map_err(|e| e.to_string())?;
-    let text = parsed.text.unwrap_or_default();
-    let segments: Vec<TranscriptSegment> = parsed
-        .words
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|w| w.kind.as_deref() != Some("spacing"))
-        .filter_map(|w| {
-            let start = w.start?;
-            let end = w.end.unwrap_or(start);
-            if w.text.trim().is_empty() {
-                return None;
-            }
-            Some(TranscriptSegment {
-                text: w.text,
-                start,
-                end,
-            })
-        })
-        .collect();
-    let alignment = if segments.is_empty() {
-        None
-    } else {
-        Some(segments_to_character_alignment(&segments))
-    };
-    Ok(TranscriptionResult {
-        text: text.clone(),
-        raw_text: text,
-        llm_text: None,
-        language: parsed
-            .language_code
-            .unwrap_or_else(|| config.language.clone()),
-        duration_seconds: samples.len() as f64 / 16_000.0,
-        refined: false,
-        refine_failed: false,
-        error: None,
-        segments,
-        alignment,
-    })
 }
 
 #[cfg(target_os = "macos")]
@@ -2296,6 +2234,7 @@ pub(crate) fn transcribe_file_samples(
                                         text: item.text,
                                         start: item.start_time + offset,
                                         end: item.end_time + offset,
+                                        speaker: None,
                                     });
                                 }
                             }
@@ -2381,6 +2320,7 @@ pub(crate) fn maybe_align_chunk(
                     text: item.text,
                     start: item.start_time + offset,
                     end: item.end_time + offset,
+                    speaker: None,
                 })
                 .collect();
             crate::elog::elog!("[mlx-worker] ForcedAligner segments={}", segs.len());
@@ -4064,6 +4004,7 @@ pub(crate) fn mlx_worker(
                                         text: item.text,
                                         start: item.start_time,
                                         end: item.end_time,
+                                        speaker: None,
                                     })
                                     .collect();
                                 attach_segments(&mut result, segs);

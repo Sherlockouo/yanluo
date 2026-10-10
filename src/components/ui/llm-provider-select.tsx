@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Input, Label, ListBox, Select, TextField } from "@heroui/react";
-import { ChevronDown } from "lucide-react";
 import { Link } from "react-router-dom";
 import {
   activateLlmProviderPatch,
@@ -18,27 +17,6 @@ import type { LlmProvider } from "@/types";
 
 const CUSTOM = "__custom__";
 
-const boxedTriggerCls = cn(
-  "h-7 gap-1 rounded-lg bg-surface px-2.5",
-  "shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)_inset]",
-  "text-[12px] font-medium text-foreground items-center",
-  "transition-[background-color] duration-150",
-  "hover:bg-surface-secondary/60",
-);
-
-/*
-  Quiet mono variant (出稿 masthead contract): no box, no shadow — a text item
-  with a ▾ chevron, muted ink → foreground on hover. Matches .dlink language.
-*/
-const quietTriggerCls = cn(
-  "h-7 gap-1 rounded-none border-0 bg-transparent px-0 shadow-none",
-  "font-mono text-[12px] font-normal text-muted items-center",
-  "transition-[color,opacity] duration-150",
-  "hover:bg-transparent hover:text-foreground",
-  "data-[hovered=true]:bg-transparent data-[hovered=true]:text-foreground",
-  "data-[pressed=true]:opacity-60",
-);
-
 /**
  * Compact provider + model picker for feature-page headers.
  * Credentials live in Settings; this only switches the active provider/model
@@ -46,16 +24,9 @@ const quietTriggerCls = cn(
  */
 export function LlmProviderSelect({
   className,
-  quiet = false,
-  triggerCls,
 }: {
   className?: string;
-  /** De-boxed mono text triggers for editorial mastheads (出稿 翻译). */
-  quiet?: boolean;
-  /** Explicit trigger class override (e.g. "qsel-quiet") — wins over quiet/default. */
-  triggerCls?: string;
 }) {
-  const trigger = triggerCls ?? (quiet ? quietTriggerCls : boxedTriggerCls);
   const t = useT();
   const { config, saveConfig } = useApp();
   const reduce = useReducedMotion();
@@ -113,9 +84,9 @@ export function LlmProviderSelect({
           activate(String(key) as LlmProvider);
         }}
       >
-        <Select.Trigger className={trigger}>
+        <Select.Trigger>
           <Select.Value>{() => providerLabel}</Select.Value>
-          <ChevronDown size={12} className="shrink-0 text-muted" />
+          <Select.Indicator />
         </Select.Trigger>
         <Select.Popover className="min-w-[9rem]">
           <ListBox>
@@ -153,11 +124,11 @@ export function LlmProviderSelect({
             setModel(id);
           }}
         >
-          <Select.Trigger className={trigger}>
+          <Select.Trigger>
             <Select.Value>
               {() => config.llm_model || t("common.llm.selectModel")}
             </Select.Value>
-            <ChevronDown size={12} className="shrink-0 text-muted" />
+            <Select.Indicator />
           </Select.Trigger>
           <Select.Popover className="min-w-[10rem]">
             <ListBox>

@@ -24,7 +24,7 @@ const RUST_PREFIXES: [string, string][] = [
   ["Model not loaded — 请先在设置 → 识别 加载 Qwen 模型", "hud.rustMsg.Model not loaded — 请先在设置 → 识别 加载 Qwen 模型"],
   ["未授权语音识别 — 设置 → 系统 → 权限，打开「语音识别」", "hud.rustMsg.未授权语音识别 — 设置 → 系统 → 权限，打开「语音识别」"],
   ["Apple Speech 仅支持 macOS，请改用 Qwen 本地识别", "hud.rustMsg.Apple Speech 仅支持 macOS，请改用 Qwen 本地识别"],
-  ["ElevenLabs 已移除 — 请在设置 → 识别 改选 Apple 或 Qwen", "hud.rustMsg.ElevenLabs 已移除 — 请在设置 → 识别 改选 Apple 或 Qwen"],
+  ["云识别目前仅支持文件转写 — 请在设置 → 识别 改选本地引擎（Apple 或 Qwen）", "hud.rustMsg.云识别目前仅支持文件转写 — 请在设置 → 识别 改选本地引擎（Apple 或 Qwen）"],
   ["已写入剪切板，但粘贴失败（请检查辅助功能权限）", "hud.rustMsg.已写入剪切板，但粘贴失败（请检查辅助功能权限）"],
   ["粘贴失败，文字已在剪贴板", "hud.rustMsg.粘贴失败，文字已在剪贴板"],
   ["切换目标语言后重译失败", "hud.rustMsg.切换目标语言后重译失败"],

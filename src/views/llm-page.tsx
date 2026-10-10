@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   Button,
   Chip,
+  Dropdown,
   Input,
   Label,
   Switch,
@@ -10,7 +11,6 @@ import {
   TextField,
   toast,
 } from "@heroui/react";
-import { Link } from "react-router-dom";
 import {
   BookOpen,
   ChevronDown,
@@ -19,8 +19,9 @@ import {
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { motion, useReducedMotion } from "framer-motion";
+import { motion } from "framer-motion";
 import {
+  InfoTip,
   PageHeader,
   PageShell,
   Reveal,
@@ -32,7 +33,7 @@ import { useApp } from "@/app-context";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
 import { DEFAULT_LLM_REFINE_PROMPT } from "@/lib/constants";
-import { duration, easeOut, springUI } from "@/lib/motion";
+import { duration, easeOut } from "@/lib/motion";
 import type { HistoryEntry } from "@/types";
 import { learnGold } from "@/lib/learn-cases";
 
@@ -100,8 +101,6 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
     applyLearnedTerms,
   } = useApp();
 
-  const reducedMotion = useReducedMotion();
-
   // ─── LLM config state
   const llmReady = Boolean(
     config.llm_api_base_url?.trim() && config.llm_model?.trim(),
@@ -114,7 +113,6 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [query, setQuery] = useState("");
   const [distilling, setDistilling] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [testingLlm, setTestingLlm] = useState(false);
 
   // ─── Delete confirm state (two-step inline)
@@ -253,50 +251,28 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   const headerAction = (
     <div className="flex items-center gap-1.5">
-      <div className="relative">
+      <Dropdown>
         <Button
           size="sm"
           variant="ghost"
           aria-label={t("learn.moreActionsAria")}
-          aria-haspopup="menu"
-          aria-expanded={moreMenuOpen}
-          onPress={() => setMoreMenuOpen((v) => !v)}
         >
           <MoreHorizontal size={16} />
         </Button>
-        {moreMenuOpen && (
-          <>
-            <div
-              role="presentation"
-              className="fixed inset-0 z-40"
-              onClick={() => setMoreMenuOpen(false)}
-            />
-            <motion.div
-              role="menu"
-              className="absolute right-0 top-full z-50 mt-1 min-w-[10rem] rounded-xl border border-border bg-surface p-1 shadow-lg"
-              initial={reducedMotion ? false : { opacity: 0.92, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={springUI}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setMoreMenuOpen(false);
-              }}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-default/60"
-                onClick={() => {
-                  setMoreMenuOpen(false);
-                  void runAiDistill();
-                }}
-              >
-                <Sparkles size={14} />
-                {t("learn.distillFromHistory")}
-              </button>
-            </motion.div>
-          </>
-        )}
-      </div>
+        <Dropdown.Popover placement="bottom end">
+          <Dropdown.Menu
+            aria-label={t("learn.moreActionsAria")}
+            onAction={(key) => {
+              if (key === "distill") void runAiDistill();
+            }}
+          >
+            <Dropdown.Item id="distill" textValue={t("learn.distillFromHistory")}>
+              <Sparkles size={14} />
+              {t("learn.distillFromHistory")}
+            </Dropdown.Item>
+          </Dropdown.Menu>
+        </Dropdown.Popover>
+      </Dropdown>
       <Button
         size="sm"
         variant="secondary"
@@ -312,8 +288,10 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
       {embedded ? (
         <div className="set-row-line">
           <div className="set-row-line-lab">
-            {t("learn.correctionsTitle")}
-            <small>{t("learn.embeddedDesc")}</small>
+            <span className="inline-flex items-center gap-1">
+              {t("learn.correctionsTitle")}
+              <InfoTip content={t("learn.embeddedDesc")} />
+            </span>
           </div>
           <div className="set-row-line-ctl">
             <Switch
@@ -327,7 +305,7 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
                 </Switch.Control>
               </Switch.Content>
             </Switch>
-            <LlmProviderSelect triggerCls="qsel-quiet" />
+            <LlmProviderSelect />
             <button
               type="button"
               className="dlink muted shrink-0 inline-flex items-center gap-1"
@@ -391,7 +369,12 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
             >
               <Switch.Content className="w-full justify-between gap-2 p-2">
                 <div className="min-w-0 pr-2">
-                  <div className="type-ui">{t("learn.enableCorrections")}</div>
+                  <div className="type-ui inline-flex items-center gap-1">
+                    {t("learn.enableCorrections")}
+                    <InfoTip
+                      content={`${t("learn.configHintPrefix")}${t("learn.configHintSettings")}${t("learn.configHintSuffix")}`}
+                    />
+                  </div>
                 </div>
                 <Switch.Control>
                   <Switch.Thumb />
@@ -399,17 +382,6 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
               </Switch.Content>
             </Switch>
           </div>
-
-          <p className="type-meta">
-            {t("learn.configHintPrefix")}{" "}
-            <Link
-              to="/settings?tab=llm"
-              className="text-accent-soft-foreground hover:underline"
-            >
-              {t("learn.configHintSettings")}
-            </Link>
-            {t("learn.configHintSuffix")}
-          </p>
 
           <TextField
             fullWidth
@@ -461,11 +433,9 @@ export function LlmPage({ embedded = false }: { embedded?: boolean } = {}) {
           <span className="dropzone-ic">
             <BookOpen size={22} aria-hidden />
           </span>
-          <span className="dropzone-t">
+          <span className="dropzone-t inline-flex items-center gap-1.5">
             {t("learn.emptyTitle")}
-          </span>
-          <span className="dropzone-fmt">
-            {t("learn.emptyHint")}
+            <InfoTip content={t("learn.emptyHint")} />
           </span>
         </div>
       ) : (

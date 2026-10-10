@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { Kbd, ListBox, Select } from "@heroui/react";
-import { ChevronDown, Languages } from "lucide-react";
+import { Languages } from "lucide-react";
 import { PageHeader, PageShell, Reveal } from "@/components/shared/page-shell";
 import { SemanticPair } from "@/components/ui/refine-diff";
 import { LlmProviderSelect } from "@/components/ui/llm-provider-select";
@@ -62,7 +62,7 @@ export function TranslatePage({
         setTargetLanguage(String(key));
       }}
     >
-      <Select.Trigger className="qsel-quiet">
+      <Select.Trigger>
         <Select.Value>
           {() => (
             <span className="inline-flex items-center gap-1.5">
@@ -70,7 +70,7 @@ export function TranslatePage({
             </span>
           )}
         </Select.Value>
-        <ChevronDown size={12} className="shrink-0 text-muted" />
+        <Select.Indicator />
       </Select.Trigger>
       <Select.Popover className="min-w-[10rem]">
         <ListBox>
@@ -95,7 +95,7 @@ export function TranslatePage({
       <span className="text-muted/40">·</span>
       {targetSelect}
       <span className="text-muted/40">·</span>
-      <LlmProviderSelect triggerCls="qsel-quiet" />
+      <LlmProviderSelect />
     </div>
   );
   const headerAction = (
@@ -116,7 +116,7 @@ export function TranslatePage({
               style={active ? undefined : { display: "none" }}
             >
               {targetSelect}
-              <LlmProviderSelect triggerCls="qsel-quiet" />
+              <LlmProviderSelect />
               <Link to={PROMPT_SETTINGS_URL} className="dlink muted">
                 {t("translate.configure")} ▾
               </Link>

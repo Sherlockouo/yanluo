@@ -60,4 +60,6 @@ export const transcribe: Record<string, string> = {
   "transcribe.empty": "（空）",
   "transcribe.confirmDelete": "确定删除？",
   "transcribe.delete": "删除",
+  "transcribe.work.openFolder": "打开目录",
+  "transcribe.work.titleAria": "作品标题",
 };

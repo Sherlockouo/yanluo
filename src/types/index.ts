@@ -6,7 +6,10 @@ export type RecState =
   | "organizing"
   | "editing";
 
-export type AsrProvider = "qwen" | "apple";
+export type AsrProvider = "qwen" | "apple" | "cloud";
+
+/** Cloud ASR vendor id (cloud_asr_provider / cloud_asr_credentials key). */
+export type CloudAsrProviderId = "elevenlabs" | "openai" | "dashscope";
 
 /** Built-in provider presets. User-added custom providers use arbitrary string ids. */
 export type LlmBuiltinProvider =
@@ -128,9 +131,9 @@ export type AppConfig = {
   /** Catalog id e.g. Qwen3-ASR-0.6B */
   asr_model_id: string;
   asr_provider: AsrProvider;
-  /** @deprecated ElevenLabs ASR removed — kept for config.json compat. */
+  /** Legacy flat ElevenLabs creds — migrated into cloud_asr_credentials on load. Kept for downgrade compat. */
   elevenlabs_api_key: string;
-  /** @deprecated */
+  /** @deprecated see elevenlabs_api_key */
   elevenlabs_model: string;
   language: string;
   /** Shift+Fn 翻译目标语言（不含 auto）。 */
@@ -198,13 +201,34 @@ export type AppConfig = {
   /** Empty = built-in default; `{target}` replaced with language name. */
   llm_translate_prompt: string;
   vocabulary: string[];
+  /** Custom works root (作品目录). Empty = app data dir / works. */
+  works_dir: string;
+  /** Works pipeline LLM provider. Empty = follow main llm_*. */
+  works_llm_provider: string;
+  /** Per-kind works prompt overrides (empty/missing = built-in). */
+  works_prompts: Record<string, string>;
+  /** Active cloud ASR vendor (elevenlabs | openai | dashscope), used when asr_provider = "cloud". */
+  cloud_asr_provider: CloudAsrProviderId;
+  /** Per-vendor cloud ASR credentials. */
+  cloud_asr_credentials: Record<string, CloudAsrCredential>;
 };
 
-/** Word/char timing span from ForcedAligner or ElevenLabs words. */
+/** Per-vendor cloud ASR credentials (mirrors Rust CloudAsrCredential). */
+export type CloudAsrCredential = {
+  api_key: string;
+  model: string;
+  base_url: string;
+  /** 说话人分离 (vendor must support it). */
+  diarize: boolean;
+};
+
+/** Word/char timing span from ForcedAligner or cloud providers. */
 export type TranscriptSegment = {
   text: string;
   start: number;
   end: number;
+  /** Canonical speaker id ("speaker_N") when the provider diarized. */
+  speaker?: string | null;
 };
 
 /** ElevenLabs CharacterAlignmentResponseModel shape. */
@@ -243,6 +267,8 @@ export type HistoryEntry = {
   learn_status?: "suggested" | "distilled" | "applied" | "skipped" | null;
   /** Terms applied to vocab from this entry. */
   learn_terms?: string[];
+  /** Linked work (作品目录) id, set for file/URL transcriptions. */
+  work_id?: string | null;
 };
 
 export type FloatingPayload = {
@@ -284,6 +310,50 @@ export type TranscriptionResult = {
   error: string | null;
   segments?: TranscriptSegment[];
   alignment?: CharacterAlignment | null;
+};
+
+/** AI artifact state in a work folder (作品目录). Filled by later phases. */
+export type ArtifactState = {
+  status: "pending" | "running" | "done" | "failed";
+  /** Path relative to the work folder. */
+  path: string;
+  updated_at: string;
+  error?: string | null;
+};
+
+/** One work folder's index (work.json). */
+export type Work = {
+  id: string;
+  title: string;
+  slug: string;
+  created_at: string;
+  /** "file" | "url" */
+  source: string;
+  /** "audio" | "video" */
+  media_kind: string;
+  duration_seconds: number;
+  asr_provider: string;
+  language: string;
+  /** Media file name inside the work folder (audio.<ext>). */
+  audio_file?: string | null;
+  /** Back-link to the spawning history entry. */
+  history_id?: string | null;
+  artifacts: Record<string, ArtifactState>;
+  /** Agent research runs, newest first. */
+  research: WorkResearchEntry[];
+};
+
+export type WorkResearchEntry = {
+  /** Agent job id; also the report file stem. */
+  id: string;
+  question: string;
+  /** "running" | "done" | "failed" | "cancelled" */
+  status: string;
+  /** Report path relative to the work folder. */
+  path: string;
+  created_at: string;
+  updated_at: string;
+  error?: string | null;
 };
 
 /** Narrow rail destinations — 出稿 / 派活 / 设置 (+ home). */

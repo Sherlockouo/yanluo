@@ -19,6 +19,7 @@ mod platform;
 mod state;
 mod transcription;
 mod update;
+mod works;
 
 pub(crate) use hotkey::*;
 pub(crate) use hud::*;
@@ -201,6 +202,17 @@ pub fn main() {
             commands::set_learn_pair_enabled,
             commands::delete_learn_pair,
             commands::get_learn_stats,
+            commands::works_list,
+            commands::works_get,
+            commands::works_rename,
+            commands::works_delete,
+            commands::works_read_artifact,
+            commands::works_write_artifact,
+            commands::works_open_in_finder,
+            commands::works_open_root,
+            commands::works_generate_artifact,
+            commands::works_cancel_artifact,
+            commands::works_start_research,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

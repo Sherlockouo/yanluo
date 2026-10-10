@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { createPortal } from "react-dom";
 import { ListBox, Select } from "@heroui/react";
 import { Link } from "react-router-dom";
-import { ChevronDown, Mic } from "lucide-react";
+import { Mic } from "lucide-react";
 import { QWEN_ASR_MODELS, providerLabel } from "@/lib/constants";
 import { PageHeader, PageShell, Reveal } from "@/components/shared/page-shell";
 import { hasRefineDiff, RefineDiff } from "@/components/ui/refine-diff";
@@ -56,9 +56,9 @@ export function AsrPage({
         void selectModel(String(key));
       }}
     >
-      <Select.Trigger className="qsel-quiet">
+      <Select.Trigger>
         <Select.Value />
-        <ChevronDown size={12} className="shrink-0 text-muted" />
+        <Select.Indicator />
       </Select.Trigger>
       <Select.Popover className="min-w-[10rem]">
         <ListBox>

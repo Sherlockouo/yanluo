@@ -377,6 +377,27 @@ export function resolveAlignment(entry: {
   return null;
 }
 
+/**
+ * Speaker ("speaker_N") covering time `t`, from diarized cloud segments.
+ * Segments may be word- or sentence-level; a small epsilon keeps boundary
+ * words on their own speaker.
+ */
+export function speakerAtTime(
+  segments: TranscriptSegment[] | null | undefined,
+  t: number,
+): string | null {
+  if (!segments) return null;
+  let found: string | null = null;
+  for (const seg of segments) {
+    if (!seg.speaker) continue;
+    if (seg.start - 1e-3 <= t && t <= seg.end + 0.25) {
+      found = seg.speaker;
+    }
+    if (seg.start > t + 0.25 && found != null) break;
+  }
+  return found;
+}
+
 export function isVideoMediaKind(kind?: string | null, path?: string | null): boolean {
   if (kind === "video") return true;
   if (kind === "audio") return false;

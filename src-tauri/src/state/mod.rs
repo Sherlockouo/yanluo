@@ -127,6 +127,9 @@ pub struct AsrEngine {
     pub(crate) translate_stream: Mutex<TranslateStreamState>,
     /// Fn/translate confirm-then-paste slot.
     pub(crate) pending_hud_confirm: Mutex<Option<PendingHudConfirm>>,
+    /// In-flight works-pipeline artifact generation: `{work_id}:{kind}` → abort flag.
+    /// Presence = running (or cancel-requested); guards duplicate generation.
+    pub(crate) work_artifact_flags: Mutex<std::collections::HashMap<String, Arc<AtomicBool>>>,
     /// HUD meter — updated from capture callbacks, read by pump (no recorder lock).
     pub(crate) live_meter: Arc<LiveMeter>,
 }
@@ -188,6 +191,7 @@ impl AsrEngine {
             session_mode: Mutex::new("fn".into()),
             translate_stream: Mutex::new(TranslateStreamState::default()),
             pending_hud_confirm: Mutex::new(None),
+            work_artifact_flags: Mutex::new(std::collections::HashMap::new()),
             live_meter: Arc::new(LiveMeter::default()),
             learn_state,
         }

@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { Button } from "@heroui/react";
-import { ChevronDown } from "lucide-react";
+import { Button, Tooltip } from "@heroui/react";
+import { ChevronDown, CircleHelp } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { useT } from "@/lib/i18n";
 import {
   duration,
   easeOut,
@@ -11,6 +12,22 @@ import {
   useFadeSlide,
   useValueSwap,
 } from "@/lib/motion";
+
+/** ? affordance — descriptive text lives in a hover/focus tooltip, not on the page. */
+export function InfoTip({ content, label }: { content: ReactNode; label?: string }) {
+  const t = useT();
+  return (
+    <Tooltip delay={200} closeDelay={0}>
+      <Tooltip.Trigger
+        className="info-tip"
+        aria-label={label ?? t("common.infoTipAria")}
+      >
+        <CircleHelp size={12} aria-hidden />
+      </Tooltip.Trigger>
+      <Tooltip.Content className="max-w-72">{content}</Tooltip.Content>
+    </Tooltip>
+  );
+}
 
 export function PageHeader({
   title,

@@ -1,5 +1,4 @@
 import {
-  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -22,6 +21,8 @@ import {
   Switch,
   TextArea,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@heroui/react";
 import { toast } from "@/lib/toast";
 import {
@@ -29,6 +30,8 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleAlert,
+  Cloud,
+  Compass,
   Cpu,
   Download,
   Ear,
@@ -58,6 +61,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { open as openExternal } from "@tauri-apps/plugin-shell";
 import {
   CollapseTrigger,
+  InfoTip,
   PageHeader,
   PageShell,
   Reveal,
@@ -72,9 +76,14 @@ import { playSfx, readSfxEnabled, setSfxEnabled, unlockSfx } from "@/lib/sfx";
 import {
   activateLlmProviderPatch,
   agentModelsFor,
+  CLOUD_ASR_PROVIDERS,
+  cloudAsrPreset,
   defaultConfig,
   DEFAULT_LLM_ORGANIZE_PROMPT,
   DEFAULT_LLM_TRANSLATE_PROMPT,
+  DEFAULT_WORK_PROMPTS,
+  WORK_ARTIFACT_KINDS,
+  type WorkArtifactKind,
   hotkeySegments,
   listLlmProviders,
   llmPreset,
@@ -85,6 +94,7 @@ import {
   QWEN_ASR_MODELS,
   qwenModelIdForPath,
   RECOMMENDED_REFINE_MODELS,
+  resolveCloudAsrCreds,
   resolveLlmCreds,
 } from "@/lib/constants";
 import {
@@ -104,6 +114,8 @@ import type {
   AgentKind,
   AgentProfile,
   AsrProvider,
+  CloudAsrCredential,
+  CloudAsrProviderId,
   ExtraLanguage,
   HotkeyBinding,
   LlmCredential,
@@ -126,7 +138,7 @@ import {
   type SettingsTab,
 } from "@/lib/ui-session";
 
-type PolishSub = "config" | "refine" | "organize" | "vocab";
+type PolishSub = "config" | "refine" | "organize" | "vocab" | "works";
 type SystemSub = "hotkeys" | "permissions";
 
 /**
@@ -263,6 +275,7 @@ const POLISH_SUBS: { id: PolishSub; labelKey: string }[] = [
   { id: "refine", labelKey: "settings.sub.refine" },
   { id: "organize", labelKey: "settings.sub.organize" },
   { id: "vocab", labelKey: "settings.sub.vocab" },
+  { id: "works", labelKey: "settings.sub.works" },
 ];
 
 const SYSTEM_SUBS: { id: SystemSub; labelKey: string }[] = [
@@ -281,8 +294,8 @@ const TAB_DESC_KEYS: Record<SettingsTab, string> = {
 };
 
 /**
- * Quiet 文字开关 (v3.1) — 「·」-separated options, no box; active option gets
- * 600 weight + 2px accent underline. Same language as .tswitch on 出稿.
+ * Segmented option control — HeroUI ToggleButtonGroup (native component,
+ * single selection, keyboard/ARIA built in). Same props at every call site.
  */
 function QSwitch<T extends string>({
   options,
@@ -296,32 +309,23 @@ function QSwitch<T extends string>({
   ariaLabel: string;
 }) {
   return (
-    <div className="qswitch" role="radiogroup" aria-label={ariaLabel}>
-      {options.map((item, i) => {
-        const active = value === item.id;
-        return (
-          <Fragment key={item.id}>
-            {i > 0 ? (
-              <span className="sep" aria-hidden>
-                ·
-              </span>
-            ) : null}
-            <button
-              type="button"
-              role="radio"
-              aria-checked={active}
-              className={cn(
-                "o rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-                active && "on",
-              )}
-              onClick={() => onChange(item.id)}
-            >
-              {item.label}
-            </button>
-          </Fragment>
-        );
-      })}
-    </div>
+    <ToggleButtonGroup
+      aria-label={ariaLabel}
+      selectionMode="single"
+      disallowEmptySelection
+      selectedKeys={[value]}
+      onSelectionChange={(keys) => {
+        const id = [...keys][0] as T | undefined;
+        if (id != null && id !== value) onChange(id);
+      }}
+      size="sm"
+    >
+      {options.map((item) => (
+        <ToggleButton key={item.id} id={item.id}>
+          {item.label}
+        </ToggleButton>
+      ))}
+    </ToggleButtonGroup>
   );
 }
 
@@ -381,27 +385,22 @@ function SubTabs<T extends string>({
 }) {
   const t = useT();
   return (
-    <div className="set-subtabs" role="tablist">
-      {items.map((item) => {
-        const isActive = active === item.id;
-        return (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={isActive}
-            aria-current={isActive ? "true" : undefined}
-            className={cn(
-              "set-subtab rounded-t-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent",
-              isActive && "is-active",
-            )}
-            onClick={() => onSelect(item.id)}
-          >
-            {t(item.labelKey)}
-          </button>
-        );
-      })}
-    </div>
+    <ToggleButtonGroup
+      selectionMode="single"
+      disallowEmptySelection
+      selectedKeys={[active]}
+      onSelectionChange={(keys) => {
+        const id = [...keys][0] as T | undefined;
+        if (id != null && id !== active) onSelect(id);
+      }}
+      size="sm"
+    >
+      {items.map((item) => (
+        <ToggleButton key={item.id} id={item.id}>
+          {t(item.labelKey)}
+        </ToggleButton>
+      ))}
+    </ToggleButtonGroup>
   );
 }
 
@@ -596,11 +595,21 @@ export function SettingsPage() {
             className="flex flex-col gap-4"
           >
             <div>
-              <h2 className="set-sechead">{activeLabel}</h2>
+              <h2 className="set-sechead">
+                {activeLabel}
+                {tab === "agent" ? (
+                  <InfoTip content={t("settings.agent.intro")} />
+                ) : null}
+              </h2>
               <p className="set-secdesc">{t(TAB_DESC_KEYS[tab])}</p>
             </div>
             {tab === "general" ? <GeneralPanel /> : null}
-            {tab === "asr" ? <AsrProviderPanel /> : null}
+            {tab === "asr" ? (
+              <>
+                <AsrProviderPanel />
+                <CloudAsrPanel />
+              </>
+            ) : null}
             {tab === "polish" ? (
               <PolishPanel
                 sub={POLISH_SUBS.some((s) => s.id === sub) ? (sub as PolishSub) : "config"}
@@ -660,6 +669,7 @@ function PolishPanel({
         ) : null}
         {sub === "organize" ? <OrganizePanel /> : null}
         {sub === "vocab" ? <VocabularyPage embedded /> : null}
+        {sub === "works" ? <WorksPipelinePanel /> : null}
       </motion.div>
     </div>
   );
@@ -682,8 +692,8 @@ function OrganizePanel() {
             <span className="set-row-line-lab-title">
               <Sparkles size={14} className="set-row-ico" aria-hidden />
               {t("settings.organize.enable")}
+              <InfoTip content={t("settings.organize.blurb")} />
             </span>
-            <small>{t("settings.organize.blurb")}</small>
           </div>
           <div className="set-row-line-ctl">
             <Switch
@@ -700,8 +710,10 @@ function OrganizePanel() {
         </div>
         <div className="set-row-line">
           <div className="set-row-line-lab">
-            <span className="set-row-line-lab-title">{t("settings.organize.provider")}</span>
-            <small>{t("settings.organize.providerBlurb")}</small>
+            <span className="set-row-line-lab-title">
+              {t("settings.organize.provider")}
+              <InfoTip content={t("settings.organize.providerBlurb")} />
+            </span>
           </div>
           <div className="set-row-line-ctl">
             <Select
@@ -725,11 +737,11 @@ function OrganizePanel() {
                 );
               }}
             >
-              <Select.Trigger className="qsel-quiet">
+              <Select.Trigger>
                 <Select.Value>
                   {() => llmProviderLabel(config, selected)}
                 </Select.Value>
-                <ChevronDown size={12} className="shrink-0 text-muted" />
+                <Select.Indicator />
               </Select.Trigger>
               <Select.Popover className="min-w-[10rem]">
                 <ListBox>
@@ -771,6 +783,146 @@ function OrganizePanel() {
   );
 }
 
+/** 作品 AI 产物 — provider override + per-kind prompt overrides. */
+function WorksPipelinePanel() {
+  const { config, updateConfig, saveConfig } = useApp();
+  const t = useT();
+  const providers = listLlmProviders(config);
+  const selected = config.works_llm_provider || "";
+  const [kind, setKind] = useState<WorkArtifactKind>("summary");
+  const promptOverride = config.works_prompts?.[kind] ?? "";
+  const prompt = promptOverride.trim() ? promptOverride : DEFAULT_WORK_PROMPTS[kind];
+
+  const setPrompt = (value: string) => {
+    updateConfig("works_prompts", { ...config.works_prompts, [kind]: value });
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="set-lines">
+        <div className="set-row-line">
+          <div className="set-row-line-lab">
+            <span className="set-row-line-lab-title">
+              {t("settings.works.provider")}
+              <InfoTip content={t("settings.works.providerBlurb")} />
+            </span>
+          </div>
+          <div className="set-row-line-ctl">
+            <Select
+              className="inline-flex w-auto"
+              aria-label={t("settings.works.provider")}
+              selectedKey={selected || "__follow__"}
+              onSelectionChange={(key) => {
+                if (key == null) return;
+                const id = String(key);
+                if (id === "__follow__") {
+                  updateConfig("works_llm_provider", "");
+                  return;
+                }
+                const provider = id as LlmProvider;
+                const creds = resolveLlmCreds(config, provider);
+                void saveConfig(
+                  {
+                    ...config,
+                    works_llm_provider: provider,
+                    llm_credentials: {
+                      ...config.llm_credentials,
+                      [provider]: creds,
+                    },
+                  },
+                  { silent: true },
+                );
+              }}
+            >
+              <Select.Trigger>
+                <Select.Value>
+                  {() =>
+                    selected
+                      ? llmProviderLabel(config, selected)
+                      : t("settings.works.providerFollow")
+                  }
+                </Select.Value>
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover className="min-w-[10rem]">
+                <ListBox>
+                  <ListBox.Item
+                    id="__follow__"
+                    textValue={t("settings.works.providerFollow")}
+                  >
+                    {t("settings.works.providerFollow")}
+                    <ListBox.ItemIndicator />
+                  </ListBox.Item>
+                  {providers.map((provider) => (
+                    <ListBox.Item key={provider.id} id={provider.id} textValue={provider.label}>
+                      {provider.label}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+          </div>
+        </div>
+        <div className="set-row-line">
+          <div className="set-row-line-lab">
+            <span className="set-row-line-lab-title">
+              {t("settings.works.promptKind")}
+              <InfoTip content={t("settings.works.promptKindBlurb")} />
+            </span>
+          </div>
+          <div className="set-row-line-ctl">
+            <Select
+              className="inline-flex w-auto"
+              aria-label={t("settings.works.promptKind")}
+              selectedKey={kind}
+              onSelectionChange={(key) => {
+                if (key == null) return;
+                setKind(String(key) as WorkArtifactKind);
+              }}
+            >
+              <Select.Trigger>
+                <Select.Value />
+                <Select.Indicator />
+              </Select.Trigger>
+              <Select.Popover className="min-w-[10rem]">
+                <ListBox>
+                  {WORK_ARTIFACT_KINDS.map((k) => (
+                    <ListBox.Item key={k.id} id={k.id} textValue={t(k.labelKey)}>
+                      {t(k.labelKey)}
+                      <ListBox.ItemIndicator />
+                    </ListBox.Item>
+                  ))}
+                </ListBox>
+              </Select.Popover>
+            </Select>
+          </div>
+        </div>
+      </div>
+
+      <TextField
+        fullWidth
+        variant="secondary"
+        value={prompt}
+        onChange={setPrompt}
+      >
+        <Label>{t("settings.works.prompt")}</Label>
+        <TextArea rows={10} className="min-h-[12rem] font-mono type-meta !text-[12px]" />
+      </TextField>
+      <div className="flex justify-end">
+        <Button
+          size="sm"
+          variant="ghost"
+          onPress={() => setPrompt(DEFAULT_WORK_PROMPTS[kind])}
+        >
+          <RotateCcw size={14} />
+          {t("common.restoreDefault")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 /** 系统 — 快捷键 + 权限 as 二级 sub-sections. */
 function SystemPanel({
   sub,
@@ -798,6 +950,146 @@ function SystemPanel({
         {sub === "permissions" ? <PermissionsPanel /> : null}
       </motion.div>
     </div>
+  );
+}
+
+/** 云识别 — 供应商凭证 + 说话人分离（仅文件转写；Fn 实时听写始终用本地引擎）. */
+function CloudAsrPanel() {
+  const { config, updateConfig } = useApp();
+  const t = useT();
+  const provider = config.cloud_asr_provider || "elevenlabs";
+  const preset = cloudAsrPreset(provider);
+  const creds = resolveCloudAsrCreds(config, provider);
+
+  const patchCreds = (patch: Partial<CloudAsrCredential>) => {
+    const next = { ...resolveCloudAsrCreds(config, provider), ...patch };
+    updateConfig("cloud_asr_credentials", {
+      ...config.cloud_asr_credentials,
+      [provider]: next,
+    });
+  };
+
+  const selectProvider = (next: CloudAsrProviderId) => {
+    updateConfig("cloud_asr_provider", next);
+    // Seed the freshly picked vendor's preset so the fields show defaults.
+    if (!config.cloud_asr_credentials?.[next]) {
+      updateConfig("cloud_asr_credentials", {
+        ...config.cloud_asr_credentials,
+        [next]: resolveCloudAsrCreds(config, next),
+      });
+    }
+  };
+
+  return (
+    <SectionCard className="flex flex-col gap-5">
+      <div>
+        <div className="set-group-t">
+          <Cloud size={14} className="set-row-ico" aria-hidden />
+          {t("cloudAsr.title")}
+          <InfoTip content={t("cloudAsr.blurb")} />
+        </div>
+      </div>
+
+      <Select
+        className="w-full flex"
+        selectedKey={provider}
+        onSelectionChange={(key) => {
+          if (key == null) return;
+          selectProvider(String(key) as CloudAsrProviderId);
+        }}
+      >
+        <Label>{t("cloudAsr.provider")}</Label>
+        <Select.Trigger className="set-select-box">
+          <Select.Value />
+          <ChevronDown size={14} className="shrink-0 text-muted opacity-70" />
+        </Select.Trigger>
+        <Select.Popover>
+          <ListBox className="gap-3 p-3">
+            {CLOUD_ASR_PROVIDERS.map((p) => (
+              <ListBox.Item key={p.id} id={p.id} textValue={p.label}>
+                {p.label}
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
+            ))}
+          </ListBox>
+        </Select.Popover>
+      </Select>
+
+      <TextField
+        fullWidth
+        variant="secondary"
+        type="password"
+        value={creds.api_key}
+        onChange={(value) => patchCreds({ api_key: value })}
+      >
+        <Label>API Key</Label>
+        <Input placeholder={t("settings.llm.apiKeyPlaceholder")} />
+      </TextField>
+      {provider === "dashscope" && !creds.api_key.trim() ? (
+        <p className="-mt-3 type-meta text-muted">{t("cloudAsr.dashscopeKeyShared")}</p>
+      ) : null}
+
+      <TextField
+        fullWidth
+        variant="secondary"
+        value={creds.base_url}
+        onChange={(value) => patchCreds({ base_url: value })}
+      >
+        <Label>API Base URL</Label>
+        <Input placeholder={preset.baseUrl} className="font-mono text-[13px]" />
+      </TextField>
+
+      <TextField
+        fullWidth
+        variant="secondary"
+        value={creds.model}
+        onChange={(value) => patchCreds({ model: value })}
+      >
+        <Label>{t("cloudAsr.model")}</Label>
+        <Input
+          placeholder={preset.models[0] ?? t("settings.llm.modelPlaceholder")}
+          className="font-mono text-[13px]"
+        />
+      </TextField>
+      {preset.models.length > 0 ? (
+        <div className="-mt-1 flex flex-wrap gap-1.5">
+          {preset.models.map((m) => (
+            <button
+              key={m}
+              type="button"
+              className="rounded-md bg-surface-secondary px-2 py-1 font-mono text-[11px] text-muted transition-[color,background-color,transform] duration-100 ease-out hover:text-foreground active:scale-[0.96] motion-reduce:active:transform-none"
+              onClick={() => patchCreds({ model: m })}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {preset.diarize ? (
+        <div className="set-row-line">
+          <div className="set-row-line-lab">
+            <span className="set-row-line-lab-title">
+              {t("cloudAsr.diarize")}
+              <InfoTip content={t("cloudAsr.diarizeBlurb")} />
+            </span>
+          </div>
+          <div className="set-row-line-ctl">
+            <Switch
+              aria-label={t("cloudAsr.diarize")}
+              isSelected={creds.diarize}
+              onChange={(value) => patchCreds({ diarize: value })}
+            >
+              <Switch.Content className="gap-2">
+                <Switch.Control>
+                  <Switch.Thumb />
+                </Switch.Control>
+              </Switch.Content>
+            </Switch>
+          </div>
+        </div>
+      ) : null}
+    </SectionCard>
   );
 }
 
@@ -1010,9 +1302,17 @@ function AsrProviderPanel() {
                 {!qwenLocal ? t("settings.asr.qwenNotBuilt") : ""}
                 <ListBox.ItemIndicator />
               </ListBox.Item>
+              <ListBox.Item id="cloud" textValue={t("cloudAsr.engineCloud")}>
+                {t("cloudAsr.engineCloud")}
+                <ListBox.ItemIndicator />
+              </ListBox.Item>
             </ListBox>
           </Select.Popover>
         </Select>
+
+        {config.asr_provider === "cloud" ? (
+          <p className="type-meta">{t("cloudAsr.engineCloudBlurb")}</p>
+        ) : null}
 
         {config.asr_provider === "apple" ? (
           <p className="type-meta">{t("settings.asr.appleBlurb")}</p>
@@ -1081,9 +1381,7 @@ function AsrProviderPanel() {
                     <div className="flex items-center gap-1.5 type-ui">
                       <HardDrive size={14} className="shrink-0 opacity-70" />
                       {t("settings.asr.localModelsFound")}
-                    </div>
-                    <div className="mt-0.5 type-meta">
-                      {t("settings.asr.localModelsBlurb")}
+                      <InfoTip content={t("settings.asr.localModelsBlurb")} />
                     </div>
                   </div>
                   <Button
@@ -1183,9 +1481,9 @@ function AsrProviderPanel() {
             <SoftCollapse open={needsDownload}>
               <div className="flex flex-col gap-3 rounded-xl bg-default/40 p-4">
                 <div>
-                  <div className="type-ui">{t("settings.asr.needDownloadTitle")}</div>
-                  <div className="mt-0.5 type-meta">
-                    {t("settings.asr.needDownloadBlurb")}
+                  <div className="type-ui">
+                    {t("settings.asr.needDownloadTitle")}
+                    <InfoTip content={t("settings.asr.needDownloadBlurb")} />
                   </div>
                 </div>
                 {downloading && progress ? (
@@ -1284,15 +1582,15 @@ function AsrProviderPanel() {
       {isQwen ? (
         <Reveal index={1}>
         <SectionCard className="flex flex-col gap-3">
-          <CollapseTrigger
-            open={advancedOpen}
-            onToggle={() => setAdvancedOpen((v) => !v)}
-          >
-            {t("settings.asr.advancedTitle")}
-          </CollapseTrigger>
-          {!advancedOpen ? (
-            <p className="-mt-1 type-meta">{t("settings.asr.advancedBlurb")}</p>
-          ) : null}
+          <div className="flex items-center gap-1">
+            <CollapseTrigger
+              open={advancedOpen}
+              onToggle={() => setAdvancedOpen((v) => !v)}
+            >
+              {t("settings.asr.advancedTitle")}
+            </CollapseTrigger>
+            <InfoTip content={t("settings.asr.advancedBlurb")} />
+          </div>
           <SoftCollapse open={advancedOpen}>
             <div className="pt-1">
               <VadAdvancedFields config={config} updateConfig={updateConfig} />
@@ -1434,7 +1732,10 @@ function VadAdvancedFields({
       </div>
 
       <div className="flex flex-col gap-1.5">
-        <span className="type-meta">{t("settings.vad.speed")}</span>
+        <span className="type-meta">
+          {t("settings.vad.speed")}
+          <InfoTip content={t("settings.vad.speedHint")} />
+        </span>
         <QSwitch
           ariaLabel={t("settings.vad.speedAria")}
           value={config.vad_speed_preset === "fast" ? "fast" : "balanced"}
@@ -1446,7 +1747,6 @@ function VadAdvancedFields({
             { id: "fast" as const, label: t("settings.vad.speedFast") },
           ]}
         />
-        <p className="type-meta">{t("settings.vad.speedHint")}</p>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -1686,8 +1986,8 @@ function LlmProviderPanel() {
             <span className="set-row-line-lab-title">
               <Wand2 size={14} className="set-row-ico" aria-hidden />
               {t("settings.llm.enableRefine")}
+              <InfoTip content={t("settings.llm.enableRefineBlurb")} />
             </span>
-            <small>{t("settings.llm.enableRefineBlurb")}</small>
           </div>
           <div className="set-row-line-ctl">
             <Switch
@@ -1842,10 +2142,12 @@ function TranslatePromptSection() {
   return (
     <section className="flex flex-col gap-3">
       <div>
-        <div className="set-group-t">{t("settings.translatePrompt.title")}</div>
-        <p className="mt-1 type-meta">
-          {t("settings.translatePrompt.blurb", { placeholder: "{target}" })}
-        </p>
+        <div className="set-group-t">
+          {t("settings.translatePrompt.title")}
+          <InfoTip
+            content={t("settings.translatePrompt.blurb", { placeholder: "{target}" })}
+          />
+        </div>
       </div>
       <TextField
         fullWidth
@@ -1998,7 +2300,10 @@ function ProviderEditor({
 
       <div className="-mt-1 flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="type-meta">{t("settings.llm.recommended")}</span>
+          <span className="type-meta">
+            {t("settings.llm.recommended")}
+            <InfoTip content={t("settings.llm.fewShotHint")} />
+          </span>
           {RECOMMENDED_REFINE_MODELS.map((rec) => (
             <button
               key={rec.model}
@@ -2010,7 +2315,6 @@ function ProviderEditor({
             </button>
           ))}
         </div>
-        <p className="type-meta">{t("settings.llm.fewShotHint")}</p>
       </div>
 
       <div className="flex flex-wrap justify-end gap-2">
@@ -2074,6 +2378,17 @@ function GeneralPanel() {
     // Prefer newly added as recognition language when still on auto? No — just list.
   };
 
+  const chooseWorksDir = async () => {
+    const selected = await openDialog({
+      directory: true,
+      multiple: false,
+      title: t("settings.general.worksDir"),
+    });
+    if (typeof selected === "string") {
+      updateConfig("works_dir", selected);
+    }
+  };
+
   const removeLanguage = (id: string) => {
     const next = (config.extra_languages ?? []).filter((e) => e.id !== id);
     updateConfig("extra_languages", next);
@@ -2120,8 +2435,8 @@ function GeneralPanel() {
           <span className="set-row-line-lab-title">
             <Languages size={14} className="set-row-ico" aria-hidden />
             {t("settings.general.uiLanguage")}
+            <InfoTip content={t("settings.general.uiLanguageBlurb")} />
           </span>
-          <small>{t("settings.general.uiLanguageBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
           <Select
@@ -2132,9 +2447,9 @@ function GeneralPanel() {
               setLocale(key);
             }}
           >
-            <Select.Trigger className="qsel">
+            <Select.Trigger>
               <Select.Value />
-              <ChevronDown size={12} className="qsel-chev shrink-0" />
+              <Select.Indicator />
             </Select.Trigger>
             <Select.Popover>
               <ListBox>
@@ -2158,8 +2473,8 @@ function GeneralPanel() {
           <span className="set-row-line-lab-title">
             <Globe size={14} className="set-row-ico" aria-hidden />
             {t("settings.general.asrLanguage")}
+            <InfoTip content={t("settings.general.asrLanguageBlurb")} />
           </span>
-          <small>{t("settings.general.asrLanguageBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
           <Select
@@ -2170,9 +2485,9 @@ function GeneralPanel() {
               updateConfig("language", String(key));
             }}
           >
-            <Select.Trigger className="qsel">
+            <Select.Trigger>
               <Select.Value />
-              <ChevronDown size={12} className="qsel-chev shrink-0" />
+              <Select.Indicator />
             </Select.Trigger>
             <Select.Popover>
               <ListBox>
@@ -2193,8 +2508,8 @@ function GeneralPanel() {
           <span className="set-row-line-lab-title">
             <Plus size={14} className="set-row-ico" aria-hidden />
             {t("settings.general.addLanguage")}
+            <InfoTip content={t("settings.general.addLanguageBlurb")} />
           </span>
-          <small>{t("settings.general.addLanguageBlurb")}</small>
         </div>
         <div className="set-row-line-ctl flex flex-col items-end gap-2">
           {(config.extra_languages?.length ?? 0) > 0 ? (
@@ -2229,9 +2544,9 @@ function GeneralPanel() {
                   setPendingAdd(String(key));
                 }}
               >
-                <Select.Trigger className="qsel">
+                <Select.Trigger>
                   <Select.Value />
-                  <ChevronDown size={12} className="qsel-chev shrink-0" />
+                  <Select.Indicator />
                 </Select.Trigger>
                 <Select.Popover>
                   <ListBox>
@@ -2266,8 +2581,8 @@ function GeneralPanel() {
           <span className="set-row-line-lab-title">
             <Mic size={14} className="set-row-ico" aria-hidden />
             {t("settings.general.audioSource")}
+            <InfoTip content={t("settings.general.audioSourceBlurb")} />
           </span>
-          <small>{t("settings.general.audioSourceBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
           <QSwitch
@@ -2289,8 +2604,8 @@ function GeneralPanel() {
           <span className="set-row-line-lab-title">
             <Palette size={14} className="set-row-ico" aria-hidden />
             {t("settings.general.appearance")}
+            <InfoTip content={t("settings.general.appearanceBlurb")} />
           </span>
-          <small>{t("settings.general.appearanceBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
           <QSwitch
@@ -2310,15 +2625,14 @@ function GeneralPanel() {
           <span className="set-row-line-lab-title">
             <Volume2 size={14} className="set-row-ico" aria-hidden />
             {t("settings.general.sfx")}
+            <InfoTip content={t("settings.general.sfxBlurb")} />
           </span>
-          <small>{t("settings.general.sfxBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
-          <QSwitch
-            ariaLabel={t("settings.general.sfx")}
-            value={sfxOn ? "on" : "off"}
-            onChange={(mode) => {
-              const on = mode === "on";
+          <Switch
+            aria-label={t("settings.general.sfx")}
+            isSelected={sfxOn}
+            onChange={(on) => {
               setSfxEnabled(on);
               setSfxOn(on);
               if (on) {
@@ -2326,25 +2640,57 @@ function GeneralPanel() {
                 playSfx("uiTap");
               }
             }}
-            options={[
-              { id: "on" as const, label: t("settings.general.sfxOn") },
-              { id: "off" as const, label: t("settings.general.sfxOff") },
-            ]}
-          />
+          >
+            <Switch.Control>
+              <Switch.Thumb />
+            </Switch.Control>
+          </Switch>
         </div>
       </div>
 
       <div className="set-row-line">
         <div className="set-row-line-lab">
           <span className="set-row-line-lab-title">
-            <Sparkles size={14} className="set-row-ico" aria-hidden />
+            <Compass size={14} className="set-row-ico" aria-hidden />
             {t("settings.general.tour")}
+            <InfoTip content={t("settings.general.tourBlurb")} />
           </span>
-          <small>{t("settings.general.tourBlurb")}</small>
         </div>
         <div className="set-row-line-ctl">
           <Button size="sm" variant="secondary" onPress={() => requestStartTour()}>
             {t("settings.general.tourButton")}
+          </Button>
+        </div>
+      </div>
+
+      {/* 作品目录 — 文件转写作品存放位置 */}
+      <div className="set-row-line">
+        <div className="set-row-line-lab">
+          <span className="set-row-line-lab-title">
+            <FolderOpen size={14} className="set-row-ico" aria-hidden />
+            {t("settings.general.worksDir")}
+          </span>
+          <small>{t("settings.general.worksDirBlurb")}</small>
+        </div>
+        <div className="set-row-line-ctl flex items-center gap-2">
+          <span className="max-w-48 truncate font-mono text-[11px] text-muted">
+            {config.works_dir?.trim() || t("settings.general.worksDirDefault")}
+          </span>
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={() => void chooseWorksDir()}
+          >
+            {t("settings.asr.browse")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onPress={() => {
+              void invoke("works_open_root").catch(() => {});
+            }}
+          >
+            {t("settings.general.worksDirOpen")}
           </Button>
         </div>
       </div>
@@ -2639,8 +2985,10 @@ function HotkeysPanel() {
       </SoftCollapse>
 
       <div className="rounded-xl bg-default/40 p-3">
-        <div className="type-ui mb-1">{t("settings.hotkeys.fnNoteTitle")}</div>
-        <p className="type-meta">{t("settings.hotkeys.fnNoteBody")}</p>
+        <div className="type-ui mb-1">
+          {t("settings.hotkeys.fnNoteTitle")}
+          <InfoTip content={t("settings.hotkeys.fnNoteBody")} />
+        </div>
         <Button
           size="sm"
           variant="secondary"
@@ -2670,7 +3018,6 @@ function PermissionsPanel() {
   const [busy, setBusy] = useState<PermKind | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [needsRelaunch, setNeedsRelaunch] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
   const lastOpenAt = useRef<Record<string, number>>({});
 
   const refresh = useCallback(async () => {
@@ -2769,8 +3116,10 @@ function PermissionsPanel() {
                   <Icon size={16} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="type-ui">{t(item.titleKey)}</div>
-                  <div className="mt-0.5 type-meta">{t(item.blurbKey)}</div>
+                  <div className="type-ui">
+                    {t(item.titleKey)}
+                    <InfoTip content={t(item.blurbKey)} />
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <motion.span
@@ -2823,45 +3172,42 @@ function PermissionsPanel() {
         ) : null}
       </SectionCard>
 
-      <div className="rounded-2xl bg-surface px-3 py-1">
-        <CollapseTrigger
-          open={helpOpen}
-          onToggle={() => setHelpOpen((v) => !v)}
-        >
+      <div className="rounded-2xl bg-surface px-3 py-3">
+        <div className="type-ui">
           {t("settings.perm.helpTitle")}
-        </CollapseTrigger>
-        <SoftCollapse open={helpOpen}>
-          <div className="px-1 pb-3 pt-2">
-            <ul className="flex flex-col gap-2 type-meta">
-              <li>{t("settings.perm.helpLine1")}</li>
-              <li>{t("settings.perm.helpLine2")}</li>
-              <li>{t("settings.perm.helpLine3")}</li>
-              <li>{t("settings.perm.helpLine4")}</li>
-            </ul>
-            {exePath ? (
-              <p className="mt-3 break-all rounded-xl bg-default/40 px-3 py-2 font-mono type-micro !normal-case !tracking-normal text-foreground">
-                {exePath}
-              </p>
-            ) : null}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                variant="secondary"
-                onPress={() =>
-                  void openSettingsOnce(firstUngranted ?? "accessibility").then(
-                    () => window.setTimeout(() => void refresh(), 800),
-                  )
-                }
-              >
-                <ExternalLink size={14} />
-                {t("settings.perm.openSystemSettings")}
-              </Button>
-              <Button size="sm" variant="secondary" onPress={relaunch}>
-                {t("settings.perm.relaunch")}
-              </Button>
-            </div>
-          </div>
-        </SoftCollapse>
+          <InfoTip
+            content={
+              <div className="flex flex-col gap-1.5">
+                <p>{t("settings.perm.helpLine1")}</p>
+                <p>{t("settings.perm.helpLine2")}</p>
+                <p>{t("settings.perm.helpLine3")}</p>
+                <p>{t("settings.perm.helpLine4")}</p>
+              </div>
+            }
+          />
+        </div>
+        {exePath ? (
+          <p className="mt-3 break-all rounded-xl bg-default/40 px-3 py-2 font-mono type-micro !normal-case !tracking-normal text-foreground">
+            {exePath}
+          </p>
+        ) : null}
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={() =>
+              void openSettingsOnce(firstUngranted ?? "accessibility").then(
+                () => window.setTimeout(() => void refresh(), 800),
+              )
+            }
+          >
+            <ExternalLink size={14} />
+            {t("settings.perm.openSystemSettings")}
+          </Button>
+          <Button size="sm" variant="secondary" onPress={relaunch}>
+            {t("settings.perm.relaunch")}
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -3250,8 +3596,6 @@ function AgentPanel() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="-mb-1 type-meta">{t("settings.agent.intro")}</p>
-
       {BUILTIN_AGENTS.map((meta, idx) => {
         const p =
           profiles.find((x) => x.kind === meta.kind) ??

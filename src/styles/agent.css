@@ -260,26 +260,6 @@
   }
 }
 
-.agent-profile-trigger {
-  display: inline-flex;
-  height: 28px;
-  align-items: center;
-  gap: 4px;
-  padding: 0 8px;
-  border-radius: 10px;
-  border: 0;
-  background: color-mix(in oklab, var(--foreground) 6%, transparent);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--foreground);
-  cursor: pointer;
-  transition: background 120ms ease;
-}
-
-.agent-profile-trigger:hover {
-  background: color-mix(in oklab, var(--foreground) 10%, transparent);
-}
-
 .agent-list-body {
   margin-inline: -0.25rem;
   padding-inline: 0.25rem;
@@ -396,31 +376,6 @@
   background: color-mix(in oklab, var(--muted) 40%, transparent);
 }
 
-.agent-model-trigger {
-  display: inline-flex;
-  height: 28px;
-  align-items: center;
-  gap: 4px;
-  padding: 0 8px;
-  border-radius: 10px;
-  border: 0;
-  background: color-mix(in oklab, var(--foreground) 6%, transparent);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--foreground);
-  cursor: pointer;
-  transition: background 120ms ease;
-}
-
-.agent-model-trigger:hover {
-  background: color-mix(in oklab, var(--foreground) 10%, transparent);
-}
-
-.agent-model-trigger[data-disabled="true"],
-.agent-model-trigger[aria-disabled="true"] {
-  cursor: default;
-  opacity: 0.85;
-}
 
 .agent-chat {
   border-radius: var(--radius-lg);
@@ -1195,19 +1150,6 @@
   transform: scale(0.96);
 }
 
-.agent-profile-trigger,
-.agent-model-trigger {
-  transition:
-    background 120ms ease,
-    transform 100ms ease-out;
-}
-
-.agent-profile-trigger:active,
-.agent-model-trigger:active,
-.agent-profile-trigger[data-pressed="true"],
-.agent-model-trigger[data-pressed="true"] {
-  transform: scale(0.97);
-}
 
 /* Press feedback off under reduced motion — rows/chips cross-fade color only */
 @media (prefers-reduced-motion: reduce) {
@@ -1224,11 +1166,7 @@
   .agent-attach-chip-x,
   .agent-attach-chip-x:active,
   .agent-composer-send,
-  .agent-composer-send:active,
-  .agent-profile-trigger,
-  .agent-profile-trigger:active,
-  .agent-model-trigger,
-  .agent-model-trigger:active {
+  .agent-composer-send:active {
     transform: none;
   }
 

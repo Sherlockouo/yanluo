@@ -2,6 +2,8 @@ import type {
   AgentKind,
   AppConfig,
   AsrProvider,
+  CloudAsrCredential,
+  CloudAsrProviderId,
   ExtraLanguage,
   HotkeyBinding,
   LlmCredential,
@@ -59,6 +61,127 @@ export const DEFAULT_LLM_ORGANIZE_PROMPT = `\
 4. URL、邮箱、版本号、命令、代码、Markdown、环境变量、文件路径和英文术语原样保留。
 5. 无法确定的内容保留原文，不凭空猜测。
 6. 只输出整理后的正文，不解释、不添加“整理结果”等标题。`;
+
+/**
+ * Built-in works-pipeline (作品 AI 产物) prompts.
+ * MUST stay byte-identical to the Rust constants in
+ * src-tauri/src/works/pipeline.rs — guarded by `prompt_sync_tests`.
+ */
+export const DEFAULT_WORK_PROMPT_SUMMARY = `\
+你是中文内容摘要助手。输入是一段转写文本（可能来自播客、视频或会议）。
+
+输出格式：
+1. 先用一段话（100 字以内）总结全文核心内容。
+2. 然后列出 5 个要点，每点一行，以「- 」开头。
+
+规则：
+1. 只基于原文信息，不添加原文没有的观点、数字或结论。
+2. 保留关键人名、数字、结论和术语的原始写法。
+3. 只输出正文，不解释、不添加“摘要”等标题。`;
+
+export const DEFAULT_WORK_PROMPT_MINUTES = `\
+你是中文会议纪要助手。输入是一段会议或讨论转写文本。
+
+按以下结构输出 Markdown：
+## 议题
+（讨论了什么，逐条列出）
+## 结论
+（达成了什么共识）
+## 决议
+（明确拍板的事项）
+## 行动项
+（每条包含：事项、负责人、截止时间——仅当原文提到时才写负责人和截止时间，没提到就不写，不虚构）
+## 悬而未决
+（讨论了但没有结论的问题；没有则写「无」）
+
+规则：
+1. 只基于原文，不虚构发言人、负责人或时间。
+2. 逐字稿没有说话人分离时，不写发言人姓名。
+3. 只输出纪要正文，不解释、不添加额外标题。`;
+
+export const DEFAULT_WORK_PROMPT_STUDY_NOTES = `\
+你是中文学习笔记助手。输入是一段转写文本（可能带 [mm:ss] 时间戳前缀）。
+
+输出 Markdown 结构化笔记：
+1. 用分级标题（## / ###）组织内容层次，标题概括主题。
+2. 每个主题下用列表记要点。
+3. 末尾设「金句摘录」一节，摘录原文中有代表性的句子。
+
+规则：
+1. 只基于原文，不添加原文没有的知识点。
+2. 保留术语、数字、名称的原始写法。
+3. 只输出笔记正文，不解释。`;
+
+export const DEFAULT_WORK_PROMPT_POST_XIAOHONGSHU = `\
+你是小红书文案写手。根据输入的转写内容写一篇小红书笔记。
+
+风格：
+1. 第一行是吸睛标题，含 1-2 个 emoji，不超过 20 字。
+2. 正文用短段落，每段 1-3 句，口语化、有真实感，适当穿插 emoji。
+3. 结尾加 3-6 个相关 tag，格式为 #话题。
+
+规则：
+1. 内容必须忠于原文，不编造事实、数字或功效。
+2. 只输出文案正文，不解释、不添加“文案”等标注。`;
+
+export const DEFAULT_WORK_PROMPT_SCRIPT_DOUYIN = `\
+你是抖音口播脚本写手。根据输入的转写内容写一条 60 秒口播脚本（约 250-300 字）。
+
+结构：
+1. 开头 3 秒钩子：用疑问、反常识或利益点抓住注意力。
+2. 主体：把原文核心内容讲清楚，口语化，短句为主。
+3. 结尾 CTA：引导点赞、关注或评论。
+
+规则：
+1. 内容忠于原文，不编造事实或数据。
+2. 只输出可直接照读的口播正文，不写镜头说明、不解释。`;
+
+export const DEFAULT_WORK_PROMPT_ARTICLE_WECHAT = `\
+你是公众号长文作者。根据输入的转写内容写一篇公众号文章。
+
+要求：
+1. 有清晰的标题（第一行，# 开头）和小标题分段（## 开头）。
+2. 观点明确，论述完整，保留原文的事实、案例、数字和金句。
+3. 语言流畅书面化，但保留原作者的表达风格。
+4. 只基于原文内容展开，不编造原文没有的事实。
+5. 只输出文章正文，不解释。`;
+
+export const DEFAULT_WORK_MAP_SUMMARY = `\
+你是中文内容压缩助手。把输入的转写片段压缩成要点列表，供后续二次生成使用。
+
+规则：
+1. 保留全部关键信息：观点、结论、数字、人名、术语、金句原句。
+2. 丢弃口水话、重复和纯过渡内容。
+3. 输出为「- 」开头的要点列表，不解释、不加标题。`;
+
+export const DEFAULT_WORK_TITLE = `\
+你是标题助手。根据输入内容为这段音/视频转写拟一个标题。
+
+规则：
+1. 不超过 20 个字，概括主题，不用书名号、引号或标点结尾。
+2. 只输出标题本身，一行，不解释。`;
+
+/** Works pipeline artifact kinds (order = tab order). */
+export const WORK_ARTIFACT_KINDS = [
+  { id: "summary", labelKey: "works.kind.summary" },
+  { id: "minutes", labelKey: "works.kind.minutes" },
+  { id: "study_notes", labelKey: "works.kind.studyNotes" },
+  { id: "post_xiaohongshu", labelKey: "works.kind.postXiaohongshu" },
+  { id: "script_douyin", labelKey: "works.kind.scriptDouyin" },
+  { id: "article_wechat", labelKey: "works.kind.articleWechat" },
+] as const;
+
+export type WorkArtifactKind = (typeof WORK_ARTIFACT_KINDS)[number]["id"];
+
+/** Built-in prompt per works artifact kind (settings default display). */
+export const DEFAULT_WORK_PROMPTS: Record<WorkArtifactKind, string> = {
+  summary: DEFAULT_WORK_PROMPT_SUMMARY,
+  minutes: DEFAULT_WORK_PROMPT_MINUTES,
+  study_notes: DEFAULT_WORK_PROMPT_STUDY_NOTES,
+  post_xiaohongshu: DEFAULT_WORK_PROMPT_POST_XIAOHONGSHU,
+  script_douyin: DEFAULT_WORK_PROMPT_SCRIPT_DOUYIN,
+  article_wechat: DEFAULT_WORK_PROMPT_ARTICLE_WECHAT,
+};
 
 /** Built-in translate system prompt; `{target}` → language name. */
 export const DEFAULT_LLM_TRANSLATE_PROMPT =
@@ -249,6 +372,81 @@ export function seedLlmCredentials(
   };
 }
 
+// ---------------------------------------------------------------------------
+// 云识别 (cloud ASR) — file/URL transcription only; live Fn dictation stays local.
+// ---------------------------------------------------------------------------
+
+export type CloudAsrProviderPreset = {
+  id: CloudAsrProviderId;
+  label: string;
+  baseUrl: string;
+  models: string[];
+  /** Vendor supports 说话人分离. */
+  diarize: boolean;
+};
+
+export const CLOUD_ASR_PROVIDERS: CloudAsrProviderPreset[] = [
+  {
+    id: "elevenlabs",
+    label: "ElevenLabs Scribe",
+    baseUrl: "https://api.elevenlabs.io",
+    models: ["scribe_v2", "scribe_v1"],
+    diarize: true,
+  },
+  {
+    id: "openai",
+    label: "OpenAI 兼容（Whisper / Groq）",
+    baseUrl: "https://api.openai.com/v1",
+    models: ["whisper-1", "gpt-4o-mini-transcribe", "whisper-large-v3-turbo"],
+    diarize: false,
+  },
+  {
+    id: "dashscope",
+    label: "阿里云百炼 Paraformer",
+    baseUrl: "https://dashscope.aliyuncs.com",
+    models: ["paraformer-v2", "paraformer-v1"],
+    diarize: true,
+  },
+];
+
+/** Preset for a cloud ASR vendor (unknown id → first preset shape). */
+export function cloudAsrPreset(id: string): CloudAsrProviderPreset {
+  return (
+    CLOUD_ASR_PROVIDERS.find((p) => p.id === id) ?? {
+      id: id as CloudAsrProviderId,
+      label: id,
+      baseUrl: "",
+      models: [],
+      diarize: false,
+    }
+  );
+}
+
+/**
+ * Resolve stored cloud ASR creds for a vendor, backfilling model/base_url from
+ * the preset. DashScope falls back to the 百炼 key stored under llm_credentials
+ * (same Aliyun account key works for ASR), mirroring the Rust resolver.
+ */
+export function resolveCloudAsrCreds(
+  config: Pick<AppConfig, "cloud_asr_credentials" | "llm_credentials" | "llm_provider" | "llm_api_key">,
+  provider: string,
+): CloudAsrCredential {
+  const preset = cloudAsrPreset(provider);
+  const stored = config.cloud_asr_credentials?.[provider];
+  let apiKey = stored?.api_key ?? "";
+  if (!apiKey.trim() && provider === "dashscope") {
+    apiKey =
+      config.llm_credentials?.["dashscope"]?.api_key ||
+      (config.llm_provider === "dashscope" ? config.llm_api_key : "");
+  }
+  return {
+    api_key: apiKey,
+    model: stored?.model ?? preset.models[0] ?? "",
+    base_url: stored?.base_url ?? preset.baseUrl,
+    diarize: stored?.diarize ?? false,
+  };
+}
+
 export const QWEN_ASR_MODELS = [
   { id: "Qwen3-ASR-0.6B", label: "Qwen3-ASR-0.6B（推荐，约 2GB）", downloadable: true },
   { id: "Qwen3-ASR-1.7B", label: "Qwen3-ASR-1.7B（更大）", downloadable: true },
@@ -313,6 +511,11 @@ export const defaultConfig: AppConfig = {
   llm_organize_prompt: "",
   llm_translate_prompt: "",
   vocabulary: [],
+  works_dir: "",
+  works_llm_provider: "",
+  works_prompts: {},
+  cloud_asr_provider: "elevenlabs",
+  cloud_asr_credentials: {},
 };
 
 /** CLI model aliases — fallback until dynamic cache fills. */
@@ -593,6 +796,7 @@ export const CAPSULE_TAIL_CHARS = 34;
 
 export function providerLabel(provider: AsrProvider) {
   if (provider === "apple") return "Apple Speech";
+  if (provider === "cloud") return "云端识别";
   return "本机识别";
 }
 

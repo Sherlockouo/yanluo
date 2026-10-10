@@ -1,6 +1,4 @@
-import { useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Button } from "@heroui/react";
+import { Button, Dropdown, Header, Separator } from "@heroui/react";
 import { Clipboard, Download } from "lucide-react";
 import type { HistoryEntry } from "@/types";
 import {
@@ -8,7 +6,6 @@ import {
   historyEntryClipboard,
   type ExportFormat,
 } from "@/lib/export-transcript";
-import { springUI } from "@/lib/motion";
 import { useT } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 
@@ -19,23 +16,8 @@ type Props = {
   className?: string;
 };
 
-function MenuItem({
-  label,
-  onPress,
-}: {
-  label: string;
-  onPress: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="flex w-full cursor-pointer items-center px-3 py-2 text-left text-[13px] text-foreground transition-colors hover:bg-surface-secondary active:bg-default"
-      onClick={onPress}
-    >
-      {label}
-    </button>
-  );
-}
+const sectionHeaderCls =
+  "px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted";
 
 /**
  * Copy / export menu: TXT · SRT · Raw (+ optional MD).
@@ -47,11 +29,8 @@ export function TranscriptExportMenu({
   className,
 }: Props) {
   const t = useT();
-  const reducedMotion = useReducedMotion();
-  const [open, setOpen] = useState(false);
 
   const run = async (format: ExportFormat, mode: "copy" | "file") => {
-    setOpen(false);
     if (mode === "copy") {
       const body = historyEntryClipboard(entry, format);
       try {
@@ -70,77 +49,53 @@ export function TranscriptExportMenu({
     variant === "copy-export" ? t("transcribe.copyExport") : t("history.export");
   const TriggerIcon = variant === "copy-export" ? Clipboard : Download;
 
+  const onAction = (key: string | number) => {
+    const [mode, format] = String(key).split(":");
+    void run(format as ExportFormat, mode as "copy" | "file");
+  };
+
   return (
-    <div className={className ? `relative ${className}` : "relative"}>
-      <Button
-        size="sm"
-        variant="secondary"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onPress={() => setOpen((v) => !v)}
-      >
+    <Dropdown>
+      <Button size="sm" variant="secondary" className={className}>
         <TriggerIcon size={14} aria-hidden />
         {triggerLabel}
       </Button>
-      <AnimatePresence>
-        {open ? (
-          <>
-            <div
-              role="presentation"
-              className="fixed inset-0 z-40 cursor-default"
-              onClick={() => setOpen(false)}
-            />
-            <motion.div
-              initial={
-                reducedMotion ? { opacity: 1 } : { opacity: 0.92, scale: 0.96, y: 4 }
-              }
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={
-                reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 4 }
-              }
-              transition={springUI}
-              style={{ transformOrigin: "top right" }}
-              className="absolute right-0 z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-border bg-surface py-1 shadow-lg"
-            >
-              <div className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted">
-                {t("transcribe.exportCopy")}
-              </div>
-              <MenuItem
-                label={t("transcribe.copyTxt")}
-                onPress={() => void run("txt", "copy")}
-              />
-              <MenuItem
-                label={t("transcribe.copySrt")}
-                onPress={() => void run("srt", "copy")}
-              />
-              <MenuItem
-                label={t("transcribe.copyRaw")}
-                onPress={() => void run("raw", "copy")}
-              />
-              <div className="my-1 border-t border-border" />
-              <div className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wide text-muted">
-                {t("transcribe.exportFile")}
-              </div>
-              <MenuItem
-                label={t("history.exportTxt")}
-                onPress={() => void run("txt", "file")}
-              />
-              <MenuItem
-                label={t("transcribe.exportSrt")}
-                onPress={() => void run("srt", "file")}
-              />
-              <MenuItem
-                label={t("transcribe.exportRaw")}
-                onPress={() => void run("raw", "file")}
-              />
-              <MenuItem
-                label={t("history.exportMd")}
-                onPress={() => void run("md", "file")}
-              />
-            </motion.div>
-          </>
-        ) : null}
-      </AnimatePresence>
-    </div>
+      <Dropdown.Popover placement="bottom end">
+        <Dropdown.Menu aria-label={triggerLabel} onAction={onAction}>
+          <Dropdown.Section>
+            <Header className={sectionHeaderCls}>
+              {t("transcribe.exportCopy")}
+            </Header>
+            <Dropdown.Item id="copy:txt" textValue={t("transcribe.copyTxt")}>
+              {t("transcribe.copyTxt")}
+            </Dropdown.Item>
+            <Dropdown.Item id="copy:srt" textValue={t("transcribe.copySrt")}>
+              {t("transcribe.copySrt")}
+            </Dropdown.Item>
+            <Dropdown.Item id="copy:raw" textValue={t("transcribe.copyRaw")}>
+              {t("transcribe.copyRaw")}
+            </Dropdown.Item>
+          </Dropdown.Section>
+          <Separator />
+          <Dropdown.Section>
+            <Header className={sectionHeaderCls}>
+              {t("transcribe.exportFile")}
+            </Header>
+            <Dropdown.Item id="file:txt" textValue={t("history.exportTxt")}>
+              {t("history.exportTxt")}
+            </Dropdown.Item>
+            <Dropdown.Item id="file:srt" textValue={t("transcribe.exportSrt")}>
+              {t("transcribe.exportSrt")}
+            </Dropdown.Item>
+            <Dropdown.Item id="file:raw" textValue={t("transcribe.exportRaw")}>
+              {t("transcribe.exportRaw")}
+            </Dropdown.Item>
+            <Dropdown.Item id="file:md" textValue={t("history.exportMd")}>
+              {t("history.exportMd")}
+            </Dropdown.Item>
+          </Dropdown.Section>
+        </Dropdown.Menu>
+      </Dropdown.Popover>
+    </Dropdown>
   );
 }

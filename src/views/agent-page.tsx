@@ -12,7 +12,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
   Bot,
-  ChevronDown,
   Clipboard,
   Paperclip,
   Send,
@@ -461,7 +460,7 @@ export function AgentPage() {
                 selectProfile(String(key));
               }}
             >
-              <Select.Trigger className="agent-profile-trigger">
+              <Select.Trigger>
                 <Select.Value>
                   {() => (
                     <span className="inline-flex items-center gap-1">
@@ -470,7 +469,7 @@ export function AgentPage() {
                     </span>
                   )}
                 </Select.Value>
-                <ChevronDown size={12} className="shrink-0 opacity-50" />
+                <Select.Indicator />
               </Select.Trigger>
               <Select.Popover className="min-w-36">
                 <ListBox>
@@ -499,9 +498,9 @@ export function AgentPage() {
                 selectModel(String(key));
               }}
             >
-              <Select.Trigger className="agent-model-trigger">
+              <Select.Trigger>
                 <Select.Value>{() => <span>{modelLabel}</span>}</Select.Value>
-                <ChevronDown size={12} className="shrink-0 opacity-50" />
+                <Select.Indicator />
               </Select.Trigger>
               <Select.Popover className="min-w-36">
                 <ListBox>

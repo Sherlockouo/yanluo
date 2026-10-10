@@ -4,6 +4,13 @@ All notable changes to Sayi are documented in this file.（曾用名：QuietType
 
 ## Unreleased
 
+### Added（转写作品工作室：作品目录 + 云识别 + AI 内容管线 + 研究）
+- **作品目录**：每次文件转写生成一个独立文件夹（`audio.*`、`transcript.json` / `transcript.md`、`notes/`、`research/`、`work.json` 索引），默认 `app_data/works`，可在设置中改到任意目录；历史记录双向关联作品
+- **云识别**：`transcription/cloud.rs` 统一分发 ElevenLabs Scribe（说话人分离 + 词级时间戳）、OpenAI 兼容 `/audio/transcriptions`（Whisper / Groq）、阿里云百炼 Paraformer（异步任务轮询），全部归一化为 `TranscriptionResult`
+- **AI 产物**：摘要、会议纪要、笔记、小红书、抖音口播、公众号长文；基于 refine 后的底稿生成，逐字稿保持不变；摘要 / 纪要 / 笔记引用 `[mm:ss]` 时间戳
+- **时间戳联动**：产物中的 `[mm:ss]` 可点击，直接跳转左侧音视频；产物与研究面板保留左侧媒体栏，边听边看
+- **研究模式**：对单个作品提问，agent 在作品目录内基于逐字稿与笔记写研究报告，结果保存到 `research/<job>.md`
+
 ### Fixed（点「文稿」整页冻结 ~0.5s — 实测定位）
 - **根因**：`get_ytdlp_status` 是同步 Tauri command（Tauri 2 主线程执行），每次进入文稿页都会同步
   spawn 最多 7 个 `yt-dlp --version` Python 子进程（每个 ~0.3s），整个 app UI 冻结——探针实测

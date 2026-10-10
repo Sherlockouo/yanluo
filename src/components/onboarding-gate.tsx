@@ -1,15 +1,12 @@
 import {
   useCallback,
   useEffect,
-  useRef,
   useState,
   type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { createPortal } from "react-dom";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import { Link } from "react-router-dom";
-import { Button } from "@heroui/react";
+import { Button, Modal } from "@heroui/react";
 import { toast } from "@/lib/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -75,35 +72,6 @@ export function OnboardingGate() {
   const [modelReady, setModelReady] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState<ModelDownloadProgress | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Move keyboard focus into the dialog on open / step change.
-  useEffect(() => {
-    if (!open) return;
-    const id = window.requestAnimationFrame(() => panelRef.current?.focus());
-    return () => window.cancelAnimationFrame(id);
-  }, [open, step]);
-
-  // Minimal Tab cycle so keyboard focus can't escape behind the modal.
-  const trapTab = (event: ReactKeyboardEvent) => {
-    if (event.key !== "Tab") return;
-    const panel = panelRef.current;
-    if (!panel) return;
-    const focusables = panel.querySelectorAll<HTMLElement>(
-      'button:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
-    );
-    if (focusables.length === 0) return;
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    const activeEl = document.activeElement;
-    if (event.shiftKey && (activeEl === panel || activeEl === first)) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && activeEl === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
 
   useEffect(() => {
     const tryOpen = () => {
@@ -256,33 +224,17 @@ export function OnboardingGate() {
     finish();
   };
 
-  return createPortal(
-    <AnimatePresence>
-      {open ? (
-        <motion.div
-          key="onboard-backdrop"
-          className="trm-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: duration.normal, ease: easeOut }}
-        >
-          <motion.div
-            ref={panelRef}
-            role="dialog"
-            aria-modal="true"
-            tabIndex={-1}
-            onKeyDown={trapTab}
+  return (
+    <Modal isOpen={open} onOpenChange={() => { /* 完成或跳过才可关闭 */ }}>
+      <Modal.Backdrop isDismissable={false}>
+        <Modal.Container placement="center" size="md">
+          <Modal.Dialog
             aria-label={
               step === "perms"
                 ? t("onboarding.permsTitle")
                 : t("onboarding.engineAria")
             }
-            className="flex w-full max-w-md flex-col overflow-hidden rounded-2xl bg-surface p-6 shadow-2xl outline-none"
-            initial={reduce ? { opacity: 0.92 } : { opacity: 0.92, scale: 0.96, y: 12 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 12 }}
-            transition={reduce ? { duration: 0.14, ease: easeOut } : springUI}
+            className="w-full max-w-md p-6"
           >
             {/* Enter-only step swap — keyed remount, no exit stacking. */}
             <motion.div
@@ -476,11 +428,10 @@ export function OnboardingGate() {
               </>
             )}
             </motion.div>
-          </motion.div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>,
-    document.body,
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </Modal>
   );
 }
 

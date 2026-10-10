@@ -53,8 +53,8 @@ export const hud: Record<string, string> = {
     "未授权语音识别 — 设置 → 系统 → 权限，打开「语音识别」",
   "hud.rustMsg.Apple Speech 仅支持 macOS，请改用 Qwen 本地识别":
     "Apple Speech 仅支持 macOS，请改用 Qwen 本地识别",
-  "hud.rustMsg.ElevenLabs 已移除 — 请在设置 → 识别 改选 Apple 或 Qwen":
-    "ElevenLabs 已移除 — 请在设置 → 识别 改选 Apple 或 Qwen",
+  "hud.rustMsg.云识别目前仅支持文件转写 — 请在设置 → 识别 改选本地引擎（Apple 或 Qwen）":
+    "云识别目前仅支持文件转写 — 请在设置 → 识别 改选本地引擎（Apple 或 Qwen）",
   "hud.rustMsg.没有待确认的识别结果": "没有待确认的识别结果",
   "hud.rustMsg.会话已取消": "会话已取消",
   "hud.rustMsg.确认文本不能为空": "确认文本不能为空",

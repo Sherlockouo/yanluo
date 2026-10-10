@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Button, Input, TextField } from "@heroui/react";
+import { Button, Dropdown, Input, Modal, Separator, TextField } from "@heroui/react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import {
+  InfoTip,
   PageHeader,
   PageShell,
   Reveal,
@@ -35,7 +36,7 @@ import { isVideoMediaKind } from "@/lib/alignment";
 import { cn } from "@/lib/cn";
 import { translateTargetLabel } from "@/lib/constants";
 import { exportHistoryEntry, historyEntryTitle } from "@/lib/export-transcript";
-import { easeOut, springBounce, springUI, useCollapse } from "@/lib/motion";
+import { easeOut, springUI, useCollapse } from "@/lib/motion";
 import { writePendingDispatchPrompt } from "@/lib/ui-session";
 import { useI18n, useT } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
@@ -99,7 +100,6 @@ export function HistoryPage({
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [cleanupOpen, setCleanupOpen] = useState(false);
   const [clearModalOpen, setClearModalOpen] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -180,7 +180,6 @@ export function HistoryPage({
     try {
       await action();
       setExpandedId(null);
-      setCleanupOpen(false);
       toast.success(label);
     } finally {
       setCleaning(false);
@@ -201,92 +200,95 @@ export function HistoryPage({
     }
   };
 
+  const onCleanupAction = (key: string | number) => {
+    switch (key) {
+      case "keep-100":
+        void runCleanup(t("history.keptRecent", { n: 100 }), () =>
+          pruneHistory(100),
+        );
+        break;
+      case "keep-500":
+        void runCleanup(t("history.keptRecent", { n: 500 }), () =>
+          pruneHistory(500),
+        );
+        break;
+      case "older-30":
+        void runCleanup(t("history.deletedOlderThan", { n: 30 }), () =>
+          pruneHistoryOlderThan(30),
+        );
+        break;
+      case "older-90":
+        void runCleanup(t("history.deletedOlderThan", { n: 90 }), () =>
+          pruneHistoryOlderThan(90),
+        );
+        break;
+      case "clear-all":
+        setClearModalOpen(true);
+        break;
+    }
+  };
+
   const headerStatus = history.length
     ? t("history.count", { n: history.length })
     : undefined;
   const headerAction =
     history.length > 0 ? (
-      <div className="relative">
+      <Dropdown>
         <Button
           size="sm"
           variant="secondary"
-          aria-expanded={cleanupOpen}
-          aria-haspopup="menu"
           isDisabled={cleaning}
           isPending={cleaning}
-          onPress={() => setCleanupOpen((v) => !v)}
           className="text-xs btn-press"
         >
           <Trash2 size={12} />
           {t("history.cleanup")}
         </Button>
-        <AnimatePresence>
-          {cleanupOpen ? (
-          <>
-            <div
-              role="presentation"
-              className="fixed inset-0 z-40 cursor-default"
-              onClick={() => setCleanupOpen(false)}
-            />
-            <motion.div
-              initial={reducedMotion ? { opacity: 1 } : { opacity: 0.92, scale: 0.96, y: 4 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 4 }}
-              transition={springUI}
-              style={{ transformOrigin: "top right" }}
-              className="absolute right-0 z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-border bg-surface py-1 shadow-lg"
+        <Dropdown.Popover placement="bottom end">
+          <Dropdown.Menu
+            aria-label={t("history.cleanup")}
+            onAction={onCleanupAction}
+          >
+            <Dropdown.Item
+              id="keep-100"
+              isDisabled={cleaning}
+              textValue={t("history.keepRecent", { n: 100 })}
             >
-              <CleanupItem
-                label={t("history.keepRecent", { n: 100 })}
-                disabled={cleaning}
-                onPress={() =>
-                  void runCleanup(t("history.keptRecent", { n: 100 }), () =>
-                    pruneHistory(100),
-                  )
-                }
-              />
-              <CleanupItem
-                label={t("history.keepRecent", { n: 500 })}
-                disabled={cleaning}
-                onPress={() =>
-                  void runCleanup(t("history.keptRecent", { n: 500 }), () =>
-                    pruneHistory(500),
-                  )
-                }
-              />
-              <CleanupItem
-                label={t("history.deleteOlderThan", { n: 30 })}
-                disabled={cleaning}
-                onPress={() =>
-                  void runCleanup(t("history.deletedOlderThan", { n: 30 }), () =>
-                    pruneHistoryOlderThan(30),
-                  )
-                }
-              />
-              <CleanupItem
-                label={t("history.deleteOlderThan", { n: 90 })}
-                disabled={cleaning}
-                onPress={() =>
-                  void runCleanup(t("history.deletedOlderThan", { n: 90 }), () =>
-                    pruneHistoryOlderThan(90),
-                  )
-                }
-              />
-              <div className="my-1 border-t border-border" />
-              <CleanupItem
-                label={t("history.clearAll")}
-                danger
-                disabled={cleaning}
-                onPress={() => {
-                  setCleanupOpen(false);
-                  setClearModalOpen(true);
-                }}
-              />
-            </motion.div>
-          </>
-        ) : null}
-        </AnimatePresence>
-      </div>
+              {t("history.keepRecent", { n: 100 })}
+            </Dropdown.Item>
+            <Dropdown.Item
+              id="keep-500"
+              isDisabled={cleaning}
+              textValue={t("history.keepRecent", { n: 500 })}
+            >
+              {t("history.keepRecent", { n: 500 })}
+            </Dropdown.Item>
+            <Dropdown.Item
+              id="older-30"
+              isDisabled={cleaning}
+              textValue={t("history.deleteOlderThan", { n: 30 })}
+            >
+              {t("history.deleteOlderThan", { n: 30 })}
+            </Dropdown.Item>
+            <Dropdown.Item
+              id="older-90"
+              isDisabled={cleaning}
+              textValue={t("history.deleteOlderThan", { n: 90 })}
+            >
+              {t("history.deleteOlderThan", { n: 90 })}
+            </Dropdown.Item>
+            <Separator />
+            <Dropdown.Item
+              id="clear-all"
+              variant="danger"
+              isDisabled={cleaning}
+              textValue={t("history.clearAll")}
+            >
+              {t("history.clearAll")}
+            </Dropdown.Item>
+          </Dropdown.Menu>
+        </Dropdown.Popover>
+      </Dropdown>
     ) : null;
 
   const content = (
@@ -320,8 +322,10 @@ export function HistoryPage({
             <span className="dropzone-ic">
               <History size={22} aria-hidden />
             </span>
-            <span className="dropzone-t">{t("history.emptyTitle")}</span>
-            <span className="dropzone-fmt">{t("history.emptyHint")}</span>
+            <span className="dropzone-t inline-flex items-center gap-1.5">
+              {t("history.emptyTitle")}
+              <InfoTip content={t("history.emptyHint")} />
+            </span>
           </div>
         </Reveal>
       ) : (
@@ -423,7 +427,6 @@ export function HistoryPage({
     <ClearAllModal
       open={clearModalOpen}
       count={history.length}
-      reducedMotion={reducedMotion}
       onConfirm={() => {
         setClearModalOpen(false);
         void runCleanup(t("history.clearedAll"), () => clearHistory());
@@ -436,105 +439,52 @@ export function HistoryPage({
   return <PageShell>{content}{clearAllModal}</PageShell>;
 }
 
-function CleanupItem({
-  label,
-  onPress,
-  danger,
-  disabled,
-}: {
-  label: string;
-  onPress: () => void;
-  danger?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <Button
-      variant="ghost"
-      isDisabled={disabled}
-      className={cn(
-        "h-auto min-h-0 w-full justify-start rounded-none px-3.5 py-2 text-left text-[13px] font-normal shadow-none btn-press",
-        danger ? "text-danger" : "text-foreground",
-      )}
-      onPress={onPress}
-    >
-      {label}
-    </Button>
-  );
-}
-
 /** P0-3: Product-internal modal to confirm clearing all history. */
 function ClearAllModal({
   open,
   count,
-  reducedMotion,
   onConfirm,
   onClose,
 }: {
   open: boolean;
   count: number;
-  reducedMotion: boolean | null;
   onConfirm: () => void;
   onClose: () => void;
 }) {
   const t = useT();
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  return createPortal(
-    <AnimatePresence>
-      {open ? (
-        <motion.div
-          key="clear-backdrop"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.18 }}
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) onClose();
-          }}
-        >
-          <motion.div
-            key="clear-panel"
-            role="alertdialog"
-            aria-modal="true"
-            aria-label={t("history.confirmClearAria")}
-            className="w-full max-w-sm rounded-2xl border border-border bg-surface p-6 shadow-2xl"
-            initial={reducedMotion ? { opacity: 0.92 } : { opacity: 0.92, scale: 0.95, y: 24 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.95, y: 24 }}
-            transition={reducedMotion ? { duration: 0.14, ease: easeOut } : springBounce}
-          >
-            <h2 className="text-[15px] font-semibold text-foreground">
+  return (
+    <Modal.Backdrop
+      isOpen={open}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
+      <Modal.Container placement="center" size="sm">
+        <Modal.Dialog aria-label={t("history.confirmClearAria")}>
+          <Modal.Header>
+            <Modal.Heading>
               {t("history.clearAllTitle", { n: count })}
-            </h2>
-            <p className="mt-2 text-[13px] text-muted">
-              {t("history.clearAllBody")}
-            </p>
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <Button size="sm" variant="secondary" onPress={onClose}>
-                {t("history.cancel")}
-              </Button>
-              <Button
-                size="sm"
-                variant="primary"
-                className="bg-danger text-white hover:bg-danger/90"
-                onPress={onConfirm}
-              >
-                {t("history.clearAll")}
-              </Button>
-            </div>
-          </motion.div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>,
-    document.body,
+            </Modal.Heading>
+          </Modal.Header>
+          <Modal.Body>
+            <p className="text-[13px] text-muted">{t("history.clearAllBody")}</p>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button size="sm" variant="secondary" onPress={onClose}>
+              {t("history.cancel")}
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              className="bg-danger text-white hover:bg-danger/90"
+              onPress={onConfirm}
+            >
+              {t("history.clearAll")}
+            </Button>
+          </Modal.Footer>
+        </Modal.Dialog>
+      </Modal.Container>
+    </Modal.Backdrop>
   );
 }
 
@@ -554,11 +504,9 @@ function HistoryRow({
   onDispatch: () => void;
 }) {
   const t = useT();
-  const [menuOpen, setMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const confirmTimer = useRef<number | null>(null);
-  const reducedMotion = useReducedMotion();
   const isTranslate = (entry.source ?? "fn") === "translate";
   const showDiff = !isTranslate && hasRefineDiff(entry.raw_text, entry.text);
   const showTranslatePair =
@@ -646,88 +594,87 @@ function HistoryRow({
       >
         {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
       </Button>
-      <div className="relative mt-0.5 shrink-0">
+      <Dropdown>
         <Button
           isIconOnly
           size="sm"
           variant="ghost"
           aria-label={t("history.moreActionsAria")}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          className={cn(
-            "text-muted transition-opacity group-hover:opacity-100 data-[hovered=true]:opacity-100",
-            menuOpen ? "opacity-100" : "opacity-0",
-          )}
-          onPress={() => setMenuOpen((v) => !v)}
+          className="mt-0.5 shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-100 data-[hovered=true]:opacity-100 aria-expanded:opacity-100"
         >
           <MoreHorizontal size={14} aria-hidden />
         </Button>
-        <AnimatePresence>
-        {menuOpen ? (
-          <>
-            <div
-              role="presentation"
-              className="fixed inset-0 z-40 cursor-default"
-              onClick={() => setMenuOpen(false)}
-            />
-            <motion.div
-              initial={reducedMotion ? { opacity: 1 } : { opacity: 0.92, scale: 0.96, y: 4 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={reducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 4 }}
-              transition={springUI}
-              style={{ transformOrigin: "top right" }}
-              className="absolute right-0 z-50 mt-2 w-44 overflow-hidden rounded-2xl border border-border bg-surface py-1 shadow-lg"
-            >
-              <CleanupItem
-                label={t("history.dispatchThis")}
-                onPress={() => {
-                  setMenuOpen(false);
+        <Dropdown.Popover placement="bottom end">
+          <Dropdown.Menu
+            aria-label={t("history.moreActionsAria")}
+            onAction={(key) => {
+              switch (key) {
+                case "dispatch":
                   onDispatch();
-                }}
-              />
-              <CleanupItem
-                label={t("history.exportMd")}
-                onPress={() => {
-                  setMenuOpen(false);
+                  break;
+                case "export-md":
                   exportHistoryEntry(entry, "md");
-                }}
-              />
-              <CleanupItem
-                label={t("history.exportTxt")}
-                onPress={() => {
-                  setMenuOpen(false);
+                  break;
+                case "export-txt":
                   exportHistoryEntry(entry, "txt");
-                }}
-              />
-              <CleanupItem
-                label={t("history.exportSrt")}
-                onPress={() => {
-                  setMenuOpen(false);
+                  break;
+                case "export-srt":
                   exportHistoryEntry(entry, "srt");
-                }}
-              />
-              <CleanupItem
-                label={t("history.exportRaw")}
-                onPress={() => {
-                  setMenuOpen(false);
+                  break;
+                case "export-raw":
                   exportHistoryEntry(entry, "raw");
-                }}
-              />
-              <div className="my-1 border-t border-border" />
-              <CleanupItem
-                label={confirmingDelete ? t("history.confirmDelete") : t("history.delete")}
-                danger
-                disabled={deleting}
-                onPress={() => {
+                  break;
+                case "open-work":
+                  if (entry.work_id) {
+                    void invoke("works_open_in_finder", {
+                      id: entry.work_id,
+                    }).catch(() => {});
+                  }
+                  break;
+                case "delete":
                   pressDelete();
-                  if (confirmingDelete) setMenuOpen(false);
-                }}
-              />
-            </motion.div>
-          </>
-        ) : null}
-        </AnimatePresence>
-      </div>
+                  break;
+              }
+            }}
+          >
+            <Dropdown.Item id="dispatch" textValue={t("history.dispatchThis")}>
+              {t("history.dispatchThis")}
+            </Dropdown.Item>
+            <Dropdown.Item id="export-md" textValue={t("history.exportMd")}>
+              {t("history.exportMd")}
+            </Dropdown.Item>
+            <Dropdown.Item id="export-txt" textValue={t("history.exportTxt")}>
+              {t("history.exportTxt")}
+            </Dropdown.Item>
+            <Dropdown.Item id="export-srt" textValue={t("history.exportSrt")}>
+              {t("history.exportSrt")}
+            </Dropdown.Item>
+            <Dropdown.Item id="export-raw" textValue={t("history.exportRaw")}>
+              {t("history.exportRaw")}
+            </Dropdown.Item>
+            {entry.work_id ? (
+              <Dropdown.Item id="open-work" textValue={t("history.openWork")}>
+                {t("history.openWork")}
+              </Dropdown.Item>
+            ) : null}
+            <Separator />
+            <Dropdown.Item
+              id="delete"
+              variant="danger"
+              isDisabled={deleting}
+              textValue={
+                confirmingDelete
+                  ? t("history.confirmDelete")
+                  : t("history.delete")
+              }
+            >
+              {confirmingDelete
+                ? t("history.confirmDelete")
+                : t("history.delete")}
+            </Dropdown.Item>
+          </Dropdown.Menu>
+        </Dropdown.Popover>
+      </Dropdown>
     </div>
   );
 }
@@ -881,7 +828,7 @@ function ExpandedViewer({
               <Save size={12} />
               {t("history.saveCorrection")}
             </Button>
-            <span className="type-meta text-muted">{t("history.saveLearnHint")}</span>
+            <InfoTip content={t("history.saveLearnHint")} />
           </div>
         </div>
       </SoftCollapse>

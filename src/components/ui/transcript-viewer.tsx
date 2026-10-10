@@ -31,6 +31,7 @@ import {
   groupWordsIntoParagraphs,
   needsLatinWordSpace,
   resolveAlignment,
+  speakerAtTime,
   splitPlainTextParagraphs,
   type TranscriptParagraph,
   type TranscriptWord,
@@ -70,6 +71,8 @@ type TranscriptCtx = {
   hasTimed: boolean;
   paragraphs: TranscriptParagraph[];
   plainParagraphs: string[];
+  /** Speaker id per paragraph (cloud diarization); null when no speaker data. */
+  paraSpeakers: (string | null)[] | null;
   emptyLabel: string;
   currentParaIndex: number;
   isPlayingOrScrubbed: boolean;
@@ -109,6 +112,22 @@ function useTranscript() {
 
 function useClock() {
   return useContext(ClockContext);
+}
+
+/**
+ * Seek the surrounding media from any panel rendered inside Root (e.g. notes
+ * with [mm:ss] anchors). Null outside Root, so callers degrade to plain text.
+ */
+export function useTranscriptSeek(): ((seconds: number) => void) | null {
+  const ctx = useContext(TranscriptContext);
+  if (!ctx || !ctx.src) return null;
+  return ctx.seekTo;
+}
+
+/** Canonical "speaker_N" → localized label; anything else passes through. */
+function speakerLabel(speaker: string, t: ReturnType<typeof useT>): string {
+  const m = /^speaker_(\d+)$/.exec(speaker);
+  return m ? t("cloudAsr.speaker", { n: Number(m[1]) }) : speaker;
 }
 
 function TranscriptRoot({
@@ -161,6 +180,13 @@ function TranscriptRoot({
     () => groupWordsIntoParagraphs(composed.words),
     [composed.words],
   );
+
+  // Diarized cloud segments carry speaker ids; map each paragraph to the
+  // speaker covering its start so the reader can label speaker turns.
+  const paraSpeakers = useMemo(() => {
+    if (!segments?.some((s) => s.speaker)) return null;
+    return paragraphs.map((p) => speakerAtTime(segments, p.startTime));
+  }, [segments, paragraphs]);
 
   const plainParagraphs = useMemo(
     () => (paragraphs.length ? [] : splitPlainTextParagraphs(text)),
@@ -362,6 +388,7 @@ function TranscriptRoot({
       hasTimed,
       paragraphs,
       plainParagraphs,
+      paraSpeakers,
       emptyLabel: resolvedEmptyLabel,
       currentParaIndex,
       isPlayingOrScrubbed,
@@ -383,6 +410,7 @@ function TranscriptRoot({
       hasTimed,
       paragraphs,
       plainParagraphs,
+      paraSpeakers,
       resolvedEmptyLabel,
       currentParaIndex,
       isPlayingOrScrubbed,
@@ -608,6 +636,7 @@ function TranscriptContent({
     hasTimed,
     paragraphs,
     plainParagraphs,
+    paraSpeakers,
     emptyLabel,
     currentParaIndex,
     isPlayingOrScrubbed,
@@ -699,16 +728,24 @@ function TranscriptContent({
                     dim && isFuture && "opacity-[0.26]",
                   )}
                 >
-                  <Button
-                    variant="ghost"
-                    aria-label={t("common.transcript.jumpToAria", {
-                      time: formatClock(para.startTime),
-                    })}
-                    className="mb-1.5 h-auto min-h-0 justify-start rounded-none px-0 py-0 font-mono text-[10px] font-normal tabular-nums tracking-wider text-muted/70 shadow-none hover:text-accent-soft-foreground data-[hovered=true]:bg-transparent data-[hovered=true]:text-accent-soft-foreground data-[pressed=true]:bg-transparent data-[pressed=true]:opacity-60"
-                    onPress={() => seekToParagraph(para)}
-                  >
-                    {formatClock(para.startTime)}
-                  </Button>
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      aria-label={t("common.transcript.jumpToAria", {
+                        time: formatClock(para.startTime),
+                      })}
+                      className="h-auto min-h-0 justify-start rounded-none px-0 py-0 font-mono text-[10px] font-normal tabular-nums tracking-wider text-muted/70 shadow-none hover:text-accent-soft-foreground data-[hovered=true]:bg-transparent data-[hovered=true]:text-accent-soft-foreground data-[pressed=true]:bg-transparent data-[pressed=true]:opacity-60"
+                      onPress={() => seekToParagraph(para)}
+                    >
+                      {formatClock(para.startTime)}
+                    </Button>
+                    {paraSpeakers?.[pi] != null &&
+                    (pi === 0 || paraSpeakers[pi] !== paraSpeakers[pi - 1]) ? (
+                      <span className="rounded-md bg-surface-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted">
+                        {speakerLabel(paraSpeakers[pi] as string, t)}
+                      </span>
+                    ) : null}
+                  </div>
                   <p
                     className={cn(
                       "text-pretty break-words",

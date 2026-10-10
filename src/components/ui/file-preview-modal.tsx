@@ -1,13 +1,10 @@
-import { useEffect } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Button, toast } from "@heroui/react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { ExternalLink, X } from "lucide-react";
+import { Button, Modal, toast } from "@heroui/react";
+import { ExternalLink } from "lucide-react";
 import { AttachMediaBody } from "@/components/ui/attach-media-body";
 import { MarkdownBody } from "@/components/shared/markdown-body";
 import { toolResultToMarkdown } from "@/lib/agent-tool-md";
-import { duration, easeOut, springBounce } from "@/lib/motion";
 import { useT } from "@/lib/i18n";
 import type { AgentPathInfo } from "@/types";
 
@@ -67,111 +64,84 @@ type Props = {
 
 /**
  * Full-screen file preview — image / video / audio / pdf / html / text / dir.
+ * HeroUI Modal (native enter/exit, Esc/backdrop close, scroll lock).
  * Asset protocol via AttachMediaBody; always offers 「用系统打开」.
  */
 export function FilePreviewModal({ item, onClose }: Props) {
   const t = useT();
-  const reduce = useReducedMotion();
-  const open = Boolean(item);
+  // Retain the last item so the exit animation keeps its content.
+  const [lastItem, setLastItem] = useState<AgentPathInfo | null>(null);
+  if (item && item !== lastItem) setLastItem(item);
+  const shown = item ?? lastItem;
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
-
-  return createPortal(
-    <AnimatePresence>
-      {item ? (
-        <motion.div
-          key="file-preview-backdrop"
-          className="trm-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: duration.normal, ease: easeOut }}
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) onClose();
-          }}
-        >
-          <motion.div
-            key="file-preview-panel"
-            role="dialog"
-            aria-modal="true"
-            aria-label={item.name}
-            className="agent-file-preview-panel flex h-[min(85vh,44rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl"
-            initial={reduce ? { opacity: 0.92 } : { opacity: 0.92, scale: 0.95, y: 24 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 16 }}
-            transition={reduce ? { duration: 0.14, ease: easeOut } : springBounce}
+  return (
+    <Modal
+      isOpen={Boolean(item)}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
+      <Modal.Backdrop>
+        <Modal.Container placement="center">
+          <Modal.Dialog
+            aria-label={shown?.name}
+            className="agent-file-preview-panel h-[min(85vh,44rem)] w-[min(56rem,calc(100vw-2rem))] gap-0 overflow-hidden p-0 sm:w-[min(56rem,calc(100vw-5rem))]"
           >
-            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-3">
-              <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{item.name}</div>
-                <div className="type-meta mt-0.5 flex flex-wrap items-center gap-2 font-mono">
-                  <span>{t(kindLabelKey(item.kind))}</span>
-                  {item.kind !== "dir" && item.size > 0 ? (
-                    <span>{formatSize(item.size)}</span>
-                  ) : null}
-                  <span className="truncate" title={item.path}>
-                    {item.path.replace(/^\/Users\/[^/]+/, "~")}
-                  </span>
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  aria-label={t("common.openInSystem")}
-                  onPress={() => void openPathInSystem(item.path)}
-                >
-                  <ExternalLink size={14} aria-hidden />
-                  {t("common.openInSystemShort")}
-                </Button>
-                <Button
-                  isIconOnly
-                  size="sm"
-                  variant="ghost"
-                  aria-label={t("common.close")}
-                  onPress={onClose}
-                >
-                  <X size={16} aria-hidden />
-                </Button>
-              </div>
-            </div>
-            <div className="agent-file-preview-body min-h-0 flex-1 overflow-auto p-4">
-              <AttachMediaBody
-                item={item}
-                density="full"
-                renderText={(preview, name) => (
-                  <div className="agent-file-preview-text max-h-full w-full overflow-auto text-left">
-                    <MarkdownBody
-                      text={
-                        /\.(md|markdown|mdx)$/i.test(name)
-                          ? preview
-                          : toolResultToMarkdown(preview)
-                      }
+            {shown ? (
+              <>
+                <Modal.Header className="shrink-0 flex-row items-center justify-between gap-3 border-b border-border px-5 py-3">
+                  <div className="min-w-0">
+                    <Modal.Heading className="truncate text-sm font-medium">
+                      {shown.name}
+                    </Modal.Heading>
+                    <div className="type-meta mt-0.5 flex flex-wrap items-center gap-2 font-mono">
+                      <span>{t(kindLabelKey(shown.kind))}</span>
+                      {shown.kind !== "dir" && shown.size > 0 ? (
+                        <span>{formatSize(shown.size)}</span>
+                      ) : null}
+                      <span className="truncate" title={shown.path}>
+                        {shown.path.replace(/^\/Users\/[^/]+/, "~")}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      aria-label={t("common.openInSystem")}
+                      onPress={() => void openPathInSystem(shown.path)}
+                    >
+                      <ExternalLink size={14} aria-hidden />
+                      {t("common.openInSystemShort")}
+                    </Button>
+                    <Modal.CloseTrigger
+                      aria-label={t("common.close")}
+                      className="static shrink-0"
                     />
                   </div>
-                )}
-              />
-            </div>
-          </motion.div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>,
-    document.body,
+                </Modal.Header>
+                <Modal.Body className="agent-file-preview-body m-0 min-h-0 flex-1 overflow-auto p-4 text-foreground">
+                  <AttachMediaBody
+                    item={shown}
+                    density="full"
+                    renderText={(preview, name) => (
+                      <div className="agent-file-preview-text max-h-full w-full overflow-auto text-left">
+                        <MarkdownBody
+                          text={
+                            /\.(md|markdown|mdx)$/i.test(name)
+                              ? preview
+                              : toolResultToMarkdown(preview)
+                          }
+                        />
+                      </div>
+                    )}
+                  />
+                </Modal.Body>
+              </>
+            ) : null}
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </Modal>
   );
 }

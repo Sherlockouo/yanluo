@@ -15,6 +15,7 @@ import { toast } from "./en/toast";
 import { transcribe } from "./en/transcribe";
 import { translate } from "./en/translate";
 import { vocab } from "./en/vocab";
+import { works } from "./en/works";
 
 export const en: Record<string, string> = {
   ...agent,
@@ -31,4 +32,5 @@ export const en: Record<string, string> = {
   ...transcribe,
   ...translate,
   ...vocab,
+  ...works,
 };

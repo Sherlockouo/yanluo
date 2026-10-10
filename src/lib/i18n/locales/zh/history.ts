@@ -49,4 +49,5 @@ export const history: Record<string, string> = {
   "history.saveCorrection": "保存修正",
   "history.saveLearnHint": "保存后自动学习差异",
   "history.export": "导出",
+  "history.openWork": "打开作品目录",
 };

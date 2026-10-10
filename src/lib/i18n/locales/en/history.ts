@@ -50,4 +50,5 @@ export const history: Record<string, string> = {
   "history.saveCorrection": "Save correction",
   "history.saveLearnHint": "Differences are learned automatically after saving",
   "history.export": "Export",
+  "history.openWork": "Open work folder",
 };

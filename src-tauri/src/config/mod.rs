@@ -354,6 +354,23 @@ pub(crate) struct AppConfig {
     pub(crate) llm_translate_prompt: String,
     #[serde(default)]
     pub(crate) vocabulary: Vec<String>,
+    /// Custom works root (作品目录). Empty = `{app_data_dir}/works`.
+    #[serde(default)]
+    pub(crate) works_dir: String,
+    /// Works pipeline (作品 AI 产物) LLM provider. Empty = follow main `llm_*`.
+    #[serde(default)]
+    pub(crate) works_llm_provider: String,
+    /// Per-kind prompt overrides (kind → prompt). Empty/missing = built-in.
+    #[serde(default)]
+    pub(crate) works_prompts: std::collections::HashMap<String, String>,
+    /// Active cloud ASR provider id: "elevenlabs" | "openai" | "dashscope".
+    /// Only consulted when `asr_provider == Cloud` (file/URL transcription).
+    #[serde(default = "default_cloud_asr_provider")]
+    pub(crate) cloud_asr_provider: String,
+    /// Per-provider cloud ASR credentials (provider id -> creds), same shape
+    /// as `llm_credentials`.
+    #[serde(default)]
+    pub(crate) cloud_asr_credentials: std::collections::HashMap<String, CloudAsrCredential>,
 }
 
 pub(crate) fn default_translate_target_language() -> String {
@@ -440,6 +457,26 @@ pub(crate) fn default_align_enabled() -> bool {
     true
 }
 
+pub(crate) fn default_cloud_asr_provider() -> String {
+    "elevenlabs".into()
+}
+
+/// Per-provider cloud ASR credentials (provider id → creds), keyed by
+/// `CloudAsrProvider::id()` ("elevenlabs" | "openai" | "dashscope").
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct CloudAsrCredential {
+    #[serde(default)]
+    pub(crate) api_key: String,
+    #[serde(default)]
+    pub(crate) model: String,
+    #[serde(default)]
+    pub(crate) base_url: String,
+    /// Speaker diarization (供应商支持时生效: ElevenLabs diarize / DashScope speaker_id).
+    #[serde(default)]
+    pub(crate) diarize: bool,
+}
+
 /// Per-provider LLM credentials. Only persisted; requests read the flat `llm_api_*`.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -460,7 +497,11 @@ pub(crate) struct LlmCredential {
 pub(crate) enum AsrProvider {
     Qwen,
     Apple,
+    /// Legacy id from pre-P2 configs; migrated to `Cloud` on load
+    /// (normalize_config_for_platform). Never selected anew.
     Elevenlabs,
+    /// 云端识别 — dispatch via `cloud_asr_provider` / `cloud_asr_credentials`.
+    Cloud,
 }
 
 impl Default for AppConfig {
@@ -515,6 +556,11 @@ impl Default for AppConfig {
             llm_organize_prompt: String::new(),
             llm_translate_prompt: String::new(),
             vocabulary: Vec::new(),
+            works_dir: String::new(),
+            works_llm_provider: String::new(),
+            works_prompts: std::collections::HashMap::new(),
+            cloud_asr_provider: default_cloud_asr_provider(),
+            cloud_asr_credentials: std::collections::HashMap::new(),
         }
     }
 }
@@ -540,6 +586,7 @@ impl AsrProvider {
             AsrProvider::Qwen => "qwen",
             AsrProvider::Apple => "apple",
             AsrProvider::Elevenlabs => "elevenlabs",
+            AsrProvider::Cloud => "cloud",
         }
     }
 }
@@ -756,16 +803,31 @@ pub(crate) fn ensure_agent_profiles(config: &mut AppConfig) {
 }
 
 pub(crate) fn normalize_config_for_platform(config: &mut AppConfig) {
+    // P2: the legacy Elevenlabs engine id becomes 云端识别 (Cloud) — the actual
+    // cloud vendor comes from `cloud_asr_provider`. Cloud stays valid on every
+    // platform (pure network calls; only live Fn dictation rejects it).
+    if matches!(config.asr_provider, AsrProvider::Elevenlabs) {
+        config.asr_provider = AsrProvider::Cloud;
+    }
     #[cfg(not(target_os = "macos"))]
     {
-        if matches!(config.asr_provider, AsrProvider::Apple | AsrProvider::Elevenlabs) {
+        if matches!(config.asr_provider, AsrProvider::Apple) {
             config.asr_provider = AsrProvider::Qwen;
         }
     }
-    #[cfg(target_os = "macos")]
-    {
-        if matches!(config.asr_provider, AsrProvider::Elevenlabs) {
-            config.asr_provider = AsrProvider::Apple;
+    // Legacy flat ElevenLabs key → per-provider cloud credentials (one-way;
+    // the flat fields stay written so downgrades keep working).
+    let legacy_key = config.elevenlabs_api_key.trim().to_string();
+    if !legacy_key.is_empty() {
+        let entry = config
+            .cloud_asr_credentials
+            .entry("elevenlabs".into())
+            .or_default();
+        if entry.api_key.trim().is_empty() {
+            entry.api_key = legacy_key;
+        }
+        if entry.model.trim().is_empty() {
+            entry.model = config.elevenlabs_model.trim().to_string();
         }
     }
     let _ = config;

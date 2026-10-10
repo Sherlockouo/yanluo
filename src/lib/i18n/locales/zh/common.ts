@@ -19,6 +19,7 @@ export const common: Record<string, string> = {
   "common.openInSystemShort": "系统打开",
   "common.clickToOpenInSystem": "点击用系统打开",
   "common.emptyParen": "（空）",
+  "common.infoTipAria": "说明",
 
   // File kinds (preview modal)
   "common.fileKind.image": "图片",

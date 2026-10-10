@@ -584,6 +584,122 @@ pub(crate) fn prune_history_older_than(days: u64, engine: State<'_, AsrEngine>) 
     Ok(remaining)
 }
 
+// ---------------------------------------------------------------------------
+// Works（作品目录）
+// ---------------------------------------------------------------------------
+
+/// Snapshot the config without holding the lock across works I/O.
+fn works_config(engine: &AsrEngine) -> Result<AppConfig, String> {
+    engine
+        .config
+        .lock()
+        .map(|c| c.clone())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn works_list(engine: State<'_, AsrEngine>) -> Result<Vec<crate::works::Work>, String> {
+    crate::works::list_works(&works_config(&engine)?)
+}
+
+#[tauri::command]
+pub(crate) fn works_get(id: String, engine: State<'_, AsrEngine>) -> Result<crate::works::Work, String> {
+    crate::works::get_work(&works_config(&engine)?, &id)
+}
+
+#[tauri::command]
+pub(crate) fn works_rename(
+    id: String,
+    title: String,
+    app: AppHandle,
+    engine: State<'_, AsrEngine>,
+) -> Result<crate::works::Work, String> {
+    let work = crate::works::rename_work(&works_config(&engine)?, &id, &title)?;
+    let _ = app.emit("works-updated", ());
+    Ok(work)
+}
+
+#[tauri::command]
+pub(crate) fn works_delete(
+    id: String,
+    app: AppHandle,
+    engine: State<'_, AsrEngine>,
+) -> Result<(), String> {
+    crate::works::delete_work(&works_config(&engine)?, &id)?;
+    let _ = app.emit("works-updated", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn works_read_artifact(
+    id: String,
+    path: String,
+    engine: State<'_, AsrEngine>,
+) -> Result<String, String> {
+    crate::works::read_artifact(&works_config(&engine)?, &id, &path)
+}
+
+#[tauri::command]
+pub(crate) fn works_write_artifact(
+    id: String,
+    path: String,
+    content: String,
+    app: AppHandle,
+    engine: State<'_, AsrEngine>,
+) -> Result<(), String> {
+    crate::works::write_artifact(&works_config(&engine)?, &id, &path, &content)?;
+    let _ = app.emit("works-updated", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) fn works_open_in_finder(
+    id: String,
+    engine: State<'_, AsrEngine>,
+) -> Result<(), String> {
+    let (dir, _work) = crate::works::resolve_work_dir(&works_config(&engine)?, &id)?;
+    crate::platform::open_path_in_system(&dir.to_string_lossy())
+}
+
+/// Reveal the works root (custom `works_dir` or the default `{app}/works`).
+#[tauri::command]
+pub(crate) fn works_open_root(engine: State<'_, AsrEngine>) -> Result<(), String> {
+    let root = crate::works::works_root(&works_config(&engine)?)?;
+    crate::platform::open_path_in_system(&root.to_string_lossy())
+}
+
+/// Start AI artifact generation (async — outcome via `work-artifact-progress`).
+#[tauri::command]
+pub(crate) fn works_generate_artifact(
+    work_id: String,
+    kind: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    crate::works::pipeline::generate_artifact(&app, &work_id, &kind)
+}
+
+/// Cancel an in-flight artifact generation (no-op when not running).
+#[tauri::command]
+pub(crate) fn works_cancel_artifact(
+    work_id: String,
+    kind: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    crate::works::pipeline::cancel_artifact(&app, &work_id, &kind)
+}
+
+/// Start an agent research run scoped to one work (outcome via `works-updated`).
+#[tauri::command]
+pub(crate) fn works_start_research(
+    work_id: String,
+    question: String,
+    app: AppHandle,
+    engine: State<'_, AsrEngine>,
+    runtime: State<'_, Arc<crate::agent::AgentRuntime>>,
+) -> Result<crate::works::research::ResearchEntry, String> {
+    crate::works::research::start(&app, engine.inner(), runtime.inner(), &work_id, &question)
+}
+
 #[tauri::command]
 pub(crate) async fn test_llm_refinement(
     text: String,
@@ -802,10 +918,9 @@ pub(crate) fn start_recording_impl(
     if matches!(config.asr_provider, AsrProvider::Apple) {
         return Err("Apple Speech 仅支持 macOS，请改用 Qwen 本地识别".into());
     }
-    if matches!(config.asr_provider, AsrProvider::Elevenlabs) {
-        return Err(
-            "ElevenLabs 已移除 — 请在设置 → 识别 改选 Apple 或 Qwen".into(),
-        );
+    // Cloud ASR is file/URL transcription only — no streaming live dictation.
+    if matches!(config.asr_provider, AsrProvider::Cloud | AsrProvider::Elevenlabs) {
+        return Err("云识别目前仅支持文件转写 — 请在设置 → 识别 改选本地引擎（Apple 或 Qwen）".into());
     }
 
     if !reserve_recording(&engine.inner().recording) {
@@ -1428,6 +1543,25 @@ pub(crate) fn stop_recording(app: AppHandle) -> Result<(), String> {
     stop_recording_impl(&app)
 }
 
+/// Cloud providers never run live (rejected in start_recording_impl); this only
+/// keeps the stop-path provider match exhaustive.
+fn cloud_not_live_result(config: &AppConfig, samples: &[f32]) -> TranscriptionResult {
+    TranscriptionResult {
+        text: String::new(),
+        raw_text: String::new(),
+        llm_text: None,
+        language: config.language.clone(),
+        duration_seconds: samples.len() as f64 / 16_000.0,
+        refined: false,
+        refine_failed: false,
+        error: Some(
+            "云识别目前仅支持文件转写 — 请在设置 → 识别 改选本地引擎（Apple 或 Qwen）".into(),
+        ),
+        segments: Vec::new(),
+        alignment: None,
+    }
+}
+
 /// Shared stop path for the IPC command and the native Fn toggle.
 pub(crate) fn stop_recording_impl(app: &AppHandle) -> Result<(), String> {
     // Belt-and-braces: a double-press race (Fn pressed between release and the
@@ -1539,19 +1673,11 @@ pub(crate) fn stop_recording_impl(app: &AppHandle) -> Result<(), String> {
             }
         } else {
             match config.asr_provider {
-                AsrProvider::Elevenlabs => transcribe_with_elevenlabs(&config, &samples)
-                    .unwrap_or_else(|error| TranscriptionResult {
-                        text: String::new(),
-                        raw_text: String::new(),
-                        llm_text: None,
-                        language: config.language.clone(),
-                        duration_seconds: samples.len() as f64 / 16_000.0,
-                        refined: false,
-                        refine_failed: false,
-                        error: Some(error),
-                        segments: Vec::new(),
-                        alignment: None,
-                    }),
+                // Live dictation rejects cloud at start (start_recording_impl);
+                // this arm only keeps the match exhaustive.
+                AsrProvider::Cloud | AsrProvider::Elevenlabs => {
+                    cloud_not_live_result(&config, &samples)
+                }
                 AsrProvider::Apple => {
                     transcribe_with_apple_speech(&config, &samples).unwrap_or_else(|error| {
                         TranscriptionResult {
@@ -1573,19 +1699,11 @@ pub(crate) fn stop_recording_impl(app: &AppHandle) -> Result<(), String> {
         };
         #[cfg(not(target_os = "macos"))]
         let mut result = match config.asr_provider {
-            AsrProvider::Elevenlabs => transcribe_with_elevenlabs(&config, &samples)
-                .unwrap_or_else(|error| TranscriptionResult {
-                    text: String::new(),
-                    raw_text: String::new(),
-                    llm_text: None,
-                    language: config.language.clone(),
-                    duration_seconds: samples.len() as f64 / 16_000.0,
-                    refined: false,
-                    refine_failed: false,
-                    error: Some(error),
-                    segments: Vec::new(),
-                    alignment: None,
-                }),
+            // Live dictation rejects cloud at start (start_recording_impl);
+            // this arm only keeps the match exhaustive.
+            AsrProvider::Cloud | AsrProvider::Elevenlabs => {
+                cloud_not_live_result(&config, &samples)
+            }
             AsrProvider::Apple => transcribe_with_apple_speech(&config, &samples).unwrap_or_else(
                 |error| TranscriptionResult {
                     text: String::new(),
@@ -1728,7 +1846,10 @@ pub(crate) fn transcribe_file(
             }
         };
         let mut result = match config.asr_provider {
-            AsrProvider::Elevenlabs => transcribe_with_elevenlabs(&config, &samples)
+            // 云端识别: pure network calls on this spawned thread (never the
+            // mlx-worker, invariant #1). Dispatches on config.cloud_asr_provider.
+            AsrProvider::Cloud | AsrProvider::Elevenlabs => {
+                cloud::transcribe_cloud(&config, &samples)
                 .unwrap_or_else(|error| TranscriptionResult {
                         text: String::new(),
                         raw_text: String::new(),
@@ -1740,7 +1861,8 @@ pub(crate) fn transcribe_file(
                         error: Some(error),
                         segments: Vec::new(),
                         alignment: None,
-                    }),
+                    })
+            }
             AsrProvider::Apple => transcribe_with_apple_speech(&config, &samples).unwrap_or_else(
                 |error| TranscriptionResult {
                         text: String::new(),

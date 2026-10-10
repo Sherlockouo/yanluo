@@ -14,6 +14,7 @@ import { toast } from "./zh/toast";
 import { transcribe } from "./zh/transcribe";
 import { translate } from "./zh/translate";
 import { vocab } from "./zh/vocab";
+import { works } from "./zh/works";
 
 export const zh: Record<string, string> = {
   ...agent,
@@ -30,4 +31,5 @@ export const zh: Record<string, string> = {
   ...transcribe,
   ...translate,
   ...vocab,
+  ...works,
 };

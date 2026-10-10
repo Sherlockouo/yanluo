@@ -18,8 +18,3 @@
 .agent-chat-row.agent-row-motion {
   animation: none;
 }
-
-/* Composer "+" popover — springs open from its trigger corner. */
-.agent-add-menu {
-  transform-origin: bottom left;
-}

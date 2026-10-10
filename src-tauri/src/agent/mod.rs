@@ -143,6 +143,10 @@ pub(crate) struct AgentRuntime {
 }
 
 impl AgentRuntime {
+    pub(crate) fn find_job(&self, id: &str) -> Option<AgentJob> {
+        self.jobs.lock().ok()?.iter().find(|j| j.id == id).cloned()
+    }
+
     pub(crate) fn new() -> Self {
         let jobs = load_jobs_from_disk();
         Self {
@@ -591,6 +595,13 @@ fn persist_jobs(jobs: &[AgentJob]) -> Result<(), String> {
 
 fn emit_job(app: &AppHandle, job: &AgentJob) {
     let _ = app.emit("agent-job-updated", job);
+}
+
+/// Settle a works research run whose agent job just reached a terminal state.
+fn notify_research(app: &AppHandle, job: Option<AgentJob>) {
+    if let Some(job) = job {
+        crate::works::research::on_job_finished(app, &job);
+    }
 }
 
 fn update_job<F>(app: &AppHandle, runtime: &AgentRuntime, id: &str, f: F) -> Option<AgentJob>
@@ -1507,18 +1518,19 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
     }
 
     if cancel.load(Ordering::SeqCst) {
-        update_job(&app, &runtime, &job_id, |j| {
+        let finished = update_job(&app, &runtime, &job_id, |j| {
             j.status = JobStatus::Cancelled;
             j.progress = "cancelled".into();
             push_event(j, "status", "cancelled", "");
             j.finished_at = Some(now_rfc3339());
         });
+        notify_research(&app, finished);
         return;
     }
 
     match status {
         Ok(s) if s.success() => {
-            update_job(&app, &runtime, &job_id, |j| {
+            let finished = update_job(&app, &runtime, &job_id, |j| {
                 j.status = JobStatus::Done;
                 j.progress = "done".into();
                 if !result_acc.trim().is_empty() {
@@ -1543,6 +1555,7 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
                 }
                 j.finished_at = Some(now_rfc3339());
             });
+            notify_research(&app, finished);
         }
         Ok(s) => {
             let err = if !stderr_acc.trim().is_empty() {
@@ -1550,7 +1563,7 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
             } else {
                 format!("exit {}", s.code().unwrap_or(-1))
             };
-            update_job(&app, &runtime, &job_id, |j| {
+            let finished = update_job(&app, &runtime, &job_id, |j| {
                 j.status = JobStatus::Error;
                 j.error = err.clone();
                 push_event(j, "error", "exit", &err);
@@ -1559,14 +1572,16 @@ fn run_job_thread(app: AppHandle, runtime: Arc<AgentRuntime>, job_id: String) {
                 }
                 j.finished_at = Some(now_rfc3339());
             });
+            notify_research(&app, finished);
         }
         Err(e) => {
-            update_job(&app, &runtime, &job_id, |j| {
+            let finished = update_job(&app, &runtime, &job_id, |j| {
                 j.status = JobStatus::Error;
                 j.error = e.to_string();
                 push_event(j, "error", "wait", &e.to_string());
                 j.finished_at = Some(now_rfc3339());
             });
+            notify_research(&app, finished);
         }
     }
 }
@@ -1696,6 +1711,34 @@ pub(crate) fn dispatch_agent(
     engine: State<'_, AsrEngine>,
     runtime: State<'_, Arc<AgentRuntime>>,
 ) -> Result<AgentJob, String> {
+    dispatch_agent_impl(
+        &app,
+        &agent,
+        &prompt,
+        &cwd,
+        attachments,
+        engine.inner(),
+        runtime.inner(),
+        true,
+        true,
+    )
+}
+
+/// Shared dispatch path. `navigate` controls the show-window + open-agent-job
+/// UI redirect; `remember_cwd` controls persisting cwd into the HUD picker
+/// defaults. Works research dispatches pass false/false: the job stays in its
+/// work folder and must not hijack the UI or pollute cwd history.
+pub(crate) fn dispatch_agent_impl(
+    app: &AppHandle,
+    agent: &str,
+    prompt: &str,
+    cwd: &str,
+    attachments: Option<Vec<String>>,
+    engine: &AsrEngine,
+    runtime: &Arc<AgentRuntime>,
+    navigate: bool,
+    remember_cwd: bool,
+) -> Result<AgentJob, String> {
     let attachments: Vec<String> = attachments
         .unwrap_or_default()
         .into_iter()
@@ -1708,7 +1751,7 @@ pub(crate) fn dispatch_agent(
     let prompt = compose_prompt(&prompt, &attachments);
     let mut cwd = cwd.trim().to_string();
     {
-        let mut cfg = engine.inner().config.lock().map_err(|e| e.to_string())?;
+        let mut cfg = engine.config.lock().map_err(|e| e.to_string())?;
         if cwd.is_empty() || !Path::new(&cwd).is_dir() {
             cwd = resolve_agent_cwd(&mut cfg)?;
         }
@@ -1716,21 +1759,24 @@ pub(crate) fn dispatch_agent(
     if !Path::new(&cwd).is_dir() {
         return Err(format!("目录不存在: {cwd}"));
     }
-    let kind = AgentKind::from_str(&agent);
+    let kind = AgentKind::from_str(agent);
 
     if matches!(kind, AgentKind::Codex) {
-        ensure_codex_cwd_allowed(&app, engine.inner(), &cwd)?;
+        ensure_codex_cwd_allowed(app, engine, &cwd)?;
     }
 
-    // Persist defaults + cwd history for HUD picker.
-    if let Ok(mut config) = engine.inner().config.lock() {
-        config.agent_kind = kind.as_str().into();
-        config.agent_cwd = cwd.clone();
-        push_agent_cwd_history(&mut config, &cwd);
-        let snapshot = config.clone();
-        drop(config);
-        let _ = save_config_to_disk(&snapshot);
-        let _ = app.emit("config-updated", &snapshot);
+    // Persist defaults + cwd history for HUD picker. Internal dispatches
+    // (works research) skip this — their per-work cwd is not a user default.
+    if remember_cwd {
+        if let Ok(mut config) = engine.config.lock() {
+            config.agent_kind = kind.as_str().into();
+            config.agent_cwd = cwd.clone();
+            push_agent_cwd_history(&mut config, &cwd);
+            let snapshot = config.clone();
+            drop(config);
+            let _ = save_config_to_disk(&snapshot);
+            let _ = app.emit("config-updated", &snapshot);
+        }
     }
 
     let job_id = new_job_id();
@@ -1773,7 +1819,7 @@ pub(crate) fn dispatch_agent(
         map.insert(job.id.clone(), Arc::clone(&cancel));
     }
 
-    let runtime_arc = runtime.inner().clone();
+    let runtime_arc = Arc::clone(runtime);
     let app_clone = app.clone();
     let job_id = job.id.clone();
     std::thread::Builder::new()
@@ -1782,9 +1828,12 @@ pub(crate) fn dispatch_agent(
         .map_err(|e| e.to_string())?;
 
     // Hide floating HUD after dispatch — follow progress on Agent page.
-    emit_floating_status(&app, false, "idle", "", 0.0);
-    crate::menu::show_main_window(&app);
-    let _ = app.emit("open-agent-job", &job.id);
+    // Internal dispatches (works research) stay where the user is.
+    emit_floating_status(app, false, "idle", "", 0.0);
+    if navigate {
+        crate::menu::show_main_window(app);
+        let _ = app.emit("open-agent-job", &job.id);
+    }
 
     Ok(job)
 }

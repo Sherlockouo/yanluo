@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Button, ListBox, Select, TextArea, TextField, toast } from "@heroui/react";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { Button, Dropdown, ListBox, Select, TextArea, TextField, toast } from "@heroui/react";
+import { motion, useReducedMotion } from "framer-motion";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import {
@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import {
   EmptyState,
+  InfoTip,
   PageHeader,
   PageShell,
   SoftCollapse,
@@ -831,25 +832,6 @@ export function AgentJobPage() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [canContinue, canDispatchNew, mergeReplyAttach]);
 
-  // "+" attachment menu: close on outside pointerdown / Escape (mirrors popover).
-  useEffect(() => {
-    if (!addMenu) return;
-    const onDown = (e: PointerEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (t?.closest?.("[data-add-menu],[data-add-menu-trigger]")) return;
-      setAddMenu(false);
-    };
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setAddMenu(false);
-    };
-    window.addEventListener("pointerdown", onDown, true);
-    window.addEventListener("keydown", onEsc, true);
-    return () => {
-      window.removeEventListener("pointerdown", onDown, true);
-      window.removeEventListener("keydown", onEsc, true);
-    };
-  }, [addMenu]);
-
   if (!job) {
     return (
       <PageShell>
@@ -1134,58 +1116,48 @@ export function AgentJobPage() {
                           if (e.key === "@" && !replyAttach.length) {
                             setAddMenu(true);
                           }
-                          if (e.key === "Escape") setAddMenu(false);
                         }}
                       />
                     </TextField>
                     <div className="agent-composer-bar">
-                      <Button
-                        isIconOnly
-                        variant="ghost"
-                        aria-label={t("agent.add")}
-                        aria-expanded={addMenu}
-                        data-add-menu-trigger
-                        className={cn(
-                          "agent-composer-icon btn-press h-7 w-7 min-h-7 min-w-7 p-0",
-                          addMenu && "is-open",
-                        )}
-                        isDisabled={sending}
-                        onPress={() => setAddMenu((v) => !v)}
-                      >
-                        <Plus size={15} strokeWidth={2.25} />
-                      </Button>
-                      <AnimatePresence initial={false}>
-                        {addMenu ? (
-                          <motion.div
-                            key="add-menu"
-                            role="menu"
+                      <Dropdown isOpen={addMenu} onOpenChange={setAddMenu}>
+                        <Button
+                          isIconOnly
+                          variant="ghost"
+                          aria-label={t("agent.add")}
+                          className={cn(
+                            "agent-composer-icon btn-press h-7 w-7 min-h-7 min-w-7 p-0",
+                            addMenu && "is-open",
+                          )}
+                          isDisabled={sending}
+                        >
+                          <Plus size={15} strokeWidth={2.25} />
+                        </Button>
+                        <Dropdown.Popover placement="top start">
+                          <Dropdown.Menu
                             aria-label={t("agent.addAttachment")}
-                            data-add-menu
-                            className="agent-add-menu absolute bottom-full left-2 z-50 mb-1.5 flex min-w-[220px] flex-col gap-0.5 rounded-xl border border-border bg-surface p-1 shadow-lg"
-                            initial={{ opacity: 0.92, y: 6, scale: 0.98 }}
-                            animate={{ opacity: 1, y: 0, scale: 1 }}
-                            exit={{ opacity: 0, y: 6, scale: 0.98 }}
-                            transition={springUI}
+                            onAction={(key) => {
+                              if (key === "files") void addReplyAttach(false);
+                              if (key === "folders") void addReplyAttach(true);
+                            }}
                           >
-                            <Button
-                              variant="ghost"
-                              className="h-auto min-h-0 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-sm font-normal shadow-none hover:bg-default/50 data-[hovered=true]:bg-default/50"
-                              onPress={() => void addReplyAttach(false)}
+                            <Dropdown.Item
+                              id="files"
+                              textValue={t("agent.filesAndFolders")}
                             >
                               <Paperclip size={14} className="opacity-60" />
                               {t("agent.filesAndFolders")}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              className="h-auto min-h-0 w-full justify-start gap-2 rounded-lg px-2 py-1.5 text-sm font-normal shadow-none hover:bg-default/50 data-[hovered=true]:bg-default/50"
-                              onPress={() => void addReplyAttach(true)}
+                            </Dropdown.Item>
+                            <Dropdown.Item
+                              id="folders"
+                              textValue={t("agent.foldersOnly")}
                             >
                               <FolderOpen size={14} className="opacity-60" />
                               {t("agent.foldersOnly")}
-                            </Button>
-                          </motion.div>
-                        ) : null}
-                      </AnimatePresence>
+                            </Dropdown.Item>
+                          </Dropdown.Menu>
+                        </Dropdown.Popover>
+                      </Dropdown>
 
                       <Select
                         className="inline-flex w-auto"
@@ -1196,7 +1168,7 @@ export function AgentJobPage() {
                           selectModel(String(key));
                         }}
                       >
-                        <Select.Trigger className="agent-model-trigger">
+                        <Select.Trigger>
                           <Select.Value>
                             {() => (
                               <span className="inline-flex items-center gap-1">
@@ -1208,10 +1180,7 @@ export function AgentJobPage() {
                               </span>
                             )}
                           </Select.Value>
-                          <ChevronDown
-                            size={12}
-                            className="shrink-0 opacity-50"
-                          />
+                          <Select.Indicator />
                         </Select.Trigger>
                         <Select.Popover className="min-w-36">
                           <ListBox>
@@ -1290,8 +1259,9 @@ export function AgentJobPage() {
             >
             <div className="agent-side-files">
               <div className="mb-2 flex items-center justify-between">
-                <span className="type-meta font-medium text-foreground">
+                <span className="type-meta inline-flex items-center gap-1 font-medium text-foreground">
                   {t("agent.files")}
+                  <InfoTip content={t("agent.filesHint")} />
                 </span>
                 <Button
                   isIconOnly
@@ -1304,9 +1274,7 @@ export function AgentJobPage() {
                   <PanelRightClose size={14} />
                 </Button>
               </div>
-              {verifiedPaths.length === 0 ? (
-                <p className="type-meta">{t("agent.filesHint")}</p>
-              ) : (
+              {verifiedPaths.length === 0 ? null : (
                 <ul className="flex flex-col gap-0.5">
                   {verifiedPaths.map((p) => {
                     const name = p.split("/").filter(Boolean).pop() || p;

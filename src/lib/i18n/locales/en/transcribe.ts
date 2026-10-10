@@ -60,4 +60,6 @@ export const transcribe: Record<string, string> = {
   "transcribe.empty": "(empty)",
   "transcribe.confirmDelete": "Delete?",
   "transcribe.delete": "Delete",
+  "transcribe.work.openFolder": "Open folder",
+  "transcribe.work.titleAria": "Work title",
 };

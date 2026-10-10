@@ -4,7 +4,7 @@
 .type-display {
   font-family: var(--font-display);
   font-size: var(--text-display);
-  font-weight: 400;
+  font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.05;
   color: var(--foreground);
@@ -54,11 +54,11 @@
   color: var(--muted);
 }
 
-/* Home poster headline — 54px serif per v3, responsive clamp */
+/* Home poster headline — 54px SF Pro Display, responsive clamp */
 .home-headline {
   font-family: var(--font-display);
   font-size: clamp(2.25rem, 6vw, 3.375rem);
-  font-weight: 400;
+  font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.05;
   color: var(--foreground);
@@ -179,7 +179,7 @@ textarea,
 
 /*
   Focus-visible fallback — :where() keeps this at zero specificity so any
-  component-level ring (HeroUI, .setnav-item, .qsel) always wins.
+  component-level ring (HeroUI, .setnav-item) always wins.
 */
 :where(
   a,

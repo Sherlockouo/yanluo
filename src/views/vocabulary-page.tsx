@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { Button, Input, Label, TextField } from "@heroui/react";
 import { BookOpen, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   EmptyState,
+  InfoTip,
   PageHeader,
   PageShell,
   PanelHeader,
@@ -86,28 +86,29 @@ export function VocabularyPage({ embedded = false }: { embedded?: boolean } = {}
     </Button>
   );
 
+  const headerStatus = (
+    <span className="inline-flex items-center gap-1.5">
+      {terms.length ? t("vocab.count", { n: terms.length }) : null}
+      <InfoTip
+        content={`${t("vocab.descPrefix")}${t("vocab.descLink")} — ${t("vocab.engineHint")}`}
+      />
+    </span>
+  );
+
   const content = (
     <>
       {embedded ? (
         <PanelHeader
-          status={terms.length ? t("vocab.count", { n: terms.length }) : undefined}
+          status={headerStatus}
           action={headerAction}
         />
       ) : (
         <PageHeader
           title={t("vocab.title")}
-          status={terms.length ? t("vocab.count", { n: terms.length }) : undefined}
+          status={headerStatus}
           action={headerAction}
         />
       )}
-
-      <p className="type-meta text-muted mb-1 px-1">
-        {t("vocab.descPrefix")} {" "}
-        <Link to="/settings?tab=refine" className="text-accent-soft-foreground hover:underline">
-          {t("vocab.descLink")}
-        </Link>
-      </p>
-      <p className="type-meta text-muted mb-1 px-1">{t("vocab.engineHint")}</p>
 
       <SoftCollapse open={addOpen}>
         <div className="surface-card mb-1 grid gap-3 p-4 sm:grid-cols-2">

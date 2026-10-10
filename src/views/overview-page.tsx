@@ -1,6 +1,7 @@
-import { Fragment, useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
+import { ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { PageShell, Reveal } from "@/components/shared/page-shell";
 import { WordCloud } from "@/components/home/word-cloud";
 import { duration, easeOut } from "@/lib/motion";
@@ -141,26 +142,23 @@ export function OverviewPage() {
       <Reveal index={3} className="home-cloud">
         <div className="home-cloud-head">
           <span className="home-cloud-label">{t("home.wordCloud")}</span>
-          <div className="tswitch" role="tablist" aria-label={t("home.cloudSourceAria")}>
-            {CLOUD_SOURCES.map((s, i) => (
-              <Fragment key={s.id}>
-                {i > 0 ? (
-                  <span className="sep" aria-hidden>
-                    ·
-                  </span>
-                ) : null}
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={cloudSource === s.id}
-                  className={`chip-press o${cloudSource === s.id ? " is-active" : ""}`}
-                  onClick={() => setSource(s.id)}
-                >
-                  {t(`home.cloudSource.${s.id}`)}
-                </button>
-              </Fragment>
+          <ToggleButtonGroup
+            aria-label={t("home.cloudSourceAria")}
+            selectionMode="single"
+            disallowEmptySelection
+            selectedKeys={[cloudSource]}
+            onSelectionChange={(keys) => {
+              const id = [...keys][0] as CloudSource | undefined;
+              if (id != null && id !== cloudSource) setSource(id);
+            }}
+            size="sm"
+          >
+            {CLOUD_SOURCES.map((s) => (
+              <ToggleButton key={s.id} id={s.id}>
+                {t(`home.cloudSource.${s.id}`)}
+              </ToggleButton>
             ))}
-          </div>
+          </ToggleButtonGroup>
         </div>
         <motion.div
           key={deferredSource}

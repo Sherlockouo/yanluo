@@ -4,6 +4,7 @@
  */
 import {
   groupWordsIntoParagraphs,
+  speakerAtTime,
   type TranscriptWord,
 } from "./alignment.ts";
 
@@ -52,5 +53,20 @@ const qWords = [
 const qParas = groupWordsIntoParagraphs(qWords, { silenceGapSec: 0.55 });
 assert(qParas.length === 1, `expected 1 para, got ${qParas.length}`);
 assert(qParas[0].text === "学习什么?", `got "${qParas[0].text}"`);
+
+// speakerAtTime: diarized segments (word- or sentence-level) cover time lookups
+const diarized = [
+  { text: "你好", start: 0, end: 1, speaker: "speaker_1" },
+  { text: "world", start: 1, end: 2, speaker: "speaker_1" },
+  { text: "收到", start: 5, end: 6, speaker: "speaker_2" },
+];
+assert(speakerAtTime(diarized, 0.5) === "speaker_1", "t=0.5 → speaker_1");
+assert(speakerAtTime(diarized, 5.5) === "speaker_2", "t=5.5 → speaker_2");
+assert(speakerAtTime(diarized, 3) === null, "gap → null");
+assert(speakerAtTime([], 0) === null, "empty → null");
+assert(
+  speakerAtTime([{ text: "x", start: 0, end: 1 }], 0.5) === null,
+  "no speaker field → null",
+);
 
 console.log("alignment.test.ts: ok");

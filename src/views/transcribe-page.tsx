@@ -1,28 +1,43 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, Link } from "react-router-dom";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, Input, Label, TextField } from "@heroui/react";
+import {
+  Button,
+  Input,
+  Label,
+  Modal,
+  TextField,
+  ToggleButton,
+  ToggleButtonGroup,
+} from "@heroui/react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Download,
   FileAudio,
   FileVideo,
+  FolderOpen,
   Plus,
   Trash2,
   Upload,
-  X,
 } from "lucide-react";
-import type { HistoryEntry, TranscriptionResult } from "@/types";
-import { providerLabel, TRANSCRIBE_FILE_FILTERS } from "@/lib/constants";
+import type { AsrProvider, HistoryEntry, TranscriptionResult } from "@/types";
+import {
+  cloudAsrPreset,
+  providerLabel,
+  resolveCloudAsrCreds,
+  TRANSCRIBE_FILE_FILTERS,
+} from "@/lib/constants";
 import { isVideoMediaKind } from "@/lib/alignment";
 import { ModeSwitch, PageHeader, PageShell, Reveal } from "@/components/shared/page-shell";
 import { TranscriptExportMenu } from "@/components/ui/transcript-export-menu";
+import { WorkArtifactsPanel } from "@/components/ui/work-artifacts";
+import { WorkResearchPanel } from "@/components/ui/work-research";
 import { useApp } from "@/app-context";
-import { springUI, springBounce, duration, easeOut } from "@/lib/motion";
+import { springUI, easeOut } from "@/lib/motion";
 import { cn } from "@/lib/cn";
 import { useT } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
@@ -217,7 +232,12 @@ export function TranscribePage({
   );
 
   const modelBlocked = config.asr_provider === "qwen" && !modelLoaded;
-  const canStart = Boolean(selectedPath) && !modelBlocked && !processing;
+  // 云端识别: blocked until the active vendor has an API key (settings → 识别).
+  const cloudCreds = resolveCloudAsrCreds(config, config.cloud_asr_provider);
+  const cloudBlocked =
+    config.asr_provider === "cloud" && !cloudCreds.api_key.trim();
+  const engineBlocked = modelBlocked || cloudBlocked;
+  const canStart = Boolean(selectedPath) && !engineBlocked && !processing;
 
   useEffect(() => {
     let cancelled = false;
@@ -616,7 +636,7 @@ export function TranscribePage({
   };
 
   const runUrlDownloadAndTranscribe = async (rawUrl: string) => {
-    if (modelBlocked || processing) return;
+    if (engineBlocked || processing) return;
     const url = rawUrl.trim();
     if (!/^https?:\/\//i.test(url)) return;
     if (!ytdlp?.available) {
@@ -669,12 +689,16 @@ export function TranscribePage({
     }
   };
 
+  const engineLabel =
+    config.asr_provider === "cloud"
+      ? `${providerLabel("cloud")} · ${cloudAsrPreset(config.cloud_asr_provider).label}`
+      : providerLabel(config.asr_provider);
   const headerStatus =
     screen === "processing"
       ? t("transcribe.recognizing")
       : screen === "result"
         ? languageLabel
-        : `${providerLabel(config.asr_provider)} · ${languageLabel}`;
+        : `${engineLabel} · ${languageLabel}`;
   const headerAction =
     screen === "result" ? (
       <Button variant="primary" onPress={enterUpload}>
@@ -700,8 +724,9 @@ export function TranscribePage({
             selectedIsVideo={selectedIsVideo}
             dragOver={dragOver}
             modelBlocked={modelBlocked}
+            cloudBlocked={cloudBlocked}
             canStart={canStart}
-            provider={providerLabel(config.asr_provider)}
+            provider={engineLabel}
             urlMode={urlMode}
             ytdlp={ytdlp}
             processing={processing}
@@ -717,7 +742,7 @@ export function TranscribePage({
         <ModeSwitch modeKey="processing">
           <ProcessingPhase
             fileName={processingName}
-            provider={providerLabel(config.asr_provider)}
+            provider={engineLabel}
             languageLabel={languageLabel}
             downloadPercent={downloadPercent}
             downloadMessage={downloadMessage}
@@ -750,6 +775,7 @@ function UploadPhase({
   selectedIsVideo,
   dragOver,
   modelBlocked,
+  cloudBlocked,
   canStart,
   provider,
   urlMode,
@@ -764,6 +790,7 @@ function UploadPhase({
   selectedIsVideo: boolean;
   dragOver: boolean;
   modelBlocked: boolean;
+  cloudBlocked: boolean;
   canStart: boolean;
   provider: string;
   urlMode: UrlMode;
@@ -775,11 +802,14 @@ function UploadPhase({
   onUrlStart: (url: string) => void;
 }) {
   const t = useT();
+  const { config, updateConfig } = useApp();
   const [source, setSource] = useState<"file" | "link">("file");
   // Local — keystrokes must not re-render TranscribePage + history tree.
   const [urlInput, setUrlInput] = useState("");
   const urlLooksValid = /^https?:\/\//i.test(urlInput.trim());
-  const canUrlStart = urlLooksValid && !modelBlocked && !processing;
+  const canUrlStart = urlLooksValid && !modelBlocked && !cloudBlocked && !processing;
+  const cloudPreset = cloudAsrPreset(config.cloud_asr_provider);
+  const cloudModel = resolveCloudAsrCreds(config, config.cloud_asr_provider).model;
 
   return (
     <div className="flex w-full flex-col">
@@ -789,6 +819,14 @@ function UploadPhase({
             {modelBlocked ? (
               <div className="rounded-xl bg-warning/10 px-3 py-2 type-meta text-warning">
                 {t("transcribe.modelBlockedBanner")}
+              </div>
+            ) : null}
+            {cloudBlocked ? (
+              <div className="rounded-xl bg-warning/10 px-3 py-2 type-meta text-warning">
+                {t("cloudAsr.notConfigured", { label: cloudPreset.label })}{" "}
+                <Link to="/settings?tab=asr" className="underline">
+                  {t("cloudAsr.configureLink")}
+                </Link>
               </div>
             ) : null}
 
@@ -821,9 +859,6 @@ function UploadPhase({
                     {dragOver
                       ? t("transcribe.releaseToAdd")
                       : t("transcribe.dropHint")}
-                  </span>
-                  <span className="dropzone-fmt">
-                    {t("transcribe.formatHint")}
                   </span>
                 </>
               )}
@@ -878,53 +913,59 @@ function UploadPhase({
         )}
       </ModeSwitch>
 
-      <div className="mt-5 flex items-center">
-        <div className="tswitch" role="tablist" aria-label={t("transcribe.sourceAria")}>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={source === "file"}
-            className={cn("o", source === "file" && "is-active")}
-            onClick={() => setSource("file")}
-          >
-            {t("transcribe.localFile")}
-          </button>
-          <span className="sep">·</span>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={source === "link"}
-            className={cn("o", source === "link" && "is-active")}
-            onClick={() => setSource("link")}
-          >
-            {t("transcribe.webLink")}
-          </button>
-        </div>
+      <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2">
+        <ToggleButtonGroup
+          aria-label={t("cloudAsr.engineAria")}
+          selectionMode="single"
+          disallowEmptySelection
+          selectedKeys={[config.asr_provider]}
+          onSelectionChange={(keys) => {
+            const id = [...keys][0] as AsrProvider | undefined;
+            if (id != null && id !== config.asr_provider) {
+              updateConfig("asr_provider", id);
+            }
+          }}
+          size="sm"
+        >
+          <ToggleButton id="qwen">{t("cloudAsr.engineQwen")}</ToggleButton>
+          <ToggleButton id="apple">{t("cloudAsr.engineApple")}</ToggleButton>
+          <ToggleButton id="cloud">{t("cloudAsr.engineCloud")}</ToggleButton>
+        </ToggleButtonGroup>
+        {config.asr_provider === "cloud" ? (
+          <span className="text-[11px] text-muted">
+            {cloudPreset.label}
+            {cloudModel ? ` · ${cloudModel}` : ""}
+          </span>
+        ) : null}
+        <ToggleButtonGroup
+          aria-label={t("transcribe.sourceAria")}
+          selectionMode="single"
+          disallowEmptySelection
+          selectedKeys={[source]}
+          onSelectionChange={(keys) => {
+            const id = [...keys][0] as "file" | "link" | undefined;
+            if (id != null && id !== source) setSource(id);
+          }}
+          size="sm"
+        >
+          <ToggleButton id="file">{t("transcribe.localFile")}</ToggleButton>
+          <ToggleButton id="link">{t("transcribe.webLink")}</ToggleButton>
+        </ToggleButtonGroup>
         {source === "link" ? (
-          <>
-            <span className="w-5" />
-            <div className="tswitch" role="tablist" aria-label={t("transcribe.mediaTypeAria")}>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={urlMode === "audio"}
-                className={cn("o", urlMode === "audio" && "is-active")}
-                onClick={() => onUrlModeChange("audio")}
-              >
-                {t("transcribe.audio")}
-              </button>
-              <span className="sep">·</span>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={urlMode === "video"}
-                className={cn("o", urlMode === "video" && "is-active")}
-                onClick={() => onUrlModeChange("video")}
-              >
-                {t("transcribe.video")}
-              </button>
-            </div>
-          </>
+          <ToggleButtonGroup
+            aria-label={t("transcribe.mediaTypeAria")}
+            selectionMode="single"
+            disallowEmptySelection
+            selectedKeys={[urlMode]}
+            onSelectionChange={(keys) => {
+              const id = [...keys][0] as UrlMode | undefined;
+              if (id != null && id !== urlMode) onUrlModeChange(id);
+            }}
+            size="sm"
+          >
+            <ToggleButton id="audio">{t("transcribe.audio")}</ToggleButton>
+            <ToggleButton id="video">{t("transcribe.video")}</ToggleButton>
+          </ToggleButtonGroup>
         ) : null}
       </div>
     </div>
@@ -1150,7 +1191,7 @@ function ResultPhase({
   );
 }
 
-/** Full-screen transcript reader dialog — silky enter/exit, Esc/backdrop close. */
+/** Full-screen transcript reader dialog — HeroUI Modal (native enter/exit, Esc/backdrop close, scroll lock). */
 function TranscriptResultModal({
   open,
   entry,
@@ -1165,161 +1206,138 @@ function TranscriptResultModal({
   onClose: () => void;
 }) {
   const t = useT();
-  const reduce = useReducedMotion();
-  // Esc to close.
+  // Retain the last entry so the exit animation keeps its content.
+  const [lastEntry, setLastEntry] = useState<HistoryEntry | null>(null);
+  if (entry && entry !== lastEntry) setLastEntry(entry);
+  const shown = entry ?? lastEntry;
+  // Transcript vs AI-artifact pane; resets when a different entry opens.
+  const [pane, setPane] = useState<WorkPane>("transcript");
+  const shownId = shown?.id ?? null;
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+    setPane("transcript");
+  }, [shownId]);
 
-  // Lock body scroll while open.
-  useEffect(() => {
-    if (!open) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [open]);
-
-  const isVideo = entry
-    ? isVideoMediaKind(entry.media_kind, entry.audio_path)
+  const isVideo = shown
+    ? isVideoMediaKind(shown.media_kind, shown.audio_path)
     : false;
-  const fileName = entry?.audio_path
-    ? (entry.audio_path.split("/").filter(Boolean).pop() ?? "")
+  const fileName = shown?.audio_path
+    ? (shown.audio_path.split("/").filter(Boolean).pop() ?? "")
     : "";
 
-  return createPortal(
-    <AnimatePresence>
-      {open && entry ? (
-        <motion.div
-          key="trm-backdrop"
-          className="trm-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-8 active:bg-black/50 transition-colors duration-100"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: duration.normal, ease: easeOut }}
-          onPointerDown={(e) => {
-            if (e.target === e.currentTarget) onClose();
-          }}
-        >
-          <motion.div
-            key="trm-panel"
-            role="dialog"
-            aria-modal="true"
+  return (
+    <Modal
+      isOpen={open}
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+    >
+      <Modal.Backdrop>
+        <Modal.Container placement="center">
+          <Modal.Dialog
             aria-label={t("transcribe.detailAria")}
-            className="flex h-[min(85vh,44rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl"
-            initial={reduce ? { opacity: 0.92 } : { opacity: 0.92, scale: 0.95, y: 24 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 16 }}
-            transition={reduce ? { duration: duration.fast, ease: easeOut } : springBounce}
+            className="h-[min(85vh,44rem)] w-[min(64rem,calc(100vw-2rem))] gap-0 overflow-hidden p-0 sm:w-[min(64rem,calc(100vw-5rem))]"
           >
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-3">
-              <div className="flex flex-wrap items-center gap-3 font-mono text-[12px] text-muted">
-                <span>{new Date(entry.created_at).toLocaleString()}</span>
-                <span>{entry.duration_seconds.toFixed(1)}s</span>
-                <span className="text-accent-soft-foreground">
-                  {entry.language || languageLabel}
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <TranscriptExportMenu entry={entry} variant="copy-export" />
-                <motion.span className="inline-flex" whileTap={{ scale: 0.94 }}>
-                  <Button
-                    isIconOnly
-                    size="sm"
-                    variant="ghost"
-                    aria-label={t("transcribe.close")}
-                    onPress={onClose}
-                  >
-                    <X size={16} aria-hidden />
-                  </Button>
-                </motion.span>
-              </div>
-            </div>
-            {Viewer ? (
-              <Viewer.Root
-                key={entry.id}
-                text={entry.text}
-                mediaSrc={
-                  entry.audio_path ? convertFileSrc(entry.audio_path) : null
-                }
-                mediaKind={isVideo ? "video" : "audio"}
-                durationSeconds={entry.duration_seconds}
-                segments={entry.segments}
-                alignment={entry.alignment}
-                emptyLabel={t("transcribe.emptyResult")}
-              >
-                <div className="flex min-h-0 flex-1">
-                  {/* Left: media column — video player, or audio placeholder card */}
-                  <motion.div
-                    className="flex w-[60%] shrink-0 flex-col border-r border-border bg-surface-secondary/60"
-                    initial={reduce ? false : { opacity: 0.92, x: -16 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ ...springUI, delay: 0.08 }}
-                  >
-                    {entry.audio_path ? (
-                      <>
-                        {isVideo ? (
-                          <div className="flex min-h-0 flex-1 items-center justify-center p-4">
-                            <Viewer.Media className="max-h-full" />
-                          </div>
-                        ) : (
-                          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6">
-                            <Viewer.Media />
-                            <div className="grid h-16 w-16 place-items-center rounded-2xl bg-accent-soft text-accent-soft-foreground">
-                              <FileAudio size={26} aria-hidden />
-                            </div>
-                            <div className="w-full min-w-0 text-center">
-                              <div className="truncate text-[13px] font-medium">
-                                {fileName}
-                              </div>
-                              <div className="mt-0.5 font-mono text-[11px] text-muted">
-                                {entry.duration_seconds.toFixed(1)}s · {t("transcribe.audio")}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        <div className="shrink-0 border-t border-border/60 p-3">
-                          <Viewer.Controls />
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-muted">
-                        <FileAudio size={26} aria-hidden />
-                        <p className="text-[12px]">{t("transcribe.noMedia")}</p>
-                      </div>
-                    )}
-                  </motion.div>
-                  {/* Right: transcript column — toggle + scrolling reader */}
-                  <motion.div
-                    className="flex min-w-0 flex-1 flex-col"
-                    initial={reduce ? false : { opacity: 0.92, x: 16 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ ...springUI, delay: 0.14 }}
-                  >
-                    <Viewer.ModeToggle className="shrink-0 border-b border-border/60 px-5 py-2.5" />
-                    <Viewer.Content
-                      fill
-                      className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
+            {shown ? (
+              <>
+                <Modal.Header className="shrink-0 flex-row flex-wrap items-center justify-between gap-2 border-b border-border px-5 py-3">
+                  <Modal.Heading className="flex flex-wrap items-center gap-3 font-mono text-[12px] font-normal text-muted">
+                    <span>{new Date(shown.created_at).toLocaleString()}</span>
+                    <span>{shown.duration_seconds.toFixed(1)}s</span>
+                    <span className="text-accent-soft-foreground">
+                      {shown.language || languageLabel}
+                    </span>
+                  </Modal.Heading>
+                  <div className="flex items-center gap-1.5">
+                    <TranscriptExportMenu entry={shown} variant="copy-export" />
+                    <Modal.CloseTrigger
+                      aria-label={t("transcribe.close")}
+                      className="static shrink-0"
                     />
-                  </motion.div>
-                </div>
-              </Viewer.Root>
-            ) : (
-              <div className="grid flex-1 place-items-center text-[12px] text-muted">
-                {t("transcribe.loadingReader")}
-              </div>
-            )}
-          </motion.div>
-        </motion.div>
-      ) : null}
-    </AnimatePresence>,
-    document.body,
+                  </div>
+                </Modal.Header>
+                {shown.work_id ? (
+                  <WorkCard workId={shown.work_id} pane={pane} onPaneChange={setPane} />
+                ) : null}
+                <Modal.Body className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden p-0 text-foreground">
+                  {Viewer ? (
+                    <Viewer.Root
+                      key={shown.id}
+                      text={shown.text}
+                      mediaSrc={
+                        shown.audio_path ? convertFileSrc(shown.audio_path) : null
+                      }
+                      mediaKind={isVideo ? "video" : "audio"}
+                      durationSeconds={shown.duration_seconds}
+                      segments={shown.segments}
+                      alignment={shown.alignment}
+                      emptyLabel={t("transcribe.emptyResult")}
+                    >
+                      <div className="flex min-h-0 flex-1">
+                        {/* Left: media column — video player, or audio placeholder card */}
+                        <div className="flex w-[60%] shrink-0 flex-col border-r border-border bg-surface-secondary/60">
+                          {shown.audio_path ? (
+                            <>
+                              {isVideo ? (
+                                <div className="flex min-h-0 flex-1 items-center justify-center p-4">
+                                  <Viewer.Media className="max-h-full" />
+                                </div>
+                              ) : (
+                                <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6">
+                                  <Viewer.Media />
+                                  <div className="grid h-16 w-16 place-items-center rounded-2xl bg-accent-soft text-accent-soft-foreground">
+                                    <FileAudio size={26} aria-hidden />
+                                  </div>
+                                  <div className="w-full min-w-0 text-center">
+                                    <div className="truncate text-[13px] font-medium">
+                                      {fileName}
+                                    </div>
+                                    <div className="mt-0.5 font-mono text-[11px] text-muted">
+                                      {shown.duration_seconds.toFixed(1)}s · {t("transcribe.audio")}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                              <div className="shrink-0 border-t border-border/60 p-3">
+                                <Viewer.Controls />
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-muted">
+                              <FileAudio size={26} aria-hidden />
+                              <p className="text-[12px]">{t("transcribe.noMedia")}</p>
+                            </div>
+                          )}
+                        </div>
+                        {/* Right: transcript, or work panes that keep the media in view */}
+                        <div className="flex min-w-0 flex-1 flex-col">
+                          {pane === "artifacts" && shown.work_id ? (
+                            <WorkArtifactsPanel workId={shown.work_id} />
+                          ) : pane === "research" && shown.work_id ? (
+                            <WorkResearchPanel workId={shown.work_id} />
+                          ) : (
+                            <>
+                              <Viewer.ModeToggle className="shrink-0 border-b border-border/60 px-5 py-2.5" />
+                              <Viewer.Content
+                                fill
+                                className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
+                              />
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </Viewer.Root>
+                  ) : (
+                    <div className="grid flex-1 place-items-center text-[12px] text-muted">
+                      {t("transcribe.loadingReader")}
+                    </div>
+                  )}
+                </Modal.Body>
+              </>
+            ) : null}
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </Modal>
   );
 }
 
@@ -1418,3 +1436,88 @@ const HistoryRow = memo(function HistoryRow({
     </div>
   );
 });
+
+/** "已存为作品" strip — linked work folder + transcript/AI-artifact pane toggle. */
+type WorkPane = "transcript" | "artifacts" | "research";
+
+const WORK_PANES: { id: WorkPane; labelKey: string }[] = [
+  { id: "transcript", labelKey: "works.tabTranscript" },
+  { id: "artifacts", labelKey: "works.tabArtifacts" },
+  { id: "research", labelKey: "works.tabResearch" },
+];
+
+function WorkCard({
+  workId,
+  pane,
+  onPaneChange,
+}: {
+  workId: string;
+  pane: WorkPane;
+  onPaneChange: (pane: WorkPane) => void;
+}) {
+  const t = useT();
+  const { works, renameWork, openWorkInFinder } = useApp();
+  const work = works.find((w) => w.id === workId);
+  const [title, setTitle] = useState(work?.title ?? "");
+
+  useEffect(() => {
+    setTitle(work?.title ?? "");
+  }, [work?.id, work?.title]);
+
+  if (!work) return null;
+
+  const commitTitle = () => {
+    const next = title.trim();
+    if (!next || next === work.title) {
+      setTitle(work.title);
+      return;
+    }
+    renameWork(work.id, next).catch((error) => {
+      setTitle(work.title);
+      toast.danger(String(error));
+    });
+  };
+
+  return (
+    <div className="flex shrink-0 items-center gap-2.5 border-b border-border/60 px-5 py-2">
+      <FolderOpen size={13} className="shrink-0 text-muted" aria-hidden />
+      <input
+        value={title}
+        aria-label={t("transcribe.work.titleAria")}
+        onChange={(e) => setTitle(e.target.value)}
+        onBlur={commitTitle}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") setTitle(work.title);
+        }}
+        className="min-w-0 flex-1 rounded-sm border-b border-transparent bg-transparent text-[13px] font-medium outline-none transition-colors focus:border-accent"
+      />
+      <div className="flex shrink-0 items-center gap-1" role="tablist">
+        {WORK_PANES.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            role="tab"
+            aria-selected={pane === p.id}
+            onClick={() => onPaneChange(p.id)}
+            className={cn(
+              "rounded-full px-2.5 py-0.5 text-[12px] transition-colors",
+              pane === p.id
+                ? "bg-accent-soft font-medium text-accent-soft-foreground"
+                : "text-muted hover:text-foreground",
+            )}
+          >
+            {t(p.labelKey)}
+          </button>
+        ))}
+      </div>
+      <button
+        type="button"
+        className="dlink shrink-0"
+        onClick={() => void openWorkInFinder(work.id).catch(() => {})}
+      >
+        {t("transcribe.work.openFolder")}
+      </button>
+    </div>
+  );
+}

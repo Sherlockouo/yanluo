@@ -11,15 +11,17 @@
       body {
         margin: 0;
         height: 100%;
-        background: #0e0f12;
-        color: #eceae6;
-        font-family: "Satoshi", "Noto Sans SC", system-ui, sans-serif;
+        background: #000000;
+        color: #f5f5f7;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+          "Hiragino Sans GB", "Helvetica Neue", system-ui, sans-serif;
         -webkit-font-smoothing: antialiased;
       }
       html.light,
       html[data-theme="light"] {
-        background: #f6f5f2;
-        color: #1c1a17;
+        background: #f5f5f7;
+        color: #1d1d1f;
       }
       #boot-shell {
         position: fixed;
@@ -35,10 +37,12 @@
         opacity: 0;
       }
       #boot-shell .mark {
-        font-family: "Instrument Serif", "Noto Serif SC", Georgia, serif;
+        font-family:
+          -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC",
+          system-ui, sans-serif;
         font-size: 42px;
-        letter-spacing: 0.12em;
-        font-weight: 400;
+        letter-spacing: 0.02em;
+        font-weight: 600;
         opacity: 0.92;
       }
       #boot-shell .rule {
@@ -52,31 +56,6 @@
         display: none;
       }
     </style>
-
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap"
-      media="print"
-      onload="this.media='all'"
-    />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
-      media="print"
-      onload="this.media='all'"
-    />
-    <noscript>
-      <link
-        href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap"
-        rel="stylesheet"
-      />
-      <link
-        href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Noto+Sans+SC:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
-        rel="stylesheet"
-      />
-    </noscript>
 
     <script>
       (function () {

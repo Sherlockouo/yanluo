@@ -1,17 +1,20 @@
-/* Theme tokens: @theme + light/dark semantic vars — Sayi (Sayi) brand */
+/* Theme tokens: @theme + Apple-grade neutral palette on HeroUI tokens.
+   Gray does the work (background / layers / selected states); the accent
+   (Apple systemBlue) is reserved for links, toggles and primary actions —
+   never for big fills or selected pills. */
 
 @theme {
-  /* UI: Satoshi (Latin) + Noto Sans SC (CJK). Display: Instrument + Noto Serif SC. */
+  /* Apple system stack — SF Pro (Latin) + PingFang SC (CJK), no webfonts. */
   --font-sans:
-    "Satoshi", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB",
-    -apple-system, BlinkMacSystemFont, "Helvetica Neue", ui-sans-serif,
-    system-ui, sans-serif;
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Helvetica Neue", "Microsoft YaHei", system-ui,
+    sans-serif;
   --font-display:
-    "Instrument Serif", "Noto Serif SC", "Satoshi", "Noto Sans SC",
-    "PingFang SC", Georgia, "Songti SC", ui-serif, serif;
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC",
+    "Hiragino Sans GB", system-ui, sans-serif;
   --font-mono:
-    "IBM Plex Mono", "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
-    Consolas, monospace;
+    "SF Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    monospace;
 
   --color-panel: rgba(23, 25, 30, 0.72);
   --color-accent-fg: #ffffff;
@@ -35,167 +38,154 @@
 }
 
 /*
-  Sayi (Sayi) brand themes. Dark is the default brand face; light is a
-  first-class alternate. Override AFTER @heroui/styles so HeroUI components
-  pick up the same semantic tokens (including calculated hover/soft vars).
-
-  NOTE: Shell is borderless — depth from paper/card/inset layers + soft ambient
-  shadow, not hairlines. Field borders also off; focus uses outline/ring.
+  Light — apple.com gray #F5F5F7 stage, white cards, gray fills.
+  Selected states (nav pill / segmented control / badges) are NEUTRAL gray
+  via --accent-soft*, not blue-tinted.
 */
 :root,
 .light,
 [data-theme="light"] {
-  color-scheme: light;
-
   --border-width: 0px;
   --field-border-width: 0px;
   --border-width-field: 0px;
-
-  /* 浅色 v4 — clean warm-white, NOT beige/muddy.
-     Three readable layers: paper #F6F5F2 → card #FFFFFF → inset #EDEBE6.
-     Ink stays warm near-black; bright orange only for CTA/recording/tab. */
-  --background: #f6f5f2;
-  --foreground: #1c1a17;
-  --muted: #6b6660;
-  --faint: #8e8983;
-  /* Spec keeps hairline values for reference; runtime is borderless. */
   --border: transparent;
   --separator: transparent;
-  --focus: #d9722e;
-  --link: #a0561f;
 
-  /* Bright orange = only primary action / recording light. White text on solid;
-     copper text on paper uses the deeper --accent-soft-foreground (≥4.5:1 on paper). */
-  --accent: #d9722e;
-  --accent-foreground: #ffffff;
-  --accent-hover: #be611f;
-  --accent-soft: rgba(217, 114, 46, 0.10);
-  --accent-soft-foreground: #a0561f;
-  --accent-soft-hover: rgba(217, 114, 46, 0.15);
-
-  --danger: #c24238;
-  --danger-foreground: #ffffff;
-  --danger-hover: #a8362d;
-  --danger-soft: rgba(194, 66, 56, 0.1);
-  --danger-soft-foreground: #c24238;
-  --danger-soft-hover: rgba(194, 66, 56, 0.16);
-
-  --success: #2f7a4c;
-  --success-foreground: #ffffff;
-  --success-hover: #26633e;
-  --success-soft: rgba(47, 122, 76, 0.12);
-  --success-soft-foreground: #26633e;
-  --success-soft-hover: rgba(47, 122, 76, 0.18);
-
-  --warning: #a66c12;
-  --warning-foreground: #ffffff;
-  --warning-hover: #8a590e;
-  --warning-soft: rgba(166, 108, 18, 0.12);
-  --warning-soft-foreground: #8a590e;
-  --warning-soft-hover: rgba(166, 108, 18, 0.18);
+  --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --muted: #86868b;
+  --faint: color-mix(in oklab, var(--foreground) 45%, transparent);
 
   --surface: #ffffff;
-  --surface-foreground: #1c1a17;
-  --surface-secondary: #faf9f6;
-  --surface-secondary-foreground: #1c1a17;
-  --surface-hover: #f0eee9;
+  --surface-foreground: var(--foreground);
+  --surface-secondary: #f2f2f7;
+  --surface-secondary-foreground: var(--foreground);
+  --surface-hover: #f2f2f7;
 
   --overlay: #ffffff;
-  --overlay-foreground: #1c1a17;
+  --overlay-foreground: var(--foreground);
 
-  --default: #edebe6;
-  --default-foreground: #1c1a17;
-  --default-hover: #e4e1da;
-  --default-soft: rgba(30, 28, 25, 0.05);
-  --default-soft-foreground: #1c1a17;
-  --default-soft-hover: rgba(30, 28, 25, 0.08);
+  /* Apple gray5 fill — secondary buttons / tracks */
+  --default: #e9e9ec;
+  --default-foreground: var(--foreground);
+  --default-hover: #e1e1e5;
+  --default-soft: rgba(0, 0, 0, 0.06);
+  --default-soft-foreground: var(--foreground);
+  --default-soft-hover: rgba(0, 0, 0, 0.09);
+
+  /* systemBlue — links / toggles / primary only */
+  --accent: #007aff;
+  --accent-foreground: #ffffff;
+  --accent-hover: #0066d6;
+  /* Selected pills: white on gray (iOS segmented), ink text — NOT blue */
+  --accent-soft: #ffffff;
+  --accent-soft-foreground: var(--foreground);
+  --accent-soft-hover: #ffffff;
+
+  --danger: #ff3b30;
+  --danger-foreground: #ffffff;
+  --danger-hover: #d70015;
+  --danger-soft: rgba(255, 59, 48, 0.1);
+  --danger-soft-foreground: #d70015;
+  --danger-soft-hover: rgba(255, 59, 48, 0.16);
+
+  --success: #34c759;
+  --success-foreground: #ffffff;
+  --success-hover: #248a3d;
+  --success-soft: rgba(52, 199, 89, 0.12);
+  --success-soft-foreground: #248a3d;
+  --success-soft-hover: rgba(52, 199, 89, 0.18);
+
+  --warning: #ff9500;
+  --warning-foreground: #ffffff;
+  --warning-hover: #c93400;
+  --warning-soft: rgba(255, 149, 0, 0.12);
+  --warning-soft-foreground: #b25000;
+  --warning-soft-hover: rgba(255, 149, 0, 0.18);
 
   --field-background: #ffffff;
-  --field-foreground: #1c1a17;
-  --field-placeholder: #9a948d;
-  --field-border: transparent;
-  --field-hover: #f5f3ee;
+  --field-foreground: var(--foreground);
+  --field-placeholder: var(--muted);
+  --field-hover: #f7f7f9;
   --field-focus: #ffffff;
-  --field-border-hover: transparent;
-  --field-border-focus: transparent;
 
   --segment: #ffffff;
-  --segment-foreground: #1c1a17;
-  --scrollbar: rgba(30, 28, 25, 0.25);
+  --segment-foreground: var(--foreground);
+  --scrollbar: rgba(0, 0, 0, 0.25);
+  --link: var(--accent);
+  --focus: var(--accent);
 }
+
+/*
+  Dark — true Apple dark: black stage, #1C1C1E grouped cards, gray2/3 fills.
+*/
 .dark,
 [data-theme="dark"] {
-  color-scheme: dark;
-
   --border-width: 0px;
   --field-border-width: 0px;
   --border-width-field: 0px;
-
-  --background: #0e0f12;
-  --foreground: #e8e6e3;
-  --muted: #8b8a86;
-  /* meta/timestamp tier — matches the old foreground@42% mix, slightly up */
-  --faint: #7a7978;
   --border: transparent;
   --separator: transparent;
-  --focus: #c4784a;
-  --link: #c4784a;
 
-  --accent: #c4784a;
+  --background: #000000;
+  --foreground: #f5f5f7;
+  --muted: #98989d;
+  --faint: color-mix(in oklab, var(--foreground) 46%, transparent);
+
+  --surface: #1c1c1e;
+  --surface-foreground: var(--foreground);
+  --surface-secondary: #2c2c2e;
+  --surface-secondary-foreground: var(--foreground);
+  --surface-hover: #2c2c2e;
+
+  --overlay: #1c1c1e;
+  --overlay-foreground: var(--foreground);
+
+  --default: #2c2c2e;
+  --default-foreground: var(--foreground);
+  --default-hover: #3a3a3c;
+  --default-soft: rgba(255, 255, 255, 0.08);
+  --default-soft-foreground: var(--foreground);
+  --default-soft-hover: rgba(255, 255, 255, 0.12);
+
+  --accent: #0a84ff;
   --accent-foreground: #ffffff;
-  --accent-hover: #d69267;
-  --accent-soft: rgba(196, 120, 74, 0.18);
-  --accent-soft-foreground: #e0a075;
-  --accent-soft-hover: rgba(196, 120, 74, 0.26);
+  --accent-hover: #2f96ff;
+  /* Selected pills: light-gray fill, ink text — NOT blue */
+  --accent-soft: rgba(255, 255, 255, 0.14);
+  --accent-soft-foreground: var(--foreground);
+  --accent-soft-hover: rgba(255, 255, 255, 0.18);
 
-  --danger: #e2695f;
+  --danger: #ff453a;
   --danger-foreground: #ffffff;
-  --danger-hover: #e88980;
-  --danger-soft: rgba(226, 105, 95, 0.18);
-  --danger-soft-foreground: #e88980;
-  --danger-soft-hover: rgba(226, 105, 95, 0.26);
+  --danger-hover: #ff6961;
+  --danger-soft: rgba(255, 69, 58, 0.16);
+  --danger-soft-foreground: #ff6961;
+  --danger-soft-hover: rgba(255, 69, 58, 0.22);
 
-  --success: #5fb37e;
+  --success: #30d158;
   --success-foreground: #08130c;
-  --success-hover: #7fc79a;
-  --success-soft: rgba(95, 179, 126, 0.18);
-  --success-soft-foreground: #7fc79a;
-  --success-soft-hover: rgba(95, 179, 126, 0.26);
+  --success-hover: #4bd97a;
+  --success-soft: rgba(48, 209, 88, 0.16);
+  --success-soft-foreground: #4bd97a;
+  --success-soft-hover: rgba(48, 209, 88, 0.22);
 
-  --warning: #d69a45;
+  --warning: #ff9f0a;
   --warning-foreground: #17110a;
-  --warning-hover: #ddac66;
-  --warning-soft: rgba(214, 154, 69, 0.18);
-  --warning-soft-foreground: #ddac66;
-  --warning-soft-hover: rgba(214, 154, 69, 0.26);
+  --warning-hover: #ffb340;
+  --warning-soft: rgba(255, 159, 10, 0.16);
+  --warning-soft-foreground: #ffb340;
+  --warning-soft-hover: rgba(255, 159, 10, 0.22);
 
-  --surface: #17191e;
-  --surface-foreground: #e8e6e3;
-  --surface-secondary: #1e2128;
-  --surface-secondary-foreground: #e8e6e3;
-  --surface-hover: #1e2128;
+  --field-background: #1c1c1e;
+  --field-foreground: var(--foreground);
+  --field-placeholder: var(--muted);
+  --field-hover: #2c2c2e;
+  --field-focus: #2c2c2e;
 
-  --overlay: #1e2128;
-  --overlay-foreground: #e8e6e3;
-
-  --default: #23262d;
-  --default-foreground: #e8e6e3;
-  --default-hover: #2b2e36;
-  --default-soft: rgba(232, 230, 227, 0.08);
-  --default-soft-foreground: #e8e6e3;
-  --default-soft-hover: rgba(232, 230, 227, 0.12);
-
-  /* Distinct from surface so inputs are readable on cards */
-  --field-background: #1e2128;
-  --field-foreground: #e8e6e3;
-  --field-placeholder: #8b8a86;
-  --field-border: transparent;
-  --field-hover: #23262d;
-  --field-focus: #23262d;
-  --field-border-hover: transparent;
-  --field-border-focus: transparent;
-
-  --segment: #1e2128;
-  --segment-foreground: #e8e6e3;
-  --scrollbar: rgba(232, 230, 227, 0.24);
+  --segment: #2c2c2e;
+  --segment-foreground: var(--foreground);
+  --scrollbar: rgba(255, 255, 255, 0.24);
+  --link: var(--accent);
+  --focus: var(--accent);
 }

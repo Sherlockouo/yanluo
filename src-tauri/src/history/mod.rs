@@ -13,6 +13,10 @@ pub(crate) struct TranscriptSegment {
     pub(crate) text: String,
     pub(crate) start: f64,
     pub(crate) end: f64,
+    /// Canonical speaker id (e.g. "speaker_1") when the provider diarized.
+    /// serde(default) keeps pre-P2 history.json / transcript.json parseable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) speaker: Option<String>,
 }
 
 /// ElevenLabs `CharacterAlignmentResponseModel` shape for transcript-viewer.
@@ -70,6 +74,9 @@ pub(crate) struct HistoryEntry {
     /// Terms applied to vocab from this entry.
     #[serde(default)]
     pub(crate) learn_terms: Vec<String>,
+    /// Linked work (作品目录 folder index id) for file/URL transcriptions.
+    #[serde(default)]
+    pub(crate) work_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -96,6 +103,7 @@ impl HistoryEntry {
             rated_at: None,
             learn_status: None,
             learn_terms: Vec::new(),
+            work_id: None,
         }
     }
 }
@@ -147,6 +155,7 @@ pub(crate) fn history_entry_for_list(entry: &HistoryEntry) -> HistoryEntry {
         rated_at: entry.rated_at.clone(),
         learn_status: entry.learn_status.clone(),
         learn_terms: entry.learn_terms.clone(),
+        work_id: entry.work_id.clone(),
     }
 }
 
@@ -247,6 +256,7 @@ pub(crate) fn append_history_with_user(
             rated_at,
             learn_status,
             learn_terms: Vec::new(),
+            work_id: None,
         },
     );
     history.truncate(5000);
@@ -257,6 +267,36 @@ pub(crate) fn append_history_with_user(
         return None;
     }
     Some(id)
+}
+
+/// Link a history entry to its work folder (作品目录). Re-persists under the
+/// same history_persist serialization as append.
+pub(crate) fn set_history_work_id(app: &AppHandle, id: &str, work_id: &str) {
+    let state = app.state::<AsrEngine>();
+    let _persist = match state.inner().history_persist.lock() {
+        Ok(lock) => lock,
+        Err(error) => {
+            crate::elog::elog!("[history] work_id serialization failed: {error}");
+            return;
+        }
+    };
+    let mut history = match state.inner().history.lock() {
+        Ok(history) => history,
+        Err(error) => {
+            crate::elog::elog!("[history] work_id update failed: {error}");
+            return;
+        }
+    };
+    let Some(entry) = history.iter_mut().find(|e| e.id == id) else {
+        crate::elog::elog!("[history] work_id target not found: {id}");
+        return;
+    };
+    entry.work_id = Some(work_id.to_string());
+    let snapshot = history.clone();
+    drop(history);
+    if let Err(error) = save_history_to_disk(&snapshot) {
+        crate::elog::elog!("[history] work_id persist failed: {error}");
+    }
 }
 
 fn learn_status_ok(status: &str) -> bool {
@@ -442,6 +482,7 @@ mod tests {
             rated_at: None,
             learn_status: None,
             learn_terms: Vec::new(),
+            work_id: None,
         }
     }
 

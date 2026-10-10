@@ -21,6 +21,7 @@ import type {
   HistoryEntry,
   RecState,
   TranscriptionResult,
+  Work,
 } from "@/types";
 import {
   defaultConfig,
@@ -46,6 +47,10 @@ export type ThemeMode = "dark" | "light";
 type AppContextValue = {
   config: AppConfig;
   history: HistoryEntry[];
+  works: Work[];
+  loadWorks: () => Promise<void>;
+  renameWork: (id: string, title: string) => Promise<Work>;
+  openWorkInFinder: (id: string) => Promise<void>;
   agentJobs: AgentJob[];
   agentModels: AgentModelsCache | null;
   refreshAgentModels: (force?: boolean) => Promise<void>;
@@ -145,6 +150,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   tRef.current = t;
   const [config, setConfig] = useState<AppConfig>(defaultConfig);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [works, setWorks] = useState<Work[]>([]);
   const [agentJobs, setAgentJobs] = useState<AgentJob[]>([]);
   const [agentModels, setAgentModels] = useState<AgentModelsCache | null>(null);
   const [state, setState] = useState<RecState>("idle");
@@ -215,6 +221,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loadHistory = useCallback(async () => {
     const entries = await invoke<HistoryEntry[]>("get_history").catch(() => []);
     setHistory(entries);
+  }, []);
+
+  const loadWorks = useCallback(async () => {
+    const list = await invoke<Work[]>("works_list").catch(() => []);
+    setWorks(list);
+  }, []);
+
+  const renameWork = useCallback(
+    async (id: string, title: string) => {
+      const work = await invoke<Work>("works_rename", { id, title });
+      setWorks((prev) => prev.map((w) => (w.id === work.id ? work : w)));
+      return work;
+    },
+    [],
+  );
+
+  const openWorkInFinder = useCallback(async (id: string) => {
+    await invoke("works_open_in_finder", { id });
   }, []);
 
   const loadAgentJobs = useCallback(async () => {
@@ -290,6 +314,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let timeoutId2: number | null = null;
     const deferredHistory = () => {
       void loadHistory();
+      void loadWorks();
     };
     const deferredAgent = () => {
       void loadAgentJobs();
@@ -417,6 +442,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       listen("agent-jobs-reload", () => {
         void loadAgentJobs();
       }),
+      listen("works-updated", () => {
+        void loadWorks();
+        // work_id is back-linked onto the history entry after work creation.
+        void loadHistory();
+      }),
+      listen("work-artifact-progress", () => {
+        // work.json artifact state machine moved — refresh the list.
+        void loadWorks();
+      }),
       listen<AgentModelsCache>("agent-models-updated", (event) => {
         setAgentModels(event.payload);
       }),
@@ -512,7 +546,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (timeoutId2 != null) window.clearTimeout(timeoutId2);
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [loadConfig, loadHistory, loadAgentJobs, loadAgentModels, refreshAgentModels, navigate]);
+  }, [loadConfig, loadHistory, loadWorks, loadAgentJobs, loadAgentModels, refreshAgentModels, navigate]);
 
   const saveConfig = useCallback(
     async (next = config, opts?: { silent?: boolean }) => {
@@ -889,6 +923,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     () => ({
       config,
       history,
+      works,
+      loadWorks,
+      renameWork,
+      openWorkInFinder,
       agentJobs,
       agentModels,
       refreshAgentModels,
@@ -930,6 +968,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [
       config,
       history,
+      works,
+      loadWorks,
+      renameWork,
+      openWorkInFinder,
       agentJobs,
       agentModels,
       refreshAgentModels,

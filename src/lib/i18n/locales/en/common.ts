@@ -19,6 +19,7 @@ export const common: Record<string, string> = {
   "common.openInSystemShort": "Open in system",
   "common.clickToOpenInSystem": "Click to open with system",
   "common.emptyParen": "(empty)",
+  "common.infoTipAria": "More info",
 
   // File kinds (preview modal)
   "common.fileKind.image": "Image",
