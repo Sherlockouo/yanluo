@@ -1,5 +1,6 @@
 export const nav: Record<string, string> = {
   "nav.drafts": "文稿",
+  "nav.works": "作品",
   "nav.dispatch": "智能体",
   "nav.settings": "设置",
   "nav.homeAria": "首页",

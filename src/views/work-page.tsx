@@ -137,7 +137,7 @@ export function WorkPage() {
   );
 
   const backButton = (
-    <Button size="sm" variant="ghost" onPress={() => navigate("/draft?mode=file")}>
+    <Button size="sm" variant="ghost" onPress={() => navigate("/works")}>
       <ArrowLeft size={14} aria-hidden />
       {t("works.back")}
     </Button>

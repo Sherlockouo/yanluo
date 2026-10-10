@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { AudioLines, Bot, Moon, Settings, Sun } from "lucide-react";
+import { AudioLines, Bot, LibraryBig, Moon, Settings, Sun } from "lucide-react";
 import type { Page } from "@/types";
 import { duration, easeOut } from "@/lib/motion";
 import { cn } from "@/lib/cn";
@@ -11,6 +11,7 @@ import { useT } from "@/lib/i18n";
 const ICONS: Record<Page, typeof AudioLines> = {
   overview: AudioLines,
   draft: AudioLines,
+  works: LibraryBig,
   dispatch: Bot,
   settings: Settings,
 };
@@ -18,12 +19,14 @@ const ICONS: Record<Page, typeof AudioLines> = {
 const PATHS: Record<Page, string> = {
   overview: "/",
   draft: "/draft",
+  works: "/works",
   dispatch: "/dispatch",
   settings: "/settings",
 };
 
 const RAIL_ITEMS: { id: Page; labelKey: string }[] = [
   { id: "draft", labelKey: "nav.drafts" },
+  { id: "works", labelKey: "nav.works" },
   { id: "dispatch", labelKey: "nav.dispatch" },
 ];
 

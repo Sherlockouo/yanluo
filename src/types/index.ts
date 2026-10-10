@@ -357,7 +357,7 @@ export type WorkResearchEntry = {
 };
 
 /** Narrow rail destinations — 出稿 / 派活 / 设置 (+ home). */
-export type Page = "overview" | "draft" | "dispatch" | "settings";
+export type Page = "overview" | "draft" | "works" | "dispatch" | "settings";
 
 /** Original-text annotation on a work transcript (原文批注). */
 export type WorkAnnotation = {
