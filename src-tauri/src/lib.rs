@@ -213,6 +213,10 @@ pub fn main() {
             commands::works_generate_artifact,
             commands::works_cancel_artifact,
             commands::works_start_research,
+            commands::works_detail,
+            commands::works_add_annotation,
+            commands::works_update_annotation,
+            commands::works_delete_annotation,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

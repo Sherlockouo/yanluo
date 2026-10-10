@@ -16,6 +16,7 @@
 @import "./styles/components.css";
 @import "./styles/draft.css";
 @import "./styles/agent.css";
+@import "./styles/work.css";
 @import "./styles/view-motion.css";
 
 /* Press utilities (.btn-press/.card-press/.row-press/.chip-press/.dropzone)

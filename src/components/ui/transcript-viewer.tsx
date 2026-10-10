@@ -36,12 +36,30 @@ import {
   type TranscriptParagraph,
   type TranscriptWord,
 } from "@/lib/alignment";
-import type { CharacterAlignment, TranscriptSegment } from "@/types";
+import type {
+  CharacterAlignment,
+  TranscriptSegment,
+  WorkAnnotation,
+} from "@/types";
+import { highlightBackground } from "@/lib/annotations";
 import { motion } from "framer-motion";
 import { useFade } from "@/lib/motion";
 
 type WordStatus = "spoken" | "unspoken" | "current";
 type ViewMode = "focus" | "read";
+
+/** A whole-word selection in the reader, in word-index space. */
+export type TranscriptSelection = {
+  wordStart: number;
+  wordEnd: number;
+  quote: string;
+  startTime: number;
+  /** Viewport rect of the selection, for anchoring a floating toolbar. */
+  rect: { top: number; left: number; width: number };
+};
+
+/** Per-word annotation state: highlight colour and/or comment marker. */
+type WordMark = { color: string | null; comment: boolean };
 
 type TranscriptViewerProps = {
   text: string;
@@ -53,6 +71,10 @@ type TranscriptViewerProps = {
   alignment?: CharacterAlignment | null;
   className?: string;
   emptyLabel?: string;
+  /** Annotations to paint over the words (matched by word index). */
+  annotations?: WorkAnnotation[] | null;
+  /** Fires when the reader's text selection covers whole words. */
+  onSelection?: ((selection: TranscriptSelection) => void) | null;
   children?: ReactNode;
 };
 
@@ -77,6 +99,12 @@ type TranscriptCtx = {
   currentParaIndex: number;
   isPlayingOrScrubbed: boolean;
   statusForWord: (word: TranscriptWord) => WordStatus;
+  wordMarks: Map<number, WordMark>;
+  reportSelection: (
+    wordStart: number,
+    wordEnd: number,
+    rect: TranscriptSelection["rect"],
+  ) => void;
   seekTo: (time: number) => void;
   togglePlay: () => void;
   seekToWord: (word: TranscriptWord) => void;
@@ -130,6 +158,27 @@ function speakerLabel(speaker: string, t: ReturnType<typeof useT>): string {
   return m ? t("cloudAsr.speaker", { n: Number(m[1]) }) : speaker;
 }
 
+/** Word index of the word span containing `node`, or null outside the reader. */
+function wordIndexOf(node: Node | null): number | null {
+  const el = node instanceof Element ? node : (node?.parentElement ?? null);
+  const span = el?.closest<HTMLElement>("[data-wi]");
+  return span ? Number(span.dataset.wi) : null;
+}
+
+function buildWordMarks(annotations: WorkAnnotation[] | null | undefined) {
+  const marks = new Map<number, WordMark>();
+  for (const a of annotations ?? []) {
+    for (let i = a.word_start; i <= a.word_end; i++) {
+      const prev = marks.get(i) ?? { color: null, comment: false };
+      marks.set(i, {
+        color: a.kind === "highlight" ? a.color : prev.color,
+        comment: prev.comment || a.kind === "comment",
+      });
+    }
+  }
+  return marks;
+}
+
 function TranscriptRoot({
   text,
   mediaSrc,
@@ -138,6 +187,8 @@ function TranscriptRoot({
   segments,
   alignment,
   emptyLabel,
+  annotations,
+  onSelection,
   children,
 }: TranscriptViewerProps) {
   const t = useT();
@@ -179,6 +230,31 @@ function TranscriptRoot({
   const paragraphs = useMemo(
     () => groupWordsIntoParagraphs(composed.words),
     [composed.words],
+  );
+
+  const wordMarks = useMemo(() => buildWordMarks(annotations), [annotations]);
+
+  const reportSelection = useCallback(
+    (wordStart: number, wordEnd: number, rect: TranscriptSelection["rect"]) => {
+      if (!onSelection) return;
+      const picked = composed.words.filter(
+        (w) => w.wordIndex >= wordStart && w.wordIndex <= wordEnd,
+      );
+      if (!picked.length) return;
+      let quote = "";
+      picked.forEach((w, i) => {
+        if (i > 0 && needsLatinWordSpace(picked[i - 1].text, w.text)) quote += " ";
+        quote += w.text;
+      });
+      onSelection({
+        wordStart,
+        wordEnd,
+        quote,
+        startTime: picked[0].startTime,
+        rect,
+      });
+    },
+    [composed.words, onSelection],
   );
 
   // Diarized cloud segments carry speaker ids; map each paragraph to the
@@ -393,6 +469,8 @@ function TranscriptRoot({
       currentParaIndex,
       isPlayingOrScrubbed,
       statusForWord,
+      wordMarks,
+      reportSelection,
       seekTo,
       togglePlay,
       seekToWord,
@@ -415,6 +493,8 @@ function TranscriptRoot({
       currentParaIndex,
       isPlayingOrScrubbed,
       statusForWord,
+      wordMarks,
+      reportSelection,
       seekTo,
       togglePlay,
       seekToWord,
@@ -643,9 +723,26 @@ function TranscriptContent({
     statusForWord,
     seekToWord,
     seekToParagraph,
+    wordMarks,
+    reportSelection,
   } = useTranscript();
 
   const rootRef = useRef<HTMLDivElement | null>(null);
+
+  // Drag-select across word spans → report the covered word range.
+  const onMouseUp = () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    const start = wordIndexOf(sel.anchorNode);
+    const end = wordIndexOf(sel.focusNode);
+    if (start == null || end == null) return;
+    const r = sel.getRangeAt(0).getBoundingClientRect();
+    reportSelection(Math.min(start, end), Math.max(start, end), {
+      top: r.top,
+      left: r.left,
+      width: r.width,
+    });
+  };
 
   useEffect(() => {
     if (scroll) return;
@@ -673,7 +770,11 @@ function TranscriptContent({
   }, [scroll, scrollRef, onUserScroll]);
 
   return (
-    <div ref={rootRef} className={cn("flex flex-col gap-3", className)}>
+    <div
+      ref={rootRef}
+      className={cn("flex flex-col gap-3", className)}
+      onMouseUp={onMouseUp}
+    >
       <div
         ref={scroll ? scrollRef : undefined}
         onScroll={scroll ? onUserScroll : undefined}
@@ -766,8 +867,18 @@ function TranscriptContent({
                           <span
                             role="button"
                             tabIndex={0}
+                            data-wi={word.wordIndex}
                             data-status={status}
                             aria-label={`${word.text}, ${formatClock(word.startTime)}`}
+                            style={
+                              wordMarks.get(word.wordIndex)?.color
+                                ? {
+                                    backgroundColor: highlightBackground(
+                                      wordMarks.get(word.wordIndex)?.color ?? "",
+                                    ),
+                                  }
+                                : undefined
+                            }
                             className={cn(
                               "inline cursor-pointer rounded-sm transition-colors duration-100 outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
                               // Latin click targets need a sliver of padding; CJK must stay flush.
@@ -776,8 +887,14 @@ function TranscriptContent({
                               status === "current" &&
                                 "bg-accent/25 font-medium text-accent-soft-foreground",
                               status === "unspoken" && "text-inherit",
+                              wordMarks.get(word.wordIndex)?.comment &&
+                                "underline decoration-accent decoration-dotted underline-offset-4",
                             )}
-                            onClick={() => seekToWord(word)}
+                            onClick={() => {
+                              // A drag-selection ends with a click; don't seek then.
+                              if (window.getSelection()?.isCollapsed === false) return;
+                              seekToWord(word);
+                            }}
                             onKeyDown={(e) => {
                               if (e.key === "Enter" || e.key === " ") {
                                 e.preventDefault();

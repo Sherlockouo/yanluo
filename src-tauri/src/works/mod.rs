@@ -15,6 +15,7 @@ use crate::config::{app_data_dir, AppConfig};
 use crate::history::{CharacterAlignment, TranscriptSegment};
 use crate::transcription::TranscriptionResult;
 
+pub(crate) mod annotations;
 pub(crate) mod pipeline;
 pub(crate) mod research;
 
@@ -347,6 +348,37 @@ pub(crate) fn resolve_work_dir(config: &AppConfig, id: &str) -> Result<(PathBuf,
         }
     }
     Err("作品不存在".into())
+}
+
+/// Everything the full-page reader needs in one round trip.
+#[derive(Serialize)]
+pub(crate) struct WorkDetail {
+    pub(crate) work: Work,
+    pub(crate) transcript: WorkTranscript,
+    /// Absolute path of the media file, when it still exists.
+    pub(crate) media_path: Option<String>,
+    pub(crate) annotations: Vec<annotations::Annotation>,
+}
+
+pub(crate) fn detail(config: &AppConfig, id: &str) -> Result<WorkDetail, String> {
+    let (dir, work) = resolve_work_dir(config, id)?;
+    let raw = fs::read_to_string(dir.join("transcript.json"))
+        .map_err(|e| format!("读取逐字稿失败: {e}"))?;
+    let transcript: WorkTranscript =
+        serde_json::from_str(&raw).map_err(|e| format!("解析逐字稿失败: {e}"))?;
+    let media_path = work
+        .audio_file
+        .as_ref()
+        .map(|f| dir.join(f))
+        .filter(|p| p.exists())
+        .map(|p| p.to_string_lossy().into_owned());
+    let annotations = annotations::list(config, id)?;
+    Ok(WorkDetail {
+        work,
+        transcript,
+        media_path,
+        annotations,
+    })
 }
 
 pub(crate) fn get_work(config: &AppConfig, id: &str) -> Result<Work, String> {

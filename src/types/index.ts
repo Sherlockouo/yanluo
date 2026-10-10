@@ -358,3 +358,48 @@ export type WorkResearchEntry = {
 
 /** Narrow rail destinations — 出稿 / 派活 / 设置 (+ home). */
 export type Page = "overview" | "draft" | "dispatch" | "settings";
+
+/** Original-text annotation on a work transcript (原文批注). */
+export type WorkAnnotation = {
+  id: string;
+  /** "highlight" | "comment" */
+  kind: "highlight" | "comment";
+  /** Highlight colour id (empty for comments). */
+  color: string;
+  quote: string;
+  word_start: number;
+  word_end: number;
+  start_time: number;
+  /** Comment body. */
+  text: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type WorkAnnotationDraft = {
+  kind: WorkAnnotation["kind"];
+  color: string;
+  quote: string;
+  word_start: number;
+  word_end: number;
+  start_time: number;
+  text: string;
+};
+
+export type WorkTranscript = {
+  text: string;
+  raw_text: string;
+  llm_text?: string | null;
+  language: string;
+  duration_seconds: number;
+  segments: TranscriptSegment[];
+  alignment?: CharacterAlignment | null;
+};
+
+/** Full-page reader payload (`works_detail`). */
+export type WorkDetail = {
+  work: Work;
+  transcript: WorkTranscript;
+  media_path: string | null;
+  annotations: WorkAnnotation[];
+};

@@ -700,6 +700,44 @@ pub(crate) fn works_start_research(
     crate::works::research::start(&app, engine.inner(), runtime.inner(), &work_id, &question)
 }
 
+/// Full-page reader payload: work, transcript, media path and annotations.
+#[tauri::command]
+pub(crate) fn works_detail(
+    id: String,
+    engine: State<'_, AsrEngine>,
+) -> Result<crate::works::WorkDetail, String> {
+    crate::works::detail(&works_config(&engine)?, &id)
+}
+
+#[tauri::command]
+pub(crate) fn works_add_annotation(
+    id: String,
+    draft: crate::works::annotations::AnnotationDraft,
+    engine: State<'_, AsrEngine>,
+) -> Result<crate::works::annotations::Annotation, String> {
+    crate::works::annotations::add(&works_config(&engine)?, &id, draft)
+}
+
+#[tauri::command]
+pub(crate) fn works_update_annotation(
+    id: String,
+    annotation_id: String,
+    text: Option<String>,
+    color: Option<String>,
+    engine: State<'_, AsrEngine>,
+) -> Result<(), String> {
+    crate::works::annotations::update(&works_config(&engine)?, &id, &annotation_id, text, color)
+}
+
+#[tauri::command]
+pub(crate) fn works_delete_annotation(
+    id: String,
+    annotation_id: String,
+    engine: State<'_, AsrEngine>,
+) -> Result<(), String> {
+    crate::works::annotations::delete(&works_config(&engine)?, &id, &annotation_id)
+}
+
 #[tauri::command]
 pub(crate) async fn test_llm_refinement(
     text: String,

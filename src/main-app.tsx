@@ -23,6 +23,9 @@ const AgentPage = lazy(() =>
 const AgentJobPage = lazy(() =>
   import("@/views/agent-job-page").then((m) => ({ default: m.AgentJobPage })),
 );
+const WorkPage = lazy(() =>
+  import("@/views/work-page").then((m) => ({ default: m.WorkPage })),
+);
 const SettingsPage = lazy(() =>
   import("@/views/settings-page").then((m) => ({ default: m.SettingsPage })),
 );
@@ -70,6 +73,7 @@ export function MainApp() {
               <Route path="draft" element={<DraftPage />} />
               <Route path="dispatch" element={<AgentPage />} />
               <Route path="dispatch/:id" element={<AgentJobPage />} />
+              <Route path="works/:id" element={<WorkPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="transcribe" element={<RedirectToDraft mode="file" />} />
               <Route path="asr" element={<RedirectToDraft mode="live" />} />

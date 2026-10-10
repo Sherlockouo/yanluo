@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useSearchParams, Link } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -19,7 +19,6 @@ import {
   Download,
   FileAudio,
   FileVideo,
-  FolderOpen,
   Plus,
   Trash2,
   Upload,
@@ -34,8 +33,6 @@ import {
 import { isVideoMediaKind } from "@/lib/alignment";
 import { ModeSwitch, PageHeader, PageShell, Reveal } from "@/components/shared/page-shell";
 import { TranscriptExportMenu } from "@/components/ui/transcript-export-menu";
-import { WorkArtifactsPanel } from "@/components/ui/work-artifacts";
-import { WorkResearchPanel } from "@/components/ui/work-research";
 import { useApp } from "@/app-context";
 import { springUI, easeOut } from "@/lib/motion";
 import { cn } from "@/lib/cn";
@@ -1057,6 +1054,7 @@ function ResultPhase({
   onNew: () => void;
 }) {
   const t = useT();
+  const navigate = useNavigate();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [Viewer, setViewer] = useState<TranscriptViewerType | null>(null);
   /** Full entry w/ alignment — fetched only when a row expands. */
@@ -1110,6 +1108,11 @@ function ResultPhase({
   // (Inline expansion replaced by user directive — full-screen reader is the
   // only way long transcripts stay readable.)
   const openRow = (id: string) => {
+    const entry = sessionEntries.find((e) => e.id === id);
+    if (entry?.work_id) {
+      navigate(`/works/${entry.work_id}`);
+      return;
+    }
     if (activeEntry?.id !== id) onSelect(id);
     setExpandedId(id);
     setDetailEntry(null);
@@ -1210,13 +1213,6 @@ function TranscriptResultModal({
   const [lastEntry, setLastEntry] = useState<HistoryEntry | null>(null);
   if (entry && entry !== lastEntry) setLastEntry(entry);
   const shown = entry ?? lastEntry;
-  // Transcript vs AI-artifact pane; resets when a different entry opens.
-  const [pane, setPane] = useState<WorkPane>("transcript");
-  const shownId = shown?.id ?? null;
-  useEffect(() => {
-    setPane("transcript");
-  }, [shownId]);
-
   const isVideo = shown
     ? isVideoMediaKind(shown.media_kind, shown.audio_path)
     : false;
@@ -1255,9 +1251,6 @@ function TranscriptResultModal({
                     />
                   </div>
                 </Modal.Header>
-                {shown.work_id ? (
-                  <WorkCard workId={shown.work_id} pane={pane} onPaneChange={setPane} />
-                ) : null}
                 <Modal.Body className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden p-0 text-foreground">
                   {Viewer ? (
                     <Viewer.Root
@@ -1308,21 +1301,13 @@ function TranscriptResultModal({
                             </div>
                           )}
                         </div>
-                        {/* Right: transcript, or work panes that keep the media in view */}
+                        {/* Right: transcript toggle + scrolling reader */}
                         <div className="flex min-w-0 flex-1 flex-col">
-                          {pane === "artifacts" && shown.work_id ? (
-                            <WorkArtifactsPanel workId={shown.work_id} />
-                          ) : pane === "research" && shown.work_id ? (
-                            <WorkResearchPanel workId={shown.work_id} />
-                          ) : (
-                            <>
-                              <Viewer.ModeToggle className="shrink-0 border-b border-border/60 px-5 py-2.5" />
-                              <Viewer.Content
-                                fill
-                                className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
-                              />
-                            </>
-                          )}
+                          <Viewer.ModeToggle className="shrink-0 border-b border-border/60 px-5 py-2.5" />
+                          <Viewer.Content
+                            fill
+                            className="min-h-0 flex-1 overflow-y-auto px-5 py-4"
+                          />
                         </div>
                       </div>
                     </Viewer.Root>
@@ -1436,88 +1421,3 @@ const HistoryRow = memo(function HistoryRow({
     </div>
   );
 });
-
-/** "已存为作品" strip — linked work folder + transcript/AI-artifact pane toggle. */
-type WorkPane = "transcript" | "artifacts" | "research";
-
-const WORK_PANES: { id: WorkPane; labelKey: string }[] = [
-  { id: "transcript", labelKey: "works.tabTranscript" },
-  { id: "artifacts", labelKey: "works.tabArtifacts" },
-  { id: "research", labelKey: "works.tabResearch" },
-];
-
-function WorkCard({
-  workId,
-  pane,
-  onPaneChange,
-}: {
-  workId: string;
-  pane: WorkPane;
-  onPaneChange: (pane: WorkPane) => void;
-}) {
-  const t = useT();
-  const { works, renameWork, openWorkInFinder } = useApp();
-  const work = works.find((w) => w.id === workId);
-  const [title, setTitle] = useState(work?.title ?? "");
-
-  useEffect(() => {
-    setTitle(work?.title ?? "");
-  }, [work?.id, work?.title]);
-
-  if (!work) return null;
-
-  const commitTitle = () => {
-    const next = title.trim();
-    if (!next || next === work.title) {
-      setTitle(work.title);
-      return;
-    }
-    renameWork(work.id, next).catch((error) => {
-      setTitle(work.title);
-      toast.danger(String(error));
-    });
-  };
-
-  return (
-    <div className="flex shrink-0 items-center gap-2.5 border-b border-border/60 px-5 py-2">
-      <FolderOpen size={13} className="shrink-0 text-muted" aria-hidden />
-      <input
-        value={title}
-        aria-label={t("transcribe.work.titleAria")}
-        onChange={(e) => setTitle(e.target.value)}
-        onBlur={commitTitle}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-          if (e.key === "Escape") setTitle(work.title);
-        }}
-        className="min-w-0 flex-1 rounded-sm border-b border-transparent bg-transparent text-[13px] font-medium outline-none transition-colors focus:border-accent"
-      />
-      <div className="flex shrink-0 items-center gap-1" role="tablist">
-        {WORK_PANES.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            role="tab"
-            aria-selected={pane === p.id}
-            onClick={() => onPaneChange(p.id)}
-            className={cn(
-              "rounded-full px-2.5 py-0.5 text-[12px] transition-colors",
-              pane === p.id
-                ? "bg-accent-soft font-medium text-accent-soft-foreground"
-                : "text-muted hover:text-foreground",
-            )}
-          >
-            {t(p.labelKey)}
-          </button>
-        ))}
-      </div>
-      <button
-        type="button"
-        className="dlink shrink-0"
-        onClick={() => void openWorkInFinder(work.id).catch(() => {})}
-      >
-        {t("transcribe.work.openFolder")}
-      </button>
-    </div>
-  );
-}
