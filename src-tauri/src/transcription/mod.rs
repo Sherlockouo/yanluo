@@ -2128,6 +2128,7 @@ pub(crate) fn transcribe_file_samples(
     qwen_lang: Option<&str>,
     align_lang: &str,
     fallback_language: &str,
+    on_progress: &mut dyn FnMut(f64, f64),
 ) -> TranscriptionResult {
     let duration = samples.len() as f64 / 16_000.0;
     let chunk_len = (FILE_CHUNK_SEC * 16_000.0) as usize;
@@ -2186,6 +2187,7 @@ pub(crate) fn transcribe_file_samples(
     let mut language = fallback_language.to_string();
     let mut start = 0usize;
     let mut chunk_i = 0usize;
+    on_progress(0.0, duration);
 
     while start < samples.len() {
         let end = (start + chunk_len).min(samples.len());
@@ -2266,6 +2268,14 @@ pub(crate) fn transcribe_file_samples(
                 return partial;
             }
         }
+
+        // Progress = audio covered by the last aligned timestamp (chunk end when
+        // alignment produced nothing), clamped to the file length.
+        let covered = all_segments
+            .last()
+            .map_or(end as f64 / 16_000.0, |seg| seg.end)
+            .min(duration);
+        on_progress(covered, duration);
 
         if end >= samples.len() {
             break;
@@ -4130,6 +4140,16 @@ pub(crate) fn mlx_worker(
                         .as_deref()
                         .unwrap_or("auto"),
                 );
+                let mut on_progress = |processed: f64, total: f64| {
+                    let _ = app.emit(
+                        "transcribe-progress",
+                        serde_json::json!({
+                            "processed_seconds": processed,
+                            "duration_seconds": total,
+                            "percent": if total > 0.0 { processed / total * 100.0 } else { 0.0 },
+                        }),
+                    );
+                };
                 let mut result = match inference.as_mut() {
                     Some(inf) => transcribe_file_samples(
                         inf,
@@ -4138,6 +4158,7 @@ pub(crate) fn mlx_worker(
                         qwen_lang.as_deref(),
                         &align_lang,
                         language.as_deref().unwrap_or(""),
+                        &mut on_progress,
                     ),
                     None => TranscriptionResult {
                         text: String::new(),
@@ -4625,6 +4646,7 @@ mod file_chunk_e2e {
             None,
             "English",
             "English",
+            &mut |_, _| {},
         );
 
         assert!(result.error.is_none(), "chunk error: {:?}", result.error);

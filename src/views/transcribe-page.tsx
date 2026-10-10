@@ -30,7 +30,7 @@ import {
   resolveCloudAsrCreds,
   TRANSCRIBE_FILE_FILTERS,
 } from "@/lib/constants";
-import { isVideoMediaKind } from "@/lib/alignment";
+import { formatClock, isVideoMediaKind } from "@/lib/alignment";
 import { ModeSwitch, PageHeader, PageShell, Reveal } from "@/components/shared/page-shell";
 import { TranscriptExportMenu } from "@/components/ui/transcript-export-menu";
 import { useApp } from "@/app-context";
@@ -160,6 +160,13 @@ function deferWork(fn: () => void, timeoutMs: number): () => void {
   return () => window.clearTimeout(id);
 }
 
+/** `transcribe-progress` payload — derived from aligned timestamps. */
+type RecognizeProgress = {
+  processed_seconds: number;
+  duration_seconds: number;
+  percent: number;
+};
+
 /** File/URL transcribe mode panel — upload/processing/result mutual-exclusive. Used standalone or embedded in 出稿. */
 export function TranscribePage({
   embedded = false,
@@ -211,6 +218,8 @@ export function TranscribePage({
   const [urlMode, setUrlMode] = useState<UrlMode>("audio");
   const [ytdlp, setYtdlp] = useState<YtdlpStatus | null>(null);
   const [downloadPercent, setDownloadPercent] = useState<number | null>(null);
+  /** Recognition progress from aligned timestamps (local engine only). */
+  const [recognizeProgress, setRecognizeProgress] = useState<RecognizeProgress | null>(null);
   const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
   const [jobBaselineId, setJobBaselineId] = useState<string | null>(
     () => stored?.jobBaselineId ?? null,
@@ -219,6 +228,25 @@ export function TranscribePage({
   const bootedRef = useRef(false);
 
   const processing = processingName != null;
+
+  // One file job at a time: progress events belong to the job on screen.
+  useEffect(() => {
+    setRecognizeProgress(null);
+    if (!processing) return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void listen<RecognizeProgress>("transcribe-progress", (event) => {
+      setRecognizeProgress(event.payload);
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [processing]);
+
   const screen: "upload" | "processing" | "result" = processing
     ? "processing"
     : view;
@@ -755,6 +783,7 @@ export function TranscribePage({
             languageLabel={languageLabel}
             downloadPercent={downloadPercent}
             downloadMessage={downloadMessage}
+            recognizeProgress={recognizeProgress}
             onCancel={() => void cancelProcessing()}
           />
         </ModeSwitch>
@@ -987,6 +1016,7 @@ function ProcessingPhase({
   languageLabel,
   downloadPercent,
   downloadMessage,
+  recognizeProgress,
   onCancel,
 }: {
   fileName: string | null;
@@ -994,12 +1024,14 @@ function ProcessingPhase({
   languageLabel: string;
   downloadPercent: number | null;
   downloadMessage: string | null;
+  recognizeProgress: RecognizeProgress | null;
   onCancel: () => void;
 }) {
   const t = useT();
   // processingName is a localized label — match either locale's download marker.
   const downloading =
     (name != null && /下载|Download/i.test(name)) || downloadPercent != null;
+  const percent = downloading ? downloadPercent : (recognizeProgress?.percent ?? null);
   return (
     <div className="proc mx-auto w-full max-w-2xl">
       <div className="proc-ic">
@@ -1020,17 +1052,24 @@ function ProcessingPhase({
             {name}
           </p>
         ) : null}
-        {downloadPercent != null ? (
+        {percent != null ? (
           <>
             <div className="proc-prog mx-auto mt-3">
               <div
                 style={{
-                  width: `${Math.min(Math.max(downloadPercent, 0), 100)}%`,
+                  width: `${Math.min(Math.max(percent, 0), 100)}%`,
                 }}
               />
             </div>
             <p className="mt-1.5 text-[12px] tabular-nums text-muted">
-              {downloadPercent.toFixed(0)}%
+              {percent.toFixed(0)}%
+              {!downloading && recognizeProgress ? (
+                <>
+                  {" · "}
+                  {formatClock(recognizeProgress.processed_seconds)} /{" "}
+                  {formatClock(recognizeProgress.duration_seconds)}
+                </>
+              ) : null}
             </p>
           </>
         ) : null}
