@@ -43,6 +43,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "autoprefixer": "^10.5.0",
     "code-inspector-plugin": "^1.5.1",
+    "esbuild": "^0.28.2",
     "postcss": "^8.5.15",
     "tailwind-variants": "3.2.2",
     "tailwindcss": "^4.3.2",
