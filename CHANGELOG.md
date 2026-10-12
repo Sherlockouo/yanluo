@@ -2,7 +2,7 @@
 
 All notable changes to Sayi are documented in this file.（曾用名：QuietType → Yanluo 言落 → ShuoChengao 说成稿）
 
-## Unreleased
+## [0.12.0] — 2026-10-12
 
 ### Added（转写作品工作室：作品目录 + 云识别 + AI 内容管线 + 研究）
 - **作品目录**：每次文件转写生成一个独立文件夹（`audio.*`、`transcript.json` / `transcript.md`、`notes/`、`research/`、`work.json` 索引），默认 `app_data/works`，可在设置中改到任意目录；历史记录双向关联作品
