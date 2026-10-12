@@ -3686,7 +3686,7 @@ dependencies = [
 [[package]]
 name = "qwen3-asr-rs"
 version = "0.2.0"
-source = "git+https://github.com/XBCoder128/qwen3_asr_rs?branch=fix%2Fasr-keep-punctuation#eed7a63969684e50f484da7ed0ce93d5fa6ba89b"
+source = "git+https://github.com/XBCoder128/qwen3_asr_rs?branch=fix%2Fasr-keep-punctuation#01516bddb994ca19d3f2df9683450e4a8bffa4e3"
 dependencies = [
  "anyhow",
  "axum",
